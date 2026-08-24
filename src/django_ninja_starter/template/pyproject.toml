@@ -9,8 +9,11 @@ description = "A production-oriented Django Ninja API"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "cryptography>=45,<48",
   "Django>=5.2,<7.0",
   "django-ninja>=1.4,<2.0",
+  "httpx>=0.28,<1.0",
+  "PyJWT>=2.10,<3.0",
   "python-dotenv>=1.1,<2.0",
 ]
 

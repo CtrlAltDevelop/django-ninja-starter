@@ -29,13 +29,16 @@ django-ninja-starter = "django_ninja_starter.cli:main"
 [project.optional-dependencies]
 dev = [
   "Django>=5.2,<7.0",
+  "cryptography>=45,<48",
   "build>=1.2",
   "django-ninja>=1.4,<2.0",
+  "httpx>=0.28,<1.0",
   "mypy>=1.15",
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "pytest-django>=4.11",
   "python-dotenv>=1.1,<2.0",
+  "PyJWT>=2.10,<3.0",
   "ruff>=0.11",
   "twine>=6.0",
 ]

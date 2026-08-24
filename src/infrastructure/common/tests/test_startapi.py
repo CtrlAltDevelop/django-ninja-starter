@@ -1,0 +1,66 @@
+import json
+from pathlib import Path
+
+import pytest
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.test import override_settings
+
+
+def _write_registry(base_dir: Path) -> Path:
+    registry_path = base_dir / "src" / "config" / "api_registry.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "v1": {
+                    "routes": [
+                        {
+                            "app_config": "infrastructure.common.apps.CommonConfig",
+                            "prefix": "/health",
+                            "router": "infrastructure.common.api.router",
+                            "tag": "Health",
+                        }
+                    ]
+                }
+            }
+        )
+    )
+    return registry_path
+
+
+def test_startapi_creates_and_registers_versioned_router(tmp_path: Path) -> None:
+    registry_path = _write_registry(tmp_path)
+
+    with override_settings(BASE_DIR=tmp_path):
+        call_command("startapi", "order_items", api_version="v2.1")
+
+    app_path = tmp_path / "src" / "apps" / "order_items"
+    assert (app_path / "apps.py").is_file()
+    assert (app_path / "api" / "v2_1.py").is_file()
+    assert (app_path / "tests" / "test_v2_1.py").is_file()
+    registry = json.loads(registry_path.read_text())
+    assert registry["v2.1"]["routes"] == [
+        {
+            "app_config": "apps.order_items.apps.OrderItemsConfig",
+            "prefix": "/order-items",
+            "router": "apps.order_items.api.v2_1.router",
+            "tag": "OrderItems",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "prefix"),
+    [("BadName", "v1", None), ("users", "latest", None), ("users", "v1", "users/")],
+)
+def test_startapi_rejects_invalid_arguments(
+    tmp_path: Path,
+    name: str,
+    version: str,
+    prefix: str | None,
+) -> None:
+    _write_registry(tmp_path)
+
+    with override_settings(BASE_DIR=tmp_path), pytest.raises(CommandError):
+        call_command("startapi", name, api_version=version, prefix=prefix)

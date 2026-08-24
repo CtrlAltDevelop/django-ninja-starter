@@ -28,5 +28,6 @@ jobs:
           /tmp/django-ninja-starter-wheel/bin/django-ninja-starter example-api
           /tmp/django-ninja-starter-wheel/bin/pip install -e 'example-api[dev]'
           cd example-api
+          /tmp/django-ninja-starter-wheel/bin/python manage.py startapi example --api-version v2
           PATH="/tmp/django-ninja-starter-wheel/bin:$PATH" make check
           PATH="/tmp/django-ninja-starter-wheel/bin:$PATH" make test
