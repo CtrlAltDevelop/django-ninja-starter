@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-ninja-starter"
+version = "0.1.0"
+description = "A production-oriented Django Ninja API template and project generator"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["django", "django-ninja", "api", "starter", "template"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Web Environment",
+  "Framework :: Django",
+  "Framework :: Django :: 5.2",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.scripts]
+django-ninja-starter = "django_ninja_starter.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "Django>=5.2,<7.0",
+  "build>=1.2",
+  "django-ninja>=1.4,<2.0",
+  "mypy>=1.15",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "pytest-django>=4.11",
+  "python-dotenv>=1.1,<2.0",
+  "ruff>=0.11",
+  "twine>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["django_ninja_starter*"]
+
+[tool.setuptools.package-data]
+django_ninja_starter = ["py.typed", "template/**/*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+pythonpath = ["src"]
+testpaths = ["src", "tests"]
+norecursedirs = ["src/django_ninja_starter/template"]
+addopts = "--strict-markers --strict-config"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "DJ"]
+ignore = ["DJ001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config", "django_ninja_starter", "infrastructure"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = []
+check_untyped_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+  "src/django_ninja_starter/__main__.py",
+  "src/django_ninja_starter/template/**",
+  "src/config/asgi.py",
+  "src/config/wsgi.py",
+  "src/config/settings/development.py",
+  "src/config/settings/production.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 90
