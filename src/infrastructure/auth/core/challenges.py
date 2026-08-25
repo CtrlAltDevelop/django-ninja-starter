@@ -16,9 +16,8 @@ mistyped authenticator code does not force the user back through step one.
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-import redis
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
@@ -26,6 +25,9 @@ from django.dispatch import receiver
 from django.utils.module_loading import import_string
 
 from infrastructure.auth.core.codes import codes_match, generate_ticket, hash_code, ticket_key
+
+if TYPE_CHECKING:  # pragma: no cover
+    import redis
 
 KEY_PREFIX = "auth:challenge:"
 COUNTER_PREFIX = "auth:counter:"
@@ -125,7 +127,15 @@ class RedisChallengeStore:
 
     @property
     def client(self) -> "redis.Redis":
+        """Connect on first use, importing the driver only when this store is chosen.
+
+        Deferring the import is what lets ``redis`` be an optional dependency: a
+        deployment running a different store should not have to install a client
+        it will never open.
+        """
         if self._client is None:
+            import redis
+
             self._client = redis.Redis.from_url(settings.AUTH_REDIS_URL)
         return self._client
 

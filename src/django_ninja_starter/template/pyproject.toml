@@ -8,19 +8,33 @@ version = "0.1.0"
 description = "A production-oriented Django Ninja API"
 readme = "README.md"
 requires-python = ">=3.12"
+
+# The base install runs the API and issues signed credentials. cryptography is
+# here rather than in an extra because any token mode installs oauth_core, whose
+# models encrypt at rest.
+#
+# Everything a *feature* needs beyond that is an extra, so a project that only
+# wants password login does not ship an HTTP client and a Redis driver it never
+# opens. Each is imported only by the module its feature loads, so leaving an
+# extra out costs nothing until something actually reaches for it.
 dependencies = [
   "cryptography>=45,<48",
   "Django>=5.2,<7.0",
   "django-ninja>=1.4,<2.0",
-  "httpx>=0.28,<1.0",
   "PyJWT>=2.10,<3.0",
-  "pyotp>=2.9,<3.0",
   "python-dotenv>=1.1,<2.0",
-  "redis>=5.0,<7.0",
 ]
 
 [project.optional-dependencies]
+# Social sign-in, for talking to the providers.
+oauth = ["httpx>=0.28,<1.0"]
+# The challenge store that survives a restart and reaches every worker.
+redis = ["redis>=5.0,<7.0"]
+# Authenticator-app second factors.
+totp = ["pyotp>=2.9,<3.0"]
+all = ["{{ project_name }}[oauth,redis,totp]"]
 dev = [
+  "{{ project_name }}[all]",
   "fakeredis>=2.26,<3.0",
   "mypy>=1.15",
   "pytest>=8.3",
