@@ -87,7 +87,7 @@ def test_factors_are_ignored_when_the_two_factor_app_is_absent(user: Any) -> Non
     """A project can enable a login method without enabling 2FA at all."""
     SecondFactor.objects.create(user=user, method=SecondFactorMethod.TOTP).confirm()
 
-    with patch("infrastructure.auth.core.flows.apps.is_installed", return_value=False):
+    with patch("infrastructure.auth.core.flows.app_installed", return_value=False):
         assert enrolled_second_factors(user) == []
 
 

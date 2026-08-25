@@ -30,12 +30,12 @@ def test_a_sound_configuration_raises_nothing() -> None:
 
 
 def test_a_token_mode_without_its_app_is_an_error() -> None:
-    with patch("infrastructure.auth.core.checks.apps.is_installed", return_value=False):
+    with patch("infrastructure.auth.core.checks.app_installed", return_value=False):
         assert "auth.E001" in _ids(AUTH_TOKEN_MODE="rotation")
 
 
 def test_the_none_token_mode_needs_no_app() -> None:
-    with patch("infrastructure.auth.core.checks.apps.is_installed", return_value=False):
+    with patch("infrastructure.auth.core.checks.app_installed", return_value=False):
         assert "auth.E001" not in _ids(AUTH_TOKEN_MODE="none")
 
 

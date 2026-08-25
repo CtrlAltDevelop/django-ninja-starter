@@ -23,9 +23,10 @@ from infrastructure.auth.core.sessions import (
     user_agent,
 )
 from infrastructure.auth.core.throttling import fingerprint
+from infrastructure.common.app_labels import app_installed
 
 PENDING_PURPOSE = "second_factor"
-TWO_FACTOR_APP = "infrastructure.auth.twofactor"
+TWO_FACTOR_APP = "auth_twofactor"
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,7 @@ def record_event(
 
 def enrolled_second_factors(user: Any) -> list[str]:
     """Return the confirmed second factors for an account, newest enrolment last."""
-    if not apps.is_installed(TWO_FACTOR_APP):
+    if not app_installed(TWO_FACTOR_APP):
         return []
     factor_model = apps.get_model("auth_twofactor", "SecondFactor")
     return list(

@@ -98,7 +98,7 @@ def test_a_deactivated_account_stops_authenticating(user: Any, mode: str) -> Non
 
 @override_settings(AUTH_TOKEN_MODE="sliding")
 def test_using_a_sliding_token_pushes_its_expiry_out(user: Any) -> None:
-    from infrastructure.oauth_sliding.models import SlidingToken
+    from infrastructure.oauth.sliding.models import SlidingToken
 
     credentials = issue_credentials(_request(), user, method="password")
     token = SlidingToken.objects.get()
@@ -153,7 +153,7 @@ def test_revoking_everything_clears_every_live_credential(user: Any, mode: str) 
 def test_a_mode_whose_app_is_not_installed_fails_loudly(user: Any) -> None:
     """Better a clear configuration error than a token silently never issued."""
     with (
-        patch("infrastructure.auth.core.sessions.apps.is_installed", return_value=False),
+        patch("infrastructure.auth.core.sessions.app_installed", return_value=False),
         pytest.raises(ImproperlyConfigured, match="oauth_sliding"),
     ):
         issue_credentials(_request(), user, method="password")

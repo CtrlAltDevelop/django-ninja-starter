@@ -5,7 +5,7 @@ from django.test import Client, override_settings
 
 from infrastructure.auth.core import delivery
 from infrastructure.auth.core.models import AuthEvent, AuthEventType
-from infrastructure.oauth_rotation.models import TokenFamily
+from infrastructure.oauth.rotation.models import TokenFamily
 
 SIGNUP_START = "/api/v1/auth/magic-link/signup/start"
 LOGIN_START = "/api/v1/auth/magic-link/login/start"

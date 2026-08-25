@@ -20,7 +20,8 @@ from django.db import transaction
 from django.http import HttpRequest
 from django.utils import timezone
 
-from infrastructure.oauth_core.tokens import generate_token, hash_token
+from infrastructure.common.app_labels import app_installed
+from infrastructure.oauth.core.tokens import generate_token, hash_token
 
 MODEL_BACKEND = "django.contrib.auth.backends.ModelBackend"
 TOKEN_MODE_APPS = {
@@ -60,7 +61,7 @@ def bearer_token(request: HttpRequest) -> str:
 
 def _model(mode: str, name: str) -> Any:
     app_label = TOKEN_MODE_APPS[mode]
-    if not apps.is_installed(f"infrastructure.{app_label}"):
+    if not app_installed(app_label):
         raise ImproperlyConfigured(
             f"DJANGO_AUTH_TOKEN_MODE={mode} needs DJANGO_OAUTH_MODE to enable {app_label}."
         )
@@ -267,7 +268,7 @@ def revoke_all_for_user(user: Any, reason: str = "password_changed") -> int:
     now = timezone.now()
     revoked = 0
     for mode, app_label in TOKEN_MODE_APPS.items():
-        if not apps.is_installed(f"infrastructure.{app_label}"):
+        if not app_installed(app_label):
             continue
         if mode == "sliding":
             revoked += (

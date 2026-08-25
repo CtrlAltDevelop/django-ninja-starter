@@ -1,10 +1,10 @@
 """Django system checks for the authentication settings."""
 
-from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Warning, register
 
 from infrastructure.auth.core.sessions import TOKEN_MODE_APPS
+from infrastructure.common.app_labels import app_installed
 
 CONSOLE_SMS_BACKEND = "infrastructure.auth.core.delivery.ConsoleSmsBackend"
 LOCMEM_STORE = "infrastructure.auth.core.challenges.LocMemChallengeStore"
@@ -16,7 +16,7 @@ def check_auth_settings(**kwargs: object) -> list[Error | Warning]:
     mode = settings.AUTH_TOKEN_MODE
     if mode != "none":
         app_label = TOKEN_MODE_APPS[mode]
-        if not apps.is_installed(f"infrastructure.{app_label}"):
+        if not app_installed(app_label):
             messages.append(
                 Error(
                     f"DJANGO_AUTH_TOKEN_MODE={mode} needs the {app_label} app",

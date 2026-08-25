@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from infrastructure.oauth_core.crypto import decrypt_secret, encrypt_secret
+from infrastructure.oauth.core.crypto import decrypt_secret, encrypt_secret
 
 
 class SecondFactorMethod:

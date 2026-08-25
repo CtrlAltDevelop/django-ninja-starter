@@ -3,7 +3,7 @@ from django.test import Client, override_settings
 
 from infrastructure.auth.core import delivery
 from infrastructure.auth.core.models import AuthEvent
-from infrastructure.oauth_rotation.models import RotatingAccessToken, TokenFamily
+from infrastructure.oauth.rotation.models import RotatingAccessToken, TokenFamily
 
 PASSWORD = "corr3ct-horse-battery"
 SIGNUP = "/api/v1/auth/password/signup"

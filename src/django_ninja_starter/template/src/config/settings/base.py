@@ -18,13 +18,13 @@ ALLOWED_HOSTS = [
 OAUTH_MODE = os.getenv("DJANGO_OAUTH_MODE", "none").lower()
 OAUTH_MODE_APPS = {
     "none": [],
-    "sliding": ["infrastructure.oauth_sliding.apps.OAuthSlidingConfig"],
-    "session": ["infrastructure.oauth_session.apps.OAuthSessionConfig"],
-    "rotation": ["infrastructure.oauth_rotation.apps.OAuthRotationConfig"],
+    "sliding": ["infrastructure.oauth.sliding.apps.OAuthSlidingConfig"],
+    "session": ["infrastructure.oauth.session.apps.OAuthSessionConfig"],
+    "rotation": ["infrastructure.oauth.rotation.apps.OAuthRotationConfig"],
     "all": [
-        "infrastructure.oauth_sliding.apps.OAuthSlidingConfig",
-        "infrastructure.oauth_session.apps.OAuthSessionConfig",
-        "infrastructure.oauth_rotation.apps.OAuthRotationConfig",
+        "infrastructure.oauth.sliding.apps.OAuthSlidingConfig",
+        "infrastructure.oauth.session.apps.OAuthSessionConfig",
+        "infrastructure.oauth.rotation.apps.OAuthRotationConfig",
     ],
 }
 if OAUTH_MODE not in OAUTH_MODE_APPS:
@@ -32,10 +32,10 @@ if OAUTH_MODE not in OAUTH_MODE_APPS:
         "DJANGO_OAUTH_MODE must be one of: none, sliding, session, rotation, all"
     )
 OAUTH_PROVIDER_APPS = {
-    "google": "infrastructure.oauth_google.apps.OAuthGoogleConfig",
-    "apple": "infrastructure.oauth_apple.apps.OAuthAppleConfig",
-    "microsoft": "infrastructure.oauth_microsoft.apps.OAuthMicrosoftConfig",
-    "github": "infrastructure.oauth_github.apps.OAuthGitHubConfig",
+    "google": "infrastructure.oauth.google.apps.OAuthGoogleConfig",
+    "apple": "infrastructure.oauth.apple.apps.OAuthAppleConfig",
+    "microsoft": "infrastructure.oauth.microsoft.apps.OAuthMicrosoftConfig",
+    "github": "infrastructure.oauth.github.apps.OAuthGitHubConfig",
 }
 OAUTH_PROVIDERS = list(
     dict.fromkeys(
@@ -51,14 +51,14 @@ if unknown_oauth_providers:
     )
 OAUTH_INSTALLED_APPS = []
 if OAUTH_MODE != "none" or OAUTH_PROVIDERS:
-    OAUTH_INSTALLED_APPS.append("infrastructure.oauth_core.apps.OAuthCoreConfig")
+    OAUTH_INSTALLED_APPS.append("infrastructure.oauth.core.apps.OAuthCoreConfig")
 OAUTH_INSTALLED_APPS.extend(OAUTH_MODE_APPS[OAUTH_MODE])
 OAUTH_INSTALLED_APPS.extend(OAUTH_PROVIDER_APPS[provider] for provider in OAUTH_PROVIDERS)
 
 OAUTH_PROVIDER_ROUTERS = [
     {
         "prefix": f"/oauth/{provider}",
-        "router": f"infrastructure.oauth_{provider}.api.router",
+        "router": f"infrastructure.oauth.{provider}.api.router",
         "tag": f"OAuth - {provider.title()}",
     }
     for provider in OAUTH_PROVIDERS
