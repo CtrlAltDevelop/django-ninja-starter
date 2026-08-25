@@ -156,3 +156,159 @@ def test_provider_error_is_recorded_on_consumed_attempt(
     assert response.status_code == 400
     assert attempt.consumed_at is not None
     assert attempt.error == "access_denied"
+
+
+def test_callback_is_rejected_when_another_browser_presents_the_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """State alone must not log a victim into the account that started the flow."""
+    _configure_google(monkeypatch)
+    attacker = Client()
+    victim = Client()
+    start = attacker.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="access"),
+            SocialProfile(subject="attacker-subject", email="attacker@example.com"),
+        ),
+    )
+
+    response = victim.get(
+        "/api/v1/oauth/google/callback",
+        {"state": state, "code": "attacker-code"},
+    )
+
+    assert response.status_code == 400
+    assert "browser" in response.json()["detail"]
+    assert "_auth_user_id" not in victim.session
+    assert SocialLoginAttempt.objects.get().error
+
+
+def test_start_binds_the_attempt_to_a_same_site_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_google(monkeypatch)
+
+    response = Client().get("/api/v1/oauth/google/start")
+
+    cookie = response.cookies["oauth_binding_google"]
+    assert cookie.value
+    assert cookie["samesite"] == "Lax"
+    assert cookie["httponly"]
+    assert SocialLoginAttempt.objects.get().binding_hash not in {"", cookie.value}
+
+
+def test_binding_cookie_is_cleared_once_the_callback_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_google(monkeypatch)
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="access"),
+            SocialProfile(subject="google-subject"),
+        ),
+    )
+
+    response = client.get("/api/v1/oauth/google/callback", {"state": state, "code": "code"})
+
+    assert response.status_code == 302
+    assert response.cookies["oauth_binding_google"].value == ""
+
+
+def test_unreadable_verifier_fails_the_callback_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rotated encryption key must not surface as an unhandled server error."""
+    _configure_google(monkeypatch)
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    SocialLoginAttempt.objects.update(code_verifier_encrypted="gAAAAABnot-a-fernet-token")
+
+    response = client.get("/api/v1/oauth/google/callback", {"state": state, "code": "code"})
+
+    assert response.status_code == 400
+    assert "decrypted" in response.json()["detail"]
+
+
+def test_a_profile_without_a_subject_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_google(monkeypatch)
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="access"),
+            SocialProfile(subject="", email="nobody@example.com"),
+        ),
+    )
+
+    response = client.get("/api/v1/oauth/google/callback", {"state": state, "code": "code"})
+
+    assert response.status_code == 400
+    assert "subject" in response.json()["detail"]
+    assert not GoogleAccount.objects.exists()
+
+
+def test_oversized_profile_values_are_clipped_to_their_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_google(monkeypatch)
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="access"),
+            SocialProfile(
+                subject="google-subject",
+                display_name="N" * 400,
+                avatar_url="https://example.com/" + "a" * 1200,
+            ),
+        ),
+    )
+
+    response = client.get("/api/v1/oauth/google/callback", {"state": state, "code": "code"})
+
+    account = GoogleAccount.objects.get(subject="google-subject")
+    assert response.status_code == 302
+    assert len(account.display_name) == 255
+    assert len(account.avatar_url) == 1000
+
+
+def test_stored_provider_tokens_are_dropped_when_storage_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_google(monkeypatch)
+    monkeypatch.setattr(settings, "OAUTH_STORE_PROVIDER_TOKENS", False)
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="access", refresh_token="refresh"),
+            SocialProfile(subject="google-subject"),
+        ),
+    )
+    GoogleAccount.objects.create(
+        user=get_user_model().objects.create_user(username="stale"),
+        subject="google-subject",
+        access_token_encrypted=encrypt_secret("previously-stored"),
+        refresh_token_encrypted=encrypt_secret("previously-stored"),
+    )
+
+    client.get("/api/v1/oauth/google/callback", {"state": state, "code": "code"})
+
+    account = GoogleAccount.objects.get(subject="google-subject")
+    assert account.access_token_encrypted == ""
+    assert account.refresh_token_encrypted == ""

@@ -14,11 +14,14 @@ dependencies = [
   "django-ninja>=1.4,<2.0",
   "httpx>=0.28,<1.0",
   "PyJWT>=2.10,<3.0",
+  "pyotp>=2.9,<3.0",
   "python-dotenv>=1.1,<2.0",
+  "redis>=5.0,<7.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "fakeredis>=2.26,<3.0",
   "mypy>=1.15",
   "pytest>=8.3",
   "pytest-cov>=6.0",

@@ -37,6 +37,13 @@ src/
 ├── apps/                   # User-created business applications
 ├── infrastructure/
 │   ├── common/             # Project-owned foundation application
+│   ├── auth/               # Login methods and second factors
+│   │   ├── core/           # Challenge store, delivery, throttling, credential issuance
+│   │   ├── password/       # Username-or-email and password
+│   │   ├── email_code/     # One-time code by email
+│   │   ├── sms_code/       # One-time code by SMS
+│   │   ├── magic_link/     # Single-use emailed link
+│   │   └── twofactor/      # TOTP, SMS, email, and recovery second factors
 │   ├── oauth_core/         # Shared clients, scopes, consent, PKCE, and audit models
 │   ├── oauth_sliding/      # Sliding token mode
 │   ├── oauth_session/      # Server-side session mode
@@ -85,13 +92,64 @@ including an exact registered redirect URI.
 
 Accounts are linked by stable provider subject, not email. State is single-use and hashed; OIDC
 nonces, PKCE, signature/audience/issuer validation, encrypted transient credentials, and provider
-timeouts are built in. Upstream tokens are discarded unless
+timeouts are built in. `start` also sets a short-lived `HttpOnly` binding cookie and stores only its
+hash, so a state that comes back from a different browser is refused rather than signing that
+browser in. Apple's cross-site `form_post` callback needs `SameSite=None; Secure` for that cookie,
+which is why it requires an HTTPS callback. Upstream tokens are discarded unless
 `DJANGO_OAUTH_STORE_PROVIDER_TOKENS=true`; when retained, they are encrypted using
 `DJANGO_OAUTH_ENCRYPTION_KEY` or a key derived from `DJANGO_SECRET_KEY`.
 
 Microsoft tenant configuration accepts `common`, `organizations`, `consumers`, or a tenant GUID.
 Run `python manage.py check` to catch missing credentials, invalid callback schemes, and unsafe
 OAuth timeout, state-lifetime, or clock-skew settings before deployment.
+
+## Login methods and two-factor authentication
+
+Enable the login methods and second factors the project needs:
+
+```env
+DJANGO_AUTH_METHODS=password,email_code,sms_code,magic_link
+DJANGO_AUTH_SECOND_FACTORS=totp,sms,email,recovery
+```
+
+| Method | Routes under `/api/<version>` |
+| --- | --- |
+| `password` | `POST /auth/password/{signup,login,logout,forgot,reset,change}` |
+| `email_code` | `POST /auth/email-code/{signup/start,signup/verify,login/start,login/verify,logout}` |
+| `sms_code` | `POST /auth/sms-code/{signup/start,signup/verify,login/start,login/verify,logout}` |
+| `magic_link` | `POST /auth/magic-link/{signup/start,login/start,verify,logout}` |
+
+Every method answers with the same shape, so the two-step branch is written once:
+
+```jsonc
+{"requires_second_factor": false, "credentials": {"token_type": "bearer", "access_token": "..."}}
+{"requires_second_factor": true, "login_ticket": "...", "methods": ["totp"]}
+```
+
+When a second factor is required, post the ticket and a code to `POST /auth/2fa/verify`. For
+`sms` and `email` factors, call `POST /auth/2fa/challenge` first to have a code sent — it returns
+the same ticket, so only one is ever tracked. Manage enrolment through `/auth/2fa/totp/enroll`,
+`/totp/confirm`, `/sms/enroll`, `/sms/confirm`, `/email/enroll`, `/email/confirm`,
+`/recovery/generate`, `GET /auth/2fa/methods`, and `DELETE /auth/2fa/{method}`.
+
+Pending logins and one-time codes live in Redis (`DJANGO_AUTH_REDIS_URL`), never the database.
+Tickets are stored as SHA-256 of themselves and codes as an HMAC keyed with `DJANGO_SECRET_KEY`,
+so a dump cannot be replayed. Codes are single use, attempt-capped, bound to the purpose that
+minted them, and rate-limited per destination. `LocMemChallengeStore` is for tests and
+single-worker development only — it does not survive across processes, and `check` warns about it.
+
+`DJANGO_AUTH_TOKEN_MODE` decides which OAuth storage mode issues the credential, so password,
+passwordless, and social logins all produce the same records and share one revocation path. It
+defaults to `DJANGO_OAUTH_MODE` (`rotation` when that is `all`); `none` uses a Django session.
+Changing or resetting a password revokes every live credential for that account.
+
+SMS and email transports are swapped by dotted path (`DJANGO_AUTH_SMS_BACKEND`,
+`DJANGO_AUTH_EMAIL_BACKEND`). The defaults log rather than send; point them at a real carrier
+before deploying. `magic_link` additionally requires `DJANGO_AUTH_MAGIC_LINK_BASE_URL`.
+
+Sign-in endpoints answer identically whether or not an account exists, mask destinations in
+responses, and record a hashed audit trail in `AuthEvent`. Run `python manage.py check` to catch
+an unusable configuration before deployment.
 
 ## Commands
 

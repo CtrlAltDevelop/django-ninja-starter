@@ -18,15 +18,19 @@ class MicrosoftProvider(AuthorizationCodeProvider):
     account_model = "oauth_microsoft.MicrosoftAccount"
     jwks_endpoint = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
 
-    def __init__(self) -> None:
-        self.authorization_endpoint = (
-            f"https://login.microsoftonline.com/{self.tenant}/oauth2/v2.0/authorize"
-        )
-        self.token_endpoint = f"https://login.microsoftonline.com/{self.tenant}/oauth2/v2.0/token"
-
     @property
     def tenant(self) -> str:
         return str(self.config.get("tenant", "common"))
+
+    # Read-only overrides: the endpoints follow whatever tenant is configured now,
+    # not the one that happened to be loaded when this module was first imported.
+    @property
+    def authorization_endpoint(self) -> str:  # type: ignore[override]
+        return f"https://login.microsoftonline.com/{self.tenant}/oauth2/v2.0/authorize"
+
+    @property
+    def token_endpoint(self) -> str:  # type: ignore[override]
+        return f"https://login.microsoftonline.com/{self.tenant}/oauth2/v2.0/token"
 
     def complete(
         self,

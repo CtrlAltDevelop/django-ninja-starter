@@ -49,6 +49,7 @@ class SocialProvider(Protocol):
     account_model: str
     uses_nonce: bool
     uses_pkce: bool
+    uses_form_post: bool
 
     def is_configured(self) -> bool: ...
 
@@ -77,6 +78,47 @@ def _client_ip(request: HttpRequest) -> str | None:
     return (
         forwarded.split(",", 1)[0].strip() if forwarded else request.META.get("REMOTE_ADDR")
     ) or None
+
+
+def _binding_cookie_name(provider: SocialProvider) -> str:
+    return f"oauth_binding_{provider.key}"
+
+
+def _write_binding_cookie(
+    response: HttpResponse,
+    request: HttpRequest,
+    provider: SocialProvider,
+    binding: str,
+    max_age: int,
+) -> None:
+    """Tie the pending attempt to the browser that started it.
+
+    Providers that answer with a cross-site ``form_post`` need ``SameSite=None``,
+    which browsers only honour on a ``Secure`` cookie; those providers are
+    required to use HTTPS callbacks anyway. Expiring the cookie has to repeat the
+    same attributes, otherwise the browser keeps the original.
+    """
+    cross_site = provider.uses_form_post
+    response.set_cookie(
+        _binding_cookie_name(provider),
+        binding,
+        max_age=max_age,
+        httponly=True,
+        secure=True if cross_site else request.is_secure(),
+        samesite="None" if cross_site else "Lax",
+    )
+
+
+def _verify_binding(
+    request: HttpRequest,
+    provider: SocialProvider,
+    attempt: SocialLoginAttempt,
+) -> None:
+    if not attempt.binding_hash:
+        return
+    presented = request.COOKIES.get(_binding_cookie_name(provider), "")
+    if not presented or not secrets.compare_digest(hash_token(presented), attempt.binding_hash):
+        raise OAuthProviderError("OAuth state did not originate in this browser")
 
 
 def _callback_uri(request: HttpRequest, provider: SocialProvider) -> str:
@@ -111,12 +153,14 @@ def begin_social_login(request: HttpRequest, provider: SocialProvider) -> HttpRe
         if verifier
         else ""
     )
+    binding = secrets.token_urlsafe(32)
     redirect_uri = _callback_uri(request, provider)
     user = request.user if request.user.is_authenticated else None
     scopes = list(settings.OAUTH_PROVIDER_CONFIG[provider.key]["scopes"])
     SocialLoginAttempt.objects.create(
         provider=provider.key,
         state_hash=hash_token(state),
+        binding_hash=hash_token(binding),
         nonce_hash=hash_token(nonce) if nonce else "",
         code_verifier_encrypted=encrypt_secret(verifier),
         user=user,
@@ -127,7 +171,7 @@ def begin_social_login(request: HttpRequest, provider: SocialProvider) -> HttpRe
         ip_address=_client_ip(request),
         user_agent=request.META.get("HTTP_USER_AGENT", ""),
     )
-    return HttpResponseRedirect(
+    response = HttpResponseRedirect(
         provider.authorization_url(
             state=state,
             nonce=nonce,
@@ -135,6 +179,8 @@ def begin_social_login(request: HttpRequest, provider: SocialProvider) -> HttpRe
             redirect_uri=redirect_uri,
         )
     )
+    _write_binding_cookie(response, request, provider, binding, settings.OAUTH_STATE_TTL_SECONDS)
+    return response
 
 
 def _consume_attempt(provider: SocialProvider, state: str) -> SocialLoginAttempt:
@@ -177,12 +223,20 @@ def _create_user(profile: SocialProfile, provider_key: str) -> Any:
     return user_model._default_manager.create_user(**attributes)
 
 
+def _fitted(account: AbstractSocialAccount, field_name: str, value: str) -> str:
+    """Clip a provider-supplied value to the width its column actually allows."""
+    max_length = account._meta.get_field(field_name).max_length
+    return value[:max_length] if max_length else value
+
+
 def _resolve_account(
     provider: SocialProvider,
     attempt: SocialLoginAttempt,
     profile: SocialProfile,
     tokens: ProviderTokens,
 ) -> AbstractSocialAccount:
+    if not profile.subject:
+        raise OAuthProviderError(f"{provider.key} did not return a subject identifier")
     account_model = apps.get_model(provider.account_model)
     account = account_model.objects.select_related("user").filter(subject=profile.subject).first()
     if account and attempt.user_id and account.user_id != attempt.user_id:
@@ -212,10 +266,10 @@ def _resolve_account(
             else:
                 raise OAuthProviderError("This provider account is linked to another user")
 
-    account.email = profile.email
+    account.email = _fitted(account, "email", profile.email)
     account.email_verified = profile.email_verified
-    account.display_name = profile.display_name
-    account.avatar_url = profile.avatar_url
+    account.display_name = _fitted(account, "display_name", profile.display_name)
+    account.avatar_url = _fitted(account, "avatar_url", profile.avatar_url)
     account.scopes = tokens.scopes
     account.raw_claims = profile.claims
     account.last_login_at = timezone.now()
@@ -237,6 +291,9 @@ def _resolve_account(
         account.access_token_encrypted = encrypt_secret(tokens.access_token)
         if tokens.refresh_token:
             account.refresh_token_encrypted = encrypt_secret(tokens.refresh_token)
+    else:
+        account.access_token_encrypted = ""
+        account.refresh_token_encrypted = ""
     account.save()
     return account
 
@@ -252,6 +309,7 @@ def finish_social_login(
     attempt: SocialLoginAttempt | None = None
     try:
         attempt = _consume_attempt(provider, state)
+        _verify_binding(request, provider, attempt)
         if callback_data.get("error"):
             raise OAuthProviderError(
                 callback_data.get("error_description") or callback_data["error"]
@@ -259,10 +317,14 @@ def finish_social_login(
         code = callback_data.get("code", "")
         if not code:
             raise OAuthProviderError("Missing authorization code")
+        try:
+            code_verifier = decrypt_secret(attempt.code_verifier_encrypted)
+        except ValueError as error:
+            raise OAuthProviderError("OAuth verifier could not be decrypted") from error
         tokens, profile = provider.complete(
             code=code,
             redirect_uri=attempt.redirect_uri,
-            code_verifier=decrypt_secret(attempt.code_verifier_encrypted),
+            code_verifier=code_verifier,
             nonce_hash=attempt.nonce_hash,
             callback_data=callback_data,
         )
@@ -272,6 +334,8 @@ def finish_social_login(
         if attempt is not None:
             attempt.error = str(error)[:255]
             attempt.save(update_fields=["error"])
-        return JsonResponse({"detail": str(error)}, status=400)
-    assert attempt is not None
-    return HttpResponseRedirect(attempt.next_url)
+        response: HttpResponse = JsonResponse({"detail": str(error)}, status=400)
+    else:
+        response = HttpResponseRedirect(attempt.next_url)
+    _write_binding_cookie(response, request, provider, "", 0)
+    return response

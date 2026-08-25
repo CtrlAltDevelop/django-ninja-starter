@@ -244,6 +244,7 @@ class SocialLoginAttempt(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     provider = models.CharField(max_length=32, db_index=True)
     state_hash = models.CharField(max_length=64, unique=True, editable=False)
+    binding_hash = models.CharField(max_length=64, blank=True, editable=False)
     nonce_hash = models.CharField(max_length=64, blank=True, editable=False)
     code_verifier_encrypted = models.TextField(blank=True, editable=False)
     user = models.ForeignKey(

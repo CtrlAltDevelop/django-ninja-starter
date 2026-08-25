@@ -9,6 +9,8 @@ from infrastructure.common.registry import api_version_number, load_api_registry
 
 def build_apis() -> dict[str, NinjaAPI]:
     """Create API instances and attach every router from the registry."""
+    if settings.AUTH_INSTALLED_APPS:
+        from infrastructure.auth.core.errors import register_auth_exception_handlers
     registry = load_api_registry()
     swagger_urls = [
         {"url": f"/api/{version}/openapi.json", "name": version} for version in registry
@@ -35,12 +37,14 @@ def build_apis() -> dict[str, NinjaAPI]:
                 route["router"],
                 tags=[route["tag"]],
             )
-        for route in settings.OAUTH_PROVIDER_ROUTERS:
+        for route in (*settings.OAUTH_PROVIDER_ROUTERS, *settings.AUTH_METHOD_ROUTERS):
             api.add_router(
                 route["prefix"],
                 import_string(route["router"]),
                 tags=[route["tag"]],
             )
+        if settings.AUTH_INSTALLED_APPS:
+            register_auth_exception_handlers(api)
         apis[version] = api
 
     return apis

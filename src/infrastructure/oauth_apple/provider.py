@@ -16,6 +16,7 @@ class AppleProvider(AuthorizationCodeProvider):
     jwks_endpoint = "https://appleid.apple.com/auth/keys"
     issuer = "https://appleid.apple.com"
     uses_pkce = False
+    uses_form_post = True
 
     def is_configured(self) -> bool:
         required = ("client_id", "team_id", "key_id", "private_key")

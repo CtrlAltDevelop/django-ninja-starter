@@ -1,0 +1,1 @@
+"""Email-code authentication tests."""

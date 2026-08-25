@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,21 @@ def test_create_project_renders_complete_starter(tmp_path: Path) -> None:
     assert "{{ project_" not in generated_text
 
 
+def _pristine_environment() -> dict[str, str]:
+    """Return the environment stripped of this suite's own Django configuration.
+
+    ``config.settings.test`` configures itself through ``os.environ.setdefault``,
+    which mutates the real process environment. A subprocess would inherit it and
+    the generated project would be checked against this repository's test setup
+    rather than its own defaults.
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("DJANGO_", "GOOGLE_", "APPLE_", "MICROSOFT_", "GITHUB_"))
+    }
+
+
 def test_generated_project_passes_django_check(tmp_path: Path) -> None:
     target = create_project("smoke-test", tmp_path / "smoke-test")
 
@@ -35,10 +51,27 @@ def test_generated_project_passes_django_check(tmp_path: Path) -> None:
         check=False,
         capture_output=True,
         text=True,
+        env=_pristine_environment(),
     )
 
     assert result.returncode == 0, result.stderr
     assert "System check identified no issues" in result.stdout
+
+
+def test_generated_project_runs_its_own_tests(tmp_path: Path) -> None:
+    """The starter is only useful if what it emits is green out of the box."""
+    target = create_project("smoke-test", tmp_path / "smoke-test")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "--no-cov"],
+        cwd=target,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_pristine_environment(),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("name", ["", "123-api", "spaces are invalid", "bad/name"])

@@ -22,6 +22,7 @@ class AuthorizationCodeProvider:
     issuer: str | list[str] = ""
     uses_nonce = True
     uses_pkce = True
+    uses_form_post = False
 
     @property
     def config(self) -> dict[str, Any]:

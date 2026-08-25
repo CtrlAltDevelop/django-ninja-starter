@@ -1,6 +1,22 @@
 import os
 
 os.environ.setdefault("DJANGO_OAUTH_MODE", "all")
+os.environ.setdefault("DJANGO_AUTH_TOKEN_MODE", "rotation")
+os.environ.setdefault("DJANGO_AUTH_METHODS", "password,email_code,sms_code,magic_link")
+os.environ.setdefault("DJANGO_AUTH_SECOND_FACTORS", "totp,sms,email,recovery")
+os.environ.setdefault(
+    "DJANGO_AUTH_CHALLENGE_STORE",
+    "infrastructure.auth.core.challenges.LocMemChallengeStore",
+)
+os.environ.setdefault(
+    "DJANGO_AUTH_SMS_BACKEND", "infrastructure.auth.core.delivery.LocMemSmsBackend"
+)
+os.environ.setdefault(
+    "DJANGO_AUTH_EMAIL_BACKEND", "infrastructure.auth.core.delivery.LocMemEmailBackend"
+)
+os.environ.setdefault("DJANGO_AUTH_MAGIC_LINK_BASE_URL", "https://example.test/auth/link")
+os.environ.setdefault("DJANGO_AUTH_PASSWORD_RESET_BASE_URL", "https://example.test/auth/reset")
+os.environ.setdefault("DJANGO_AUTH_RESEND_COOLDOWN_SECONDS", "0")
 os.environ.setdefault("DJANGO_OAUTH_PROVIDERS", "google,apple,microsoft,github")
 for key, value in {
     "GOOGLE_OAUTH_CLIENT_ID": "test-google-client",

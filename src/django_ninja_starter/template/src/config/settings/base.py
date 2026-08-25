@@ -94,6 +94,103 @@ OAUTH_PROVIDER_CONFIG = {
         "scopes": os.getenv("GITHUB_OAUTH_SCOPES", "read:user user:email").split(),
     },
 }
+AUTH_METHOD_APPS = {
+    "password": "infrastructure.auth.password.apps.AuthPasswordConfig",
+    "email_code": "infrastructure.auth.email_code.apps.AuthEmailCodeConfig",
+    "sms_code": "infrastructure.auth.sms_code.apps.AuthSmsCodeConfig",
+    "magic_link": "infrastructure.auth.magic_link.apps.AuthMagicLinkConfig",
+}
+AUTH_METHODS = list(
+    dict.fromkeys(
+        method.strip().lower()
+        for method in os.getenv("DJANGO_AUTH_METHODS", "").split(",")
+        if method.strip()
+    )
+)
+unknown_auth_methods = set(AUTH_METHODS) - AUTH_METHOD_APPS.keys()
+if unknown_auth_methods:
+    raise ImproperlyConfigured(
+        f"Unknown DJANGO_AUTH_METHODS: {', '.join(sorted(unknown_auth_methods))}"
+    )
+AUTH_SECOND_FACTORS = list(
+    dict.fromkeys(
+        factor.strip().lower()
+        for factor in os.getenv("DJANGO_AUTH_SECOND_FACTORS", "").split(",")
+        if factor.strip()
+    )
+)
+SUPPORTED_SECOND_FACTORS = {"totp", "sms", "email", "recovery"}
+unknown_second_factors = set(AUTH_SECOND_FACTORS) - SUPPORTED_SECOND_FACTORS
+if unknown_second_factors:
+    raise ImproperlyConfigured(
+        f"Unknown DJANGO_AUTH_SECOND_FACTORS: {', '.join(sorted(unknown_second_factors))}"
+    )
+if AUTH_SECOND_FACTORS and not AUTH_METHODS:
+    raise ImproperlyConfigured(
+        "DJANGO_AUTH_SECOND_FACTORS requires at least one DJANGO_AUTH_METHODS entry"
+    )
+AUTH_INSTALLED_APPS = []
+if AUTH_METHODS or AUTH_SECOND_FACTORS:
+    AUTH_INSTALLED_APPS.append("infrastructure.auth.core.apps.AuthCoreConfig")
+AUTH_INSTALLED_APPS.extend(AUTH_METHOD_APPS[method] for method in AUTH_METHODS)
+if AUTH_SECOND_FACTORS:
+    AUTH_INSTALLED_APPS.append("infrastructure.auth.twofactor.apps.AuthTwoFactorConfig")
+
+AUTH_METHOD_ROUTERS = [
+    {
+        "prefix": f"/auth/{method.replace('_', '-')}",
+        "router": f"infrastructure.auth.{method}.api.router",
+        "tag": f"Auth - {method.replace('_', ' ').title()}",
+    }
+    for method in AUTH_METHODS
+]
+if AUTH_SECOND_FACTORS:
+    AUTH_METHOD_ROUTERS.append(
+        {
+            "prefix": "/auth/2fa",
+            "router": "infrastructure.auth.twofactor.api.router",
+            "tag": "Auth - Two Factor",
+        }
+    )
+
+AUTH_TOKEN_MODES = {"none", "sliding", "session", "rotation"}
+AUTH_TOKEN_MODE = os.getenv("DJANGO_AUTH_TOKEN_MODE", "").lower() or (
+    "rotation" if OAUTH_MODE == "all" else OAUTH_MODE
+)
+if AUTH_TOKEN_MODE not in AUTH_TOKEN_MODES:
+    raise ImproperlyConfigured(
+        "DJANGO_AUTH_TOKEN_MODE must be one of: none, sliding, session, rotation"
+    )
+AUTH_REDIS_URL = os.getenv("DJANGO_AUTH_REDIS_URL", "redis://127.0.0.1:6379/0")
+AUTH_CHALLENGE_STORE = os.getenv(
+    "DJANGO_AUTH_CHALLENGE_STORE",
+    "infrastructure.auth.core.challenges.RedisChallengeStore",
+)
+AUTH_CHALLENGE_TTL_SECONDS = int(os.getenv("DJANGO_AUTH_CHALLENGE_TTL_SECONDS", "300"))
+AUTH_CHALLENGE_MAX_ATTEMPTS = int(os.getenv("DJANGO_AUTH_CHALLENGE_MAX_ATTEMPTS", "5"))
+AUTH_PENDING_LOGIN_TTL_SECONDS = int(os.getenv("DJANGO_AUTH_PENDING_LOGIN_TTL_SECONDS", "600"))
+AUTH_CODE_DIGITS = int(os.getenv("DJANGO_AUTH_CODE_DIGITS", "6"))
+AUTH_RESEND_COOLDOWN_SECONDS = int(os.getenv("DJANGO_AUTH_RESEND_COOLDOWN_SECONDS", "30"))
+AUTH_MAX_SENDS_PER_HOUR = int(os.getenv("DJANGO_AUTH_MAX_SENDS_PER_HOUR", "10"))
+AUTH_ACCESS_TOKEN_TTL_SECONDS = int(os.getenv("DJANGO_AUTH_ACCESS_TOKEN_TTL_SECONDS", "3600"))
+AUTH_REFRESH_TOKEN_TTL_SECONDS = int(os.getenv("DJANGO_AUTH_REFRESH_TOKEN_TTL_SECONDS", "1209600"))
+AUTH_SLIDING_IDLE_TIMEOUT_SECONDS = int(
+    os.getenv("DJANGO_AUTH_SLIDING_IDLE_TIMEOUT_SECONDS", "900")
+)
+AUTH_SMS_BACKEND = os.getenv(
+    "DJANGO_AUTH_SMS_BACKEND", "infrastructure.auth.core.delivery.ConsoleSmsBackend"
+)
+AUTH_EMAIL_BACKEND = os.getenv(
+    "DJANGO_AUTH_EMAIL_BACKEND", "infrastructure.auth.core.delivery.DjangoEmailBackend"
+)
+AUTH_EMAIL_FROM = os.getenv("DJANGO_AUTH_EMAIL_FROM", "no-reply@example.com")
+AUTH_SMS_FROM = os.getenv("DJANGO_AUTH_SMS_FROM", "")
+AUTH_MAGIC_LINK_BASE_URL = os.getenv("DJANGO_AUTH_MAGIC_LINK_BASE_URL", "")
+AUTH_PASSWORD_RESET_BASE_URL = os.getenv("DJANGO_AUTH_PASSWORD_RESET_BASE_URL", "")
+AUTH_AUTO_CREATE_USERS = os.getenv("DJANGO_AUTH_AUTO_CREATE_USERS", "true").lower() == "true"
+AUTH_TOTP_ISSUER = os.getenv("DJANGO_AUTH_TOTP_ISSUER", "{{ project_title }}")
+AUTH_RECOVERY_CODE_COUNT = int(os.getenv("DJANGO_AUTH_RECOVERY_CODE_COUNT", "10"))
+
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")
 OAUTH_STATE_TTL_SECONDS = int(os.getenv("DJANGO_OAUTH_STATE_TTL_SECONDS", "600"))
 OAUTH_HTTP_TIMEOUT_SECONDS = float(os.getenv("DJANGO_OAUTH_HTTP_TIMEOUT_SECONDS", "10"))
@@ -114,6 +211,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     *registered_app_configs(BASE_DIR / "src" / "config" / "api_registry.json"),
     *OAUTH_INSTALLED_APPS,
+    *AUTH_INSTALLED_APPS,
 ]
 
 MIDDLEWARE = [

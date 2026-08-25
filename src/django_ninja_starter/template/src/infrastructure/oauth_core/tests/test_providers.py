@@ -379,3 +379,34 @@ def test_provider_routers_are_reusable_across_api_versions(
         paths = api.get_openapi_schema(path_prefix=f"/api/{version}")["paths"]
         assert f"/api/{version}/oauth/google/start" in paths
         assert f"/api/{version}/oauth/apple/callback" in paths
+
+
+def test_microsoft_endpoints_follow_the_configured_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single-tenant deployment must not be sent to the /common endpoint."""
+    tenant_id = "11111111-1111-1111-1111-111111111111"
+    _configure(monkeypatch, "microsoft")
+    monkeypatch.setitem(
+        settings.OAUTH_PROVIDER_CONFIG,
+        "microsoft",
+        {**settings.OAUTH_PROVIDER_CONFIG["microsoft"], "tenant": tenant_id},
+    )
+
+    response = Client().get("/api/v1/oauth/microsoft/start")
+
+    assert urlparse(response.headers["Location"]).path == f"/{tenant_id}/oauth2/v2.0/authorize"
+    assert microsoft.token_endpoint.endswith(f"/{tenant_id}/oauth2/v2.0/token")
+
+
+def test_apple_binding_cookie_survives_its_cross_site_form_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SameSite=Lax would be dropped on Apple's cross-site POST callback."""
+    _configure(monkeypatch, "apple")
+
+    response = Client().get("/api/v1/oauth/apple/start")
+
+    cookie = response.cookies["oauth_binding_apple"]
+    assert cookie["samesite"] == "None"
+    assert cookie["secure"]
