@@ -5,9 +5,66 @@ from django.core.checks import Error, Warning, register
 
 from infrastructure.auth.core.sessions import TOKEN_MODE_APPS
 from infrastructure.common.app_labels import app_installed
+from infrastructure.oauth.core.jwt_tokens import (
+    ASYMMETRIC_ALGORITHMS,
+    SUPPORTED_ALGORITHMS,
+)
 
 CONSOLE_SMS_BACKEND = "infrastructure.auth.core.delivery.ConsoleSmsBackend"
 LOCMEM_STORE = "infrastructure.auth.core.challenges.LocMemChallengeStore"
+
+
+def _jwt_messages() -> list[Error | Warning]:
+    """Check the signing configuration, which no request can work around."""
+    messages: list[Error | Warning] = []
+    algorithm = settings.AUTH_JWT_ALGORITHM
+    if algorithm not in SUPPORTED_ALGORITHMS:
+        return [
+            Error(
+                f"DJANGO_AUTH_JWT_ALGORITHM must be one of: "
+                f"{', '.join(sorted(SUPPORTED_ALGORITHMS))}",
+                id="auth.E007",
+            )
+        ]
+    if algorithm in ASYMMETRIC_ALGORITHMS:
+        missing = [
+            name
+            for name, value in (
+                ("DJANGO_AUTH_JWT_SIGNING_KEY", settings.AUTH_JWT_SIGNING_KEY),
+                ("DJANGO_AUTH_JWT_VERIFYING_KEY", settings.AUTH_JWT_VERIFYING_KEY),
+            )
+            if not value
+        ]
+        if missing:
+            messages.append(
+                Error(
+                    f"{algorithm} signing needs: {', '.join(missing)}",
+                    hint="Supply the PEM-encoded key pair, or use HS256.",
+                    id="auth.E008",
+                )
+            )
+    elif not settings.AUTH_JWT_SIGNING_KEY:
+        messages.append(
+            Warning(
+                "Access tokens are signed with a key derived from DJANGO_SECRET_KEY",
+                hint=(
+                    "Set DJANGO_AUTH_JWT_SIGNING_KEY so tokens can be re-keyed "
+                    "without invalidating everything else the secret key protects."
+                ),
+                id="auth.W004",
+            )
+        )
+    if not settings.AUTH_JWT_ISSUER:
+        messages.append(
+            Error(
+                "DJANGO_AUTH_JWT_ISSUER must name this deployment",
+                hint="Tokens carry it as `iss` and it is verified on every request.",
+                id="auth.E009",
+            )
+        )
+    if not 0 <= settings.AUTH_JWT_LEEWAY_SECONDS <= 300:
+        messages.append(Error("JWT clock leeway must be between 0 and 300 seconds", id="auth.E010"))
+    return messages
 
 
 @register()
@@ -67,4 +124,6 @@ def check_auth_settings(**kwargs: object) -> list[Error | Warning]:
                 id="auth.W003",
             )
         )
+    if settings.AUTH_TOKEN_MODE != "none":
+        messages.extend(_jwt_messages())
     return messages

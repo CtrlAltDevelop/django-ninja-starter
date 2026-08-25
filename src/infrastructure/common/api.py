@@ -24,9 +24,7 @@ def liveness(request: HttpRequest) -> HealthResponse:
     auth=None,
     summary="Readiness check",
 )
-def readiness(
-    request: HttpRequest,
-) -> Status[HealthResponse]:
+def readiness(request: HttpRequest) -> Status[HealthResponse]:
     """Report whether required infrastructure is available."""
     database_ready = database_is_ready()
     response = HealthResponse(

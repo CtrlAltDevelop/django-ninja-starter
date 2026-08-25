@@ -191,6 +191,16 @@ AUTH_AUTO_CREATE_USERS = os.getenv("DJANGO_AUTH_AUTO_CREATE_USERS", "true").lowe
 AUTH_TOTP_ISSUER = os.getenv("DJANGO_AUTH_TOTP_ISSUER", "{{ project_title }}")
 AUTH_RECOVERY_CODE_COUNT = int(os.getenv("DJANGO_AUTH_RECOVERY_CODE_COUNT", "10"))
 
+# Signed credentials. HS256 needs only DJANGO_SECRET_KEY to work out of the box;
+# an RS*/ES* algorithm needs a real key pair, which the system checks insist on
+# rather than silently falling back to something weaker.
+AUTH_JWT_ALGORITHM = os.getenv("DJANGO_AUTH_JWT_ALGORITHM", "HS256").upper()
+AUTH_JWT_SIGNING_KEY = os.getenv("DJANGO_AUTH_JWT_SIGNING_KEY", "")
+AUTH_JWT_VERIFYING_KEY = os.getenv("DJANGO_AUTH_JWT_VERIFYING_KEY", "")
+AUTH_JWT_ISSUER = os.getenv("DJANGO_AUTH_JWT_ISSUER", "{{ project_name }}")
+AUTH_JWT_AUDIENCE = os.getenv("DJANGO_AUTH_JWT_AUDIENCE", "")
+AUTH_JWT_LEEWAY_SECONDS = int(os.getenv("DJANGO_AUTH_JWT_LEEWAY_SECONDS", "30"))
+
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")
 OAUTH_STATE_TTL_SECONDS = int(os.getenv("DJANGO_OAUTH_STATE_TTL_SECONDS", "600"))
 OAUTH_HTTP_TIMEOUT_SECONDS = float(os.getenv("DJANGO_OAUTH_HTTP_TIMEOUT_SECONDS", "10"))

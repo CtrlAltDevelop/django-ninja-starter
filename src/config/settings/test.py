@@ -17,6 +17,9 @@ os.environ.setdefault(
 os.environ.setdefault("DJANGO_AUTH_MAGIC_LINK_BASE_URL", "https://example.test/auth/link")
 os.environ.setdefault("DJANGO_AUTH_PASSWORD_RESET_BASE_URL", "https://example.test/auth/reset")
 os.environ.setdefault("DJANGO_AUTH_RESEND_COOLDOWN_SECONDS", "0")
+os.environ.setdefault(
+    "DJANGO_AUTH_JWT_SIGNING_KEY", "test-only-jwt-signing-key-of-sufficient-length"
+)
 os.environ.setdefault("DJANGO_OAUTH_PROVIDERS", "google,apple,microsoft,github")
 for key, value in {
     "GOOGLE_OAUTH_CLIENT_ID": "test-google-client",

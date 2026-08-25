@@ -13,14 +13,17 @@ from django.test import RequestFactory, override_settings
 from infrastructure.auth.core.sessions import (
     bearer_token,
     client_ip,
+    credential_handle,
     issue_credentials,
     resolve_request_user,
     revoke_all_for_user,
     revoke_credentials,
     user_agent,
 )
+from infrastructure.oauth.core import jwt_tokens
 
 TOKEN_MODES = ["sliding", "session", "rotation"]
+PAIRED_MODES = ["session", "rotation"]
 
 
 @pytest.fixture
@@ -147,6 +150,73 @@ def test_revoking_everything_clears_every_live_credential(user: Any, mode: str) 
         for credentials in (first, second):
             request = _request(HTTP_AUTHORIZATION=f"Bearer {credentials.access_token}")
             assert resolve_request_user(request) is None
+
+
+@pytest.mark.parametrize("mode", TOKEN_MODES)
+def test_the_access_token_is_a_signed_jwt_describing_the_login(user: Any, mode: str) -> None:
+    with override_settings(AUTH_TOKEN_MODE=mode):
+        credentials = issue_credentials(_request(), user, method="password")
+
+    claims = jwt_tokens.decode(credentials.access_token, token_type=jwt_tokens.ACCESS)
+    assert claims.subject == str(user.pk)
+    assert claims.mode == mode
+    assert claims.session_id == credentials.session_id
+    assert claims.methods == ["password"]
+
+
+@pytest.mark.parametrize("mode", PAIRED_MODES)
+def test_the_refresh_token_is_signed_as_a_refresh_token(user: Any, mode: str) -> None:
+    with override_settings(AUTH_TOKEN_MODE=mode):
+        credentials = issue_credentials(_request(), user, method="password")
+
+    claims = jwt_tokens.decode(credentials.refresh_token, token_type=jwt_tokens.REFRESH)
+    assert claims.session_id == credentials.session_id
+
+
+@pytest.mark.parametrize("mode", PAIRED_MODES)
+def test_a_refresh_token_cannot_be_used_as_a_bearer_credential(user: Any, mode: str) -> None:
+    """Otherwise the long-lived half would authenticate every ordinary request."""
+    with override_settings(AUTH_TOKEN_MODE=mode):
+        credentials = issue_credentials(_request(), user, method="password")
+        request = _request(HTTP_AUTHORIZATION=f"Bearer {credentials.refresh_token}")
+
+        assert resolve_request_user(request) is None
+
+
+@pytest.mark.parametrize("mode", PAIRED_MODES)
+def test_signing_out_accepts_the_refresh_token(user: Any, mode: str) -> None:
+    """A client whose access token has lapsed still holds this one."""
+    with override_settings(AUTH_TOKEN_MODE=mode):
+        credentials = issue_credentials(_request(), user, method="password")
+
+        assert revoke_credentials(_request(), credentials.refresh_token) is True
+
+        request = _request(HTTP_AUTHORIZATION=f"Bearer {credentials.access_token}")
+        assert resolve_request_user(request) is None
+
+
+def test_a_token_minted_for_another_mode_is_refused(user: Any) -> None:
+    """Its handle belongs to a different table, so looking it up is meaningless."""
+    with override_settings(AUTH_TOKEN_MODE="rotation"):
+        credentials = issue_credentials(_request(), user, method="password")
+
+    with override_settings(AUTH_TOKEN_MODE="session"):
+        request = _request(HTTP_AUTHORIZATION=f"Bearer {credentials.access_token}")
+        assert resolve_request_user(request) is None
+
+
+@override_settings(AUTH_TOKEN_MODE="rotation")
+def test_an_unsigned_bearer_value_never_reaches_the_database(user: Any) -> None:
+    with patch("infrastructure.auth.core.sessions._user_from_rotation") as resolver:
+        assert resolve_request_user(_request(HTTP_AUTHORIZATION="Bearer not-a-jwt")) is None
+
+    resolver.assert_not_called()
+
+
+@override_settings(AUTH_TOKEN_MODE="rotation")
+def test_signing_out_with_an_unreadable_token_reports_nothing_revoked(user: Any) -> None:
+    assert credential_handle("not-a-jwt", token_type=jwt_tokens.ACCESS) == ""
+    assert revoke_credentials(_request(), "not-a-jwt") is False
 
 
 @override_settings(AUTH_TOKEN_MODE="sliding")

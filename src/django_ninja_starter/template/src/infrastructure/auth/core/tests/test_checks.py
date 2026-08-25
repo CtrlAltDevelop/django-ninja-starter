@@ -20,6 +20,11 @@ def _ids(**overrides: object) -> set[str]:
         "AUTH_SECOND_FACTORS": [],
         "AUTH_MAGIC_LINK_BASE_URL": "",
         "AUTH_PASSWORD_RESET_BASE_URL": "",
+        "AUTH_JWT_ALGORITHM": "HS256",
+        "AUTH_JWT_SIGNING_KEY": "a-signing-key-long-enough-for-hs256",
+        "AUTH_JWT_VERIFYING_KEY": "",
+        "AUTH_JWT_ISSUER": "checks-under-test",
+        "AUTH_JWT_LEEWAY_SECONDS": 30,
     }
     with override_settings(**{**defaults, **overrides}):
         return {message.id for message in check_auth_settings()}
@@ -37,6 +42,45 @@ def test_a_token_mode_without_its_app_is_an_error() -> None:
 def test_the_none_token_mode_needs_no_app() -> None:
     with patch("infrastructure.auth.core.checks.app_installed", return_value=False):
         assert "auth.E001" not in _ids(AUTH_TOKEN_MODE="none")
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"AUTH_JWT_ALGORITHM": "HS128"}, "auth.E007"),
+        ({"AUTH_JWT_ALGORITHM": "RS256", "AUTH_JWT_SIGNING_KEY": ""}, "auth.E008"),
+        (
+            {
+                "AUTH_JWT_ALGORITHM": "RS256",
+                "AUTH_JWT_SIGNING_KEY": "private",
+                "AUTH_JWT_VERIFYING_KEY": "",
+            },
+            "auth.E008",
+        ),
+        ({"AUTH_JWT_ISSUER": ""}, "auth.E009"),
+        ({"AUTH_JWT_LEEWAY_SECONDS": 9999}, "auth.E010"),
+        ({"AUTH_JWT_SIGNING_KEY": ""}, "auth.W004"),
+    ],
+)
+def test_an_unusable_signing_setup_is_reported(overrides: dict[str, object], expected: str) -> None:
+    assert expected in _ids(AUTH_TOKEN_MODE="rotation", **overrides)
+
+
+def test_signing_is_not_checked_when_no_token_is_ever_issued() -> None:
+    """The `none` mode signs nothing, so an unusable key pair is not its problem."""
+    assert _ids(AUTH_TOKEN_MODE="none", AUTH_JWT_ALGORITHM="HS128") == set()
+
+
+def test_a_key_pair_satisfies_an_asymmetric_algorithm() -> None:
+    assert (
+        _ids(
+            AUTH_TOKEN_MODE="rotation",
+            AUTH_JWT_ALGORITHM="ES256",
+            AUTH_JWT_SIGNING_KEY="private",
+            AUTH_JWT_VERIFYING_KEY="public",
+        )
+        == set()
+    )
 
 
 @pytest.mark.parametrize(
