@@ -20,6 +20,11 @@ os.environ.setdefault("DJANGO_AUTH_RESEND_COOLDOWN_SECONDS", "0")
 os.environ.setdefault(
     "DJANGO_AUTH_JWT_SIGNING_KEY", "test-only-jwt-signing-key-of-sufficient-length"
 )
+# The declared settings contracts are real requirements, so the suite satisfies
+# them the way a deployment would. The challenge store is the one deliberate
+# exception: tests need the in-process one, and it warns about itself.
+os.environ.setdefault("DJANGO_AUTH_EMAIL_FROM", "sign-in@example.test")
+os.environ.setdefault("DJANGO_AUTH_SMS_FROM", "+15555550100")
 os.environ.setdefault("DJANGO_OAUTH_PROVIDERS", "google,apple,microsoft,github")
 for key, value in {
     "GOOGLE_OAUTH_CLIENT_ID": "test-google-client",
