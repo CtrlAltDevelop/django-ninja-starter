@@ -15,22 +15,21 @@ from infrastructure.auth.core.challenges import (
 )
 from infrastructure.auth.core.identities import IdentityError
 from infrastructure.auth.core.throttling import RateLimited
+from infrastructure.common.errors import ApiError
 
 
-class AuthError(RuntimeError):
-    """A failure the client caused, carrying the status it should receive."""
-
-    def __init__(self, message: str, status: int = 400) -> None:
-        super().__init__(message)
-        self.status = status
+class AuthError(ApiError):
+    """A sign-in failure the client caused. Rendered by the shared handler."""
 
 
 def register_auth_exception_handlers(api: NinjaAPI) -> None:
-    """Teach one API instance how to render authentication failures."""
+    """Teach one API instance how to render authentication-specific failures.
 
-    @api.exception_handler(AuthError)
-    def _auth_error(request: HttpRequest, error: AuthError) -> HttpResponse:
-        return api.create_response(request, {"detail": str(error)}, status=error.status)
+    :class:`AuthError` itself is not listed: it is an :class:`ApiError`, which
+    :func:`~infrastructure.common.errors.register_error_handlers` already covers.
+    What is here are the domain errors that carry their own status, and the rate
+    limit, which also has a header to set.
+    """
 
     @api.exception_handler(RateLimited)
     def _rate_limited(request: HttpRequest, error: RateLimited) -> HttpResponse:

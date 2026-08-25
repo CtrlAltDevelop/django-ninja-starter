@@ -1,10 +1,9 @@
-"""Turn a proven identity into whatever credential the project already issues.
+"""Turn a proven identity into the credential this project already issues.
 
-The OAuth token modes own the credential models; this module is the seam that
-lets a password or one-time-code login mint exactly the same tokens a social
-login would, so a project has one revocation story instead of two. Models are
-resolved through the app registry, never imported, so enabling ``sliding`` does
-not drag ``rotation``'s tables into the schema.
+The OAuth token modes own the credential models and the signing vocabulary; this
+module is the seam that lets a password or one-time-code login mint exactly the
+same tokens a social login would, so a project has one revocation story instead
+of two.
 
 Every mode but ``none`` hands the client a signed JWT rather than the raw row
 handle. The handle lives on as the token's ``jti``, so the database still holds
@@ -12,7 +11,6 @@ only a digest and revocation is still a single indexed lookup -- see
 :mod:`infrastructure.oauth.core.jwt_tokens` for why both halves are checked.
 """
 
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -20,98 +18,42 @@ from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import login as django_login
 from django.contrib.auth import logout as django_logout
-from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.http import HttpRequest
 from django.utils import timezone
 
 from infrastructure.common.app_labels import app_installed
 from infrastructure.oauth.core import jwt_tokens
+from infrastructure.oauth.core.credentials import (
+    BEARER,
+    TOKEN_MODE_APPS,
+    IssuedCredentials,
+    bearer_token,
+    client_ip,
+    credential_handle,
+    sign_pair,
+    sign_single,
+    token_model,
+    user_agent,
+)
 from infrastructure.oauth.core.tokens import hash_token
 
 MODEL_BACKEND = "django.contrib.auth.backends.ModelBackend"
-TOKEN_MODE_APPS = {
-    "sliding": "oauth_sliding",
-    "session": "oauth_session",
-    "rotation": "oauth_rotation",
-}
 
-
-@dataclass(frozen=True)
-class IssuedCredentials:
-    """What a successful login hands back to the client."""
-
-    token_type: str
-    access_token: str = ""
-    refresh_token: str = ""
-    expires_in: int | None = None
-    session_id: str = ""
-
-
-def client_ip(request: HttpRequest) -> str | None:
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    return (
-        forwarded.split(",", 1)[0].strip() if forwarded else request.META.get("REMOTE_ADDR")
-    ) or None
-
-
-def user_agent(request: HttpRequest) -> str:
-    return request.META.get("HTTP_USER_AGENT", "")
-
-
-def bearer_token(request: HttpRequest) -> str:
-    header = request.META.get("HTTP_AUTHORIZATION", "")
-    scheme, _, value = header.partition(" ")
-    return value.strip() if scheme.lower() == "bearer" else ""
-
-
-def _model(mode: str, name: str) -> Any:
-    app_label = TOKEN_MODE_APPS[mode]
-    if not app_installed(app_label):
-        raise ImproperlyConfigured(
-            f"DJANGO_AUTH_TOKEN_MODE={mode} needs DJANGO_OAUTH_MODE to enable {app_label}."
-        )
-    return apps.get_model(app_label, name)
-
-
-def _pair(
-    user: Any,
-    *,
-    mode: str,
-    session_id: str,
-    method: str,
-    access_handle: str,
-    refresh_handle: str,
-    access_lifetime: timedelta,
-    refresh_lifetime: timedelta,
-) -> IssuedCredentials:
-    """Wrap a freshly stored access/refresh handle pair as signed tokens."""
-    subject = str(user.pk)
-    access_token, _ = jwt_tokens.mint(
-        subject=subject,
-        handle=access_handle,
-        token_type=jwt_tokens.ACCESS,
-        lifetime=access_lifetime,
-        mode=mode,
-        session_id=session_id,
-        methods=[method],
-    )
-    refresh_token, _ = jwt_tokens.mint(
-        subject=subject,
-        handle=refresh_handle,
-        token_type=jwt_tokens.REFRESH,
-        lifetime=refresh_lifetime,
-        mode=mode,
-        session_id=session_id,
-        methods=[method],
-    )
-    return IssuedCredentials(
-        token_type="bearer",
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=int(access_lifetime.total_seconds()),
-        session_id=session_id,
-    )
+__all__ = [
+    "BEARER",
+    "TOKEN_MODE_APPS",
+    "IssuedCredentials",
+    "api_auth",
+    "bearer_token",
+    "client_ip",
+    "credential_handle",
+    "issue_credentials",
+    "resolve_request_user",
+    "revoke_all_for_user",
+    "revoke_credentials",
+    "user_agent",
+]
 
 
 def _issue_sliding(request: HttpRequest, user: Any, method: str) -> IssuedCredentials:
@@ -122,14 +64,14 @@ def _issue_sliding(request: HttpRequest, user: Any, method: str) -> IssuedCreden
     stamped with the *idle* expiry would go stale while the session it stands for
     was still very much alive. The idle timeout is enforced by the row.
     """
-    token_model = _model("sliding", "SlidingToken")
-    event_model = _model("sliding", "SlidingTokenEvent")
+    sliding_model = token_model("sliding", "SlidingToken")
+    event_model = token_model("sliding", "SlidingTokenEvent")
     now = timezone.now()
     idle = settings.AUTH_SLIDING_IDLE_TIMEOUT_SECONDS
     absolute_expiry = now + timedelta(seconds=settings.AUTH_REFRESH_TOKEN_TTL_SECONDS)
     expiry = min(now + timedelta(seconds=idle), absolute_expiry)
     handle = jwt_tokens.new_handle()
-    record = token_model.objects.create(
+    record = sliding_model.objects.create(
         user=user,
         token_hash=hash_token(handle),
         expires_at=expiry,
@@ -145,26 +87,20 @@ def _issue_sliding(request: HttpRequest, user: Any, method: str) -> IssuedCreden
         new_expires_at=expiry,
         ip_address=client_ip(request),
     )
-    access_token, _ = jwt_tokens.mint(
-        subject=str(user.pk),
-        handle=handle,
-        token_type=jwt_tokens.ACCESS,
-        lifetime=absolute_expiry - now,
+    return sign_single(
+        user,
         mode="sliding",
         session_id=str(record.id),
         methods=[method],
-    )
-    return IssuedCredentials(
-        token_type="bearer",
-        access_token=access_token,
+        handle=handle,
+        signature_lifetime=absolute_expiry - now,
         expires_in=int((expiry - now).total_seconds()),
-        session_id=str(record.id),
     )
 
 
 def _issue_session(request: HttpRequest, user: Any, method: str) -> IssuedCredentials:
-    session_model = _model("session", "OAuthSession")
-    access_model = _model("session", "SessionAccessToken")
+    session_model = token_model("session", "OAuthSession")
+    access_model = token_model("session", "SessionAccessToken")
     now = timezone.now()
     session_lifetime = timedelta(seconds=settings.AUTH_REFRESH_TOKEN_TTL_SECONDS)
     access_lifetime = timedelta(seconds=settings.AUTH_ACCESS_TOKEN_TTL_SECONDS)
@@ -187,11 +123,11 @@ def _issue_session(request: HttpRequest, user: Any, method: str) -> IssuedCreden
         user_agent=user_agent(request),
         metadata={"auth_method": method},
     )
-    return _pair(
+    return sign_pair(
         user,
         mode="session",
         session_id=str(session.id),
-        method=method,
+        methods=[method],
         access_handle=access_handle,
         refresh_handle=session_handle,
         access_lifetime=access_lifetime,
@@ -200,9 +136,9 @@ def _issue_session(request: HttpRequest, user: Any, method: str) -> IssuedCreden
 
 
 def _issue_rotation(request: HttpRequest, user: Any, method: str) -> IssuedCredentials:
-    family_model = _model("rotation", "TokenFamily")
-    refresh_model = _model("rotation", "RotatingRefreshToken")
-    access_model = _model("rotation", "RotatingAccessToken")
+    family_model = token_model("rotation", "TokenFamily")
+    refresh_model = token_model("rotation", "RotatingRefreshToken")
+    access_model = token_model("rotation", "RotatingAccessToken")
     now = timezone.now()
     refresh_lifetime = timedelta(seconds=settings.AUTH_REFRESH_TOKEN_TTL_SECONDS)
     access_lifetime = timedelta(seconds=settings.AUTH_ACCESS_TOKEN_TTL_SECONDS)
@@ -235,11 +171,11 @@ def _issue_rotation(request: HttpRequest, user: Any, method: str) -> IssuedCrede
         user_agent=user_agent(request),
         metadata={"auth_method": method},
     )
-    return _pair(
+    return sign_pair(
         user,
         mode="rotation",
         session_id=str(family.id),
-        method=method,
+        methods=[method],
         access_handle=access_handle,
         refresh_handle=refresh_handle,
         access_lifetime=access_lifetime,
@@ -263,9 +199,9 @@ def issue_credentials(request: HttpRequest, user: Any, *, method: str) -> Issued
 
 
 def _revoke_sliding(digest: str) -> bool:
-    token_model = _model("sliding", "SlidingToken")
-    event_model = _model("sliding", "SlidingTokenEvent")
-    record = token_model.objects.filter(token_hash=digest, revoked_at__isnull=True).first()
+    sliding_model = token_model("sliding", "SlidingToken")
+    event_model = token_model("sliding", "SlidingTokenEvent")
+    record = sliding_model.objects.filter(token_hash=digest, revoked_at__isnull=True).first()
     if record is None:
         return False
     record.revoke("logout")
@@ -274,9 +210,9 @@ def _revoke_sliding(digest: str) -> bool:
 
 
 def _revoke_session(digest: str) -> bool:
-    session_model = _model("session", "OAuthSession")
-    access_model = _model("session", "SessionAccessToken")
-    revocation_model = _model("session", "SessionRevocation")
+    session_model = token_model("session", "OAuthSession")
+    access_model = token_model("session", "SessionAccessToken")
+    revocation_model = token_model("session", "SessionRevocation")
     session = session_model.objects.filter(session_key_hash=digest, revoked_at__isnull=True).first()
     if session is None:
         access = (
@@ -298,8 +234,8 @@ def _revoke_session(digest: str) -> bool:
 
 
 def _revoke_rotation(digest: str) -> bool:
-    refresh_model = _model("rotation", "RotatingRefreshToken")
-    access_model = _model("rotation", "RotatingAccessToken")
+    refresh_model = token_model("rotation", "RotatingRefreshToken")
+    access_model = token_model("rotation", "RotatingAccessToken")
     holder = (
         refresh_model.objects.select_related("family").filter(token_hash=digest).first()
         or access_model.objects.select_related("family").filter(token_hash=digest).first()
@@ -308,19 +244,6 @@ def _revoke_rotation(digest: str) -> bool:
         return False
     holder.family.revoke("logout")
     return True
-
-
-def credential_handle(token: str, *, token_type: str) -> str:
-    """Return the row handle inside a token, or an empty string if it is not ours.
-
-    Signing out is deliberately forgiving: a client that presents a token which
-    has already expired, or which was signed under a rotated key, has nothing
-    left to revoke and should not be told that its logout failed.
-    """
-    try:
-        return jwt_tokens.decode(token, token_type=token_type).handle
-    except jwt_tokens.JwtError:
-        return ""
 
 
 def revoke_credentials(request: HttpRequest, token: str = "") -> bool:
@@ -389,7 +312,7 @@ def revoke_all_for_user(user: Any, reason: str = "password_changed") -> int:
 
 def _user_from_sliding(digest: str) -> Any | None:
     record = (
-        _model("sliding", "SlidingToken")
+        token_model("sliding", "SlidingToken")
         .objects.select_related("user")
         .filter(token_hash=digest)
         .first()
@@ -402,7 +325,7 @@ def _user_from_sliding(digest: str) -> Any | None:
 
 def _user_from_session(digest: str) -> Any | None:
     record = (
-        _model("session", "SessionAccessToken")
+        token_model("session", "SessionAccessToken")
         .objects.select_related("user", "session")
         .filter(token_hash=digest)
         .first()
@@ -416,7 +339,7 @@ def _user_from_session(digest: str) -> Any | None:
 
 def _user_from_rotation(digest: str) -> Any | None:
     record = (
-        _model("rotation", "RotatingAccessToken")
+        token_model("rotation", "RotatingAccessToken")
         .objects.select_related("user", "family")
         .filter(token_hash=digest)
         .first()

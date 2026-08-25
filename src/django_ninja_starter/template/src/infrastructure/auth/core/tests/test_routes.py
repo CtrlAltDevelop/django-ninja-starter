@@ -52,8 +52,19 @@ TWO_FACTOR_ROUTES = {
     ("POST", "/auth/2fa/recovery/generate"),
     ("DELETE", "/auth/2fa/{method}"),
 }
+TOKEN_ROUTES = {
+    ("POST", "/auth/token/refresh"),
+    ("POST", "/auth/token/revoke"),
+    ("GET", "/auth/token/sessions"),
+    ("DELETE", "/auth/token/sessions/{session_id}"),
+}
 ALL_ROUTES = (
-    PASSWORD_ROUTES | EMAIL_CODE_ROUTES | SMS_CODE_ROUTES | MAGIC_LINK_ROUTES | TWO_FACTOR_ROUTES
+    PASSWORD_ROUTES
+    | EMAIL_CODE_ROUTES
+    | SMS_CODE_ROUTES
+    | MAGIC_LINK_ROUTES
+    | TWO_FACTOR_ROUTES
+    | TOKEN_ROUTES
 )
 
 
@@ -101,7 +112,9 @@ def test_every_route_is_reachable(db: None, verb: str, path: str) -> None:
     reveal. What the handler decides about an empty body is each route's own
     business -- the logout routes are deliberately idempotent and answer 200.
     """
-    url = f"/api/v1{path.replace('{method}', 'totp')}"
+    url = f"/api/v1{path}".replace("{method}", "totp").replace(
+        "{session_id}", "00000000-0000-0000-0000-000000000000"
+    )
     response = getattr(Client(), verb.lower())(url, {}, content_type="application/json")
 
     assert response.status_code not in {404, 405}
@@ -115,6 +128,17 @@ def test_router_wiring_follows_the_enabled_methods() -> None:
         expected.add("/auth/2fa")
 
     assert prefixes == expected
+
+
+def test_the_token_router_follows_the_active_mode() -> None:
+    """One prefix whichever mode is active, so a client never has to care."""
+    routers = settings.AUTH_TOKEN_ROUTERS
+
+    if settings.AUTH_TOKEN_MODE == "none":
+        assert routers == []
+        return
+    assert [route["prefix"] for route in routers] == ["/auth/token"]
+    assert routers[0]["router"] == (f"infrastructure.oauth.{settings.AUTH_TOKEN_MODE}.api.router")
 
 
 def test_enabled_methods_install_their_apps() -> None:

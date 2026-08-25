@@ -223,7 +223,7 @@ def test_signing_out_with_an_unreadable_token_reports_nothing_revoked(user: Any)
 def test_a_mode_whose_app_is_not_installed_fails_loudly(user: Any) -> None:
     """Better a clear configuration error than a token silently never issued."""
     with (
-        patch("infrastructure.auth.core.sessions.app_installed", return_value=False),
+        patch("infrastructure.oauth.core.credentials.app_installed", return_value=False),
         pytest.raises(ImproperlyConfigured, match="oauth_sliding"),
     ):
         issue_credentials(_request(), user, method="password")

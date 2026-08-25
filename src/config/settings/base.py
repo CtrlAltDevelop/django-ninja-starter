@@ -161,6 +161,19 @@ if AUTH_TOKEN_MODE not in AUTH_TOKEN_MODES:
     raise ImproperlyConfigured(
         "DJANGO_AUTH_TOKEN_MODE must be one of: none, sliding, session, rotation"
     )
+# Refresh, revoke and session management for whichever mode is active. Always at
+# the same prefix, so a client does not have to know which mode it is talking to.
+AUTH_TOKEN_ROUTERS = (
+    []
+    if AUTH_TOKEN_MODE == "none"
+    else [
+        {
+            "prefix": "/auth/token",
+            "router": f"infrastructure.oauth.{AUTH_TOKEN_MODE}.api.router",
+            "tag": "Auth - Token",
+        }
+    ]
+)
 AUTH_REDIS_URL = os.getenv("DJANGO_AUTH_REDIS_URL", "redis://127.0.0.1:6379/0")
 AUTH_CHALLENGE_STORE = os.getenv(
     "DJANGO_AUTH_CHALLENGE_STORE",
