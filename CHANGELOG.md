@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The token mode now defaults to issuing tokens.** Left unset,
+  `DJANGO_AUTH_TOKEN_MODE` follows `DJANGO_OAUTH_MODE` when that names one, and
+  is otherwise `rotation` as soon as anything signs users in. Enabling only a
+  login method previously fell through to `none`, which handed back a session
+  cookie and an empty `access_token` -- a working login and an unusable API. A
+  project that wants Django sessions now asks for `none` explicitly. The active
+  mode's app is installed for you, so a login method no longer has to be paired
+  with `DJANGO_OAUTH_MODE` by hand.
+- `POST /auth/password/change` answers **400**, not 401, when `current_password`
+  is wrong. The caller is authenticated -- that is how they reached the endpoint
+  -- and 401 would send a client that refreshes on 401 round a loop renewing a
+  perfectly good token over a typo.
+
+### Added
+
+- Isolation tests that boot the project with one app enabled at a time, in a
+  fresh interpreter, and sign somebody in. The main suite runs with everything
+  on, which is the one configuration nobody deploys.
+- Interoperability tests proving a credential from any method is accepted by
+  every protected endpoint, that ending one session closes all of them, and that
+  a second factor enrolled through one method gates the others too.
+- The published project URLs are pinned to the git remote, so a fork is told to
+  update its metadata rather than quietly publishing links to another repository.
+
 ## [0.2.0] - 2026-08-25
 
 ### Added

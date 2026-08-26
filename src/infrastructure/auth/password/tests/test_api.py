@@ -216,6 +216,12 @@ def test_a_decoy_reset_ticket_cannot_set_a_password(db: None) -> None:
 
 
 def test_change_requires_the_current_password(db: None) -> None:
+    """A wrong current password is a bad request, not an authentication failure.
+
+    The caller reached this endpoint with a valid credential. Answering 401 would
+    tell a client that refreshes on 401 to renew a perfectly good token and try
+    again, forever, over what is really a typo in a form field.
+    """
     client = Client()
     credentials = _signup(client)["credentials"]
     headers = {"HTTP_AUTHORIZATION": f"Bearer {credentials['access_token']}"}
@@ -227,7 +233,8 @@ def test_change_requires_the_current_password(db: None) -> None:
         **headers,
     )
 
-    assert response.status_code == 401
+    assert response.status_code == 400
+    assert "current password" in response.json()["detail"]
 
 
 def test_change_updates_the_password_and_revokes_tokens(db: None) -> None:

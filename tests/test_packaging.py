@@ -177,3 +177,48 @@ def test_the_template_holds_no_unrendered_placeholder_outside_the_known_two() ->
             start = end + 2
 
     assert found <= known, found - known
+
+
+def _git_remote() -> str | None:
+    """The repository this working copy actually points at, if git can say."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:  # pragma: no cover - git absent
+        return None
+    url = result.stdout.strip()
+    return url.removesuffix(".git") if result.returncode == 0 and url else None
+
+
+def test_the_published_urls_match_the_repository_they_describe(generator: dict) -> None:
+    """Metadata URLs are the one thing nobody notices is wrong until after a release.
+
+    Pinned to the git remote rather than to a literal, so a fork that changes its
+    remote is told to change its metadata too instead of quietly publishing links
+    to somebody else's repository.
+    """
+    remote = _git_remote()
+    if remote is None or not remote.startswith("https://github.com/"):
+        pytest.skip("no https origin to compare against")
+
+    urls = generator["project"]["urls"]
+
+    assert urls["Homepage"] == remote
+    assert urls["Repository"] == remote
+    for name in ("Issues", "Changelog", "Documentation"):
+        assert urls[name].startswith(f"{remote}/"), name
+
+
+def test_every_published_url_points_at_something_that_exists(generator: dict) -> None:
+    """The paths inside the repository, which a typo would otherwise 404 forever."""
+    urls = generator["project"]["urls"]
+
+    assert (ROOT / "CHANGELOG.md").is_file(), urls["Changelog"]
+    assert (ROOT / "docs").is_dir(), urls["Documentation"]

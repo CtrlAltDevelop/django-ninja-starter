@@ -182,14 +182,20 @@ def reset(request: HttpRequest, payload: ResetIn) -> MessageOut:
 
 @router.post(
     "/change",
-    response={200: MessageOut, 400: MessageOut, 401: MessageOut},
+    response={200: MessageOut, 400: MessageOut},
     auth=api_auth,
     summary="Change the password on this account",
 )
 def change(request: HttpRequest, payload: ChangeIn) -> MessageOut:
-    """Change a password and retire every credential issued under the old one."""
+    """Change a password and retire every credential issued under the old one.
+
+    A wrong ``current_password`` is a 400, not a 401. The caller *is*
+    authenticated -- that is how they reached this endpoint at all -- and 401
+    means "authenticate and retry", which would send a client that refreshes on
+    401 round a loop renewing a perfectly good token over a typo.
+    """
     if not password_matches(request.user, payload.current_password):
-        raise AuthError("Those credentials are not valid.", status=401)
+        raise AuthError("That is not the current password for this account.", status=400)
     enforce_password_policy(payload.new_password, request.user)
     request.user.set_password(payload.new_password)
     request.user.save(update_fields=["password"])

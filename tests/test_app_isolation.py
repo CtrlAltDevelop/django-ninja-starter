@@ -1,0 +1,189 @@
+"""Every app has to work on its own, not only alongside all the others.
+
+The main suite runs with everything enabled, which is the one configuration
+nobody deploys. It would happily pass while a single-method project failed to
+boot, or booted and issued a credential its own API would not accept.
+
+Settings are read once at import, so a test process cannot un-enable an app it
+has already installed. Each scenario therefore gets a fresh interpreter, driven
+by ``isolation_driver.py``. That makes these slower than the rest of the suite
+and worth every second: this is the only place the *shipped* defaults are
+exercised, rather than the test settings that turn everything on.
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+DRIVER = ROOT / "tests" / "isolation_driver.py"
+LOCMEM_STORE = "infrastructure.auth.core.challenges.LocMemChallengeStore"
+
+BASE_ENV = {
+    "DJANGO_SETTINGS_MODULE": "config.settings.development",
+    "DJANGO_SECRET_KEY": "isolation-secret-key-long-enough-for-hs256",
+    "DJANGO_AUTH_CHALLENGE_STORE": LOCMEM_STORE,
+    "DJANGO_AUTH_SMS_BACKEND": "infrastructure.auth.core.delivery.LocMemSmsBackend",
+    "DJANGO_AUTH_EMAIL_BACKEND": "infrastructure.auth.core.delivery.LocMemEmailBackend",
+    "DJANGO_AUTH_MAGIC_LINK_BASE_URL": "https://example.test/link",
+}
+METHODS = ["password", "email_code", "sms_code", "magic_link"]
+TOKEN_MODES = ["sliding", "session", "rotation"]
+PROVIDERS = {
+    "google": {
+        "GOOGLE_OAUTH_CLIENT_ID": "id",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "secret",
+        "GOOGLE_OAUTH_REDIRECT_URI": "https://example.test/callback",
+    },
+    "apple": {
+        "APPLE_OAUTH_CLIENT_ID": "com.example.service",
+        "APPLE_OAUTH_TEAM_ID": "TEAM",
+        "APPLE_OAUTH_KEY_ID": "KEY",
+        "APPLE_OAUTH_PRIVATE_KEY": "-----BEGIN PRIVATE KEY-----",
+        "APPLE_OAUTH_REDIRECT_URI": "https://example.test/callback",
+    },
+    "microsoft": {
+        "MICROSOFT_OAUTH_CLIENT_ID": "id",
+        "MICROSOFT_OAUTH_CLIENT_SECRET": "secret",
+        "MICROSOFT_OAUTH_REDIRECT_URI": "https://example.test/callback",
+    },
+    "github": {
+        "GITHUB_OAUTH_CLIENT_ID": "id",
+        "GITHUB_OAUTH_CLIENT_SECRET": "secret",
+        "GITHUB_OAUTH_REDIRECT_URI": "https://example.test/callback",
+    },
+}
+
+
+def _run(
+    arguments: list[str], environment: dict[str, str], database: Path
+) -> subprocess.CompletedProcess[str]:
+    """Run a management command or the driver in a clean environment.
+
+    The environment is built from nothing rather than inherited: the suite's own
+    settings module configures itself through ``os.environ.setdefault``, and a
+    child that inherited it would be testing this repository's test setup instead
+    of the shipped defaults.
+    """
+    return subprocess.run(
+        [sys.executable, *arguments],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            **BASE_ENV,
+            **environment,
+            "DJANGO_DB_NAME": str(database),
+        },
+    )
+
+
+def _check(environment: dict[str, str], database: Path) -> subprocess.CompletedProcess[str]:
+    return _run(["manage.py", "check"], environment, database)
+
+
+def _drive(scenario: str, environment: dict[str, str], database: Path) -> None:
+    result = _run([str(DRIVER), scenario], environment, database)
+
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    assert result.stdout.strip().endswith("ok")
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_a_single_login_method_issues_a_usable_bearer_token(method: str, tmp_path: Path) -> None:
+    """Enable one method and nothing else: it must sign somebody in, end to end,
+    and the credential has to be one an API client can carry.
+
+    Enabling a login method used to leave the token mode at `none`, which handed
+    back a session cookie and an empty access_token -- a working login and an
+    unusable API. The driver refuses anything that does not authenticate.
+    """
+    _drive(method, {"DJANGO_AUTH_METHODS": method}, tmp_path / "db.sqlite3")
+
+
+@pytest.mark.parametrize("mode", TOKEN_MODES)
+def test_one_login_method_works_against_each_token_mode(mode: str, tmp_path: Path) -> None:
+    _drive(
+        "password",
+        {"DJANGO_AUTH_METHODS": "password", "DJANGO_AUTH_TOKEN_MODE": mode},
+        tmp_path / "db.sqlite3",
+    )
+
+
+@pytest.mark.parametrize("factor", ["totp", "sms", "email", "recovery"])
+def test_one_second_factor_installs_on_its_own(factor: str, tmp_path: Path) -> None:
+    """A project should be able to offer exactly one second factor."""
+    result = _check(
+        {"DJANGO_AUTH_METHODS": "password", "DJANGO_AUTH_SECOND_FACTORS": factor},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("provider", sorted(PROVIDERS))
+def test_one_oauth_provider_installs_with_no_first_party_methods(
+    provider: str, tmp_path: Path
+) -> None:
+    result = _check(
+        {"DJANGO_OAUTH_PROVIDERS": provider, **PROVIDERS[provider]},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_project_with_nothing_enabled_still_starts(tmp_path: Path) -> None:
+    """The starter has to be usable before anybody turns authentication on."""
+    result = _check({}, tmp_path / "db.sqlite3")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "System check identified no issues" in result.stdout
+
+
+def test_nothing_enabled_installs_no_authentication_tables(tmp_path: Path) -> None:
+    """An unused feature should not cost a migration."""
+    result = _run(["manage.py", "migrate", "--plan"], {}, tmp_path / "db.sqlite3")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "auth_core" not in result.stdout
+    assert "oauth_core" not in result.stdout
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_a_single_method_installs_only_what_it_needs(method: str, tmp_path: Path) -> None:
+    """Enabling one method must not drag the other three into the schema."""
+    result = _run(
+        ["manage.py", "migrate", "--plan"],
+        {"DJANGO_AUTH_METHODS": method},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    for other in METHODS:
+        if other != method:
+            assert f"auth_{other}" not in result.stdout, other
+
+
+def test_an_unknown_method_is_refused_at_startup(tmp_path: Path) -> None:
+    """Better than silently ignoring a typo and serving no route for it."""
+    result = _check({"DJANGO_AUTH_METHODS": "passwrod"}, tmp_path / "db.sqlite3")
+
+    assert result.returncode != 0
+    assert "Unknown DJANGO_AUTH_METHODS: passwrod" in result.stderr
+
+
+def test_a_token_mode_can_be_chosen_without_any_oauth_provider(tmp_path: Path) -> None:
+    """DJANGO_OAUTH_MODE names credential tables, not a dependency on social login."""
+    result = _check(
+        {"DJANGO_AUTH_METHODS": "password", "DJANGO_AUTH_TOKEN_MODE": "session"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr

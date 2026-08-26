@@ -147,7 +147,9 @@ single-worker development only — it does not survive across processes, and `ch
 
 `DJANGO_AUTH_TOKEN_MODE` decides which OAuth storage mode issues the credential, so password,
 passwordless, and social logins all produce the same records and share one revocation path. It
-defaults to `DJANGO_OAUTH_MODE` (`rotation` when that is `all`); `none` uses a Django session.
+follows `DJANGO_OAUTH_MODE` when that names one, and is otherwise `rotation` as soon as anything
+signs users in -- so enabling a login method gets you a real bearer token, not a session cookie.
+Ask for `none` explicitly to use a Django session instead.
 Changing or resetting a password revokes every live credential for that account.
 
 SMS and email transports are swapped by dotted path (`DJANGO_AUTH_SMS_BACKEND`,

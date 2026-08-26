@@ -49,9 +49,10 @@ if unknown_oauth_providers:
     raise ImproperlyConfigured(
         f"Unknown DJANGO_OAUTH_PROVIDERS: {', '.join(sorted(unknown_oauth_providers))}"
     )
+OAUTH_CORE_APP = "infrastructure.oauth.core.apps.OAuthCoreConfig"
 OAUTH_INSTALLED_APPS = []
 if OAUTH_MODE != "none" or OAUTH_PROVIDERS:
-    OAUTH_INSTALLED_APPS.append("infrastructure.oauth.core.apps.OAuthCoreConfig")
+    OAUTH_INSTALLED_APPS.append(OAUTH_CORE_APP)
 OAUTH_INSTALLED_APPS.extend(OAUTH_MODE_APPS[OAUTH_MODE])
 OAUTH_INSTALLED_APPS.extend(OAUTH_PROVIDER_APPS[provider] for provider in OAUTH_PROVIDERS)
 
@@ -154,13 +155,33 @@ if AUTH_SECOND_FACTORS:
     )
 
 AUTH_TOKEN_MODES = {"none", "sliding", "session", "rotation"}
-AUTH_TOKEN_MODE = os.getenv("DJANGO_AUTH_TOKEN_MODE", "").lower() or (
-    "rotation" if OAUTH_MODE == "all" else OAUTH_MODE
-)
+AUTH_DEFAULT_TOKEN_MODE = "rotation"
+_requested_token_mode = os.getenv("DJANGO_AUTH_TOKEN_MODE", "").lower()
+if _requested_token_mode:
+    AUTH_TOKEN_MODE = _requested_token_mode
+elif OAUTH_MODE in {"sliding", "session", "rotation"}:
+    AUTH_TOKEN_MODE = OAUTH_MODE
+elif OAUTH_MODE == "all" or AUTH_METHODS or AUTH_SECOND_FACTORS or OAUTH_PROVIDERS:
+    # Something here signs people in, so they need a credential an API client can
+    # actually carry. Falling through to `none` would hand out a session cookie
+    # and an empty access token, which is a working login and an unusable API.
+    AUTH_TOKEN_MODE = AUTH_DEFAULT_TOKEN_MODE
+else:
+    AUTH_TOKEN_MODE = "none"
 if AUTH_TOKEN_MODE not in AUTH_TOKEN_MODES:
     raise ImproperlyConfigured(
         "DJANGO_AUTH_TOKEN_MODE must be one of: none, sliding, session, rotation"
     )
+# The active mode owns the credential tables, so its app has to be installed --
+# whether it was named through DJANGO_OAUTH_MODE or arrived at by the default
+# above. Without this, enabling only a login method would issue tokens into a
+# table that does not exist.
+if AUTH_TOKEN_MODE != "none":
+    if OAUTH_CORE_APP not in OAUTH_INSTALLED_APPS:
+        OAUTH_INSTALLED_APPS.insert(0, OAUTH_CORE_APP)
+    for _token_app in OAUTH_MODE_APPS[AUTH_TOKEN_MODE]:
+        if _token_app not in OAUTH_INSTALLED_APPS:
+            OAUTH_INSTALLED_APPS.append(_token_app)
 # Refresh, revoke and session management for whichever mode is active. Always at
 # the same prefix, so a client does not have to know which mode it is talking to.
 AUTH_TOKEN_ROUTERS = (

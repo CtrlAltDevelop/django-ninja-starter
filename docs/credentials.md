@@ -53,8 +53,23 @@ Two consequences worth knowing:
 
 ## Choosing a mode
 
-`DJANGO_AUTH_TOKEN_MODE` picks one. It defaults to `DJANGO_OAUTH_MODE`, or to
-`rotation` when that is `all`.
+`DJANGO_AUTH_TOKEN_MODE` picks one. Left unset, the default is worked out from
+what else is enabled:
+
+1. `DJANGO_OAUTH_MODE`, when it names a single mode.
+2. Otherwise `rotation`, as soon as *anything* signs users in -- a login method, a
+   second factor, or a social provider.
+3. `none` only when nothing does.
+
+The second rule is the one worth knowing. Enabling a login method and nothing
+else used to leave this at `none`, which handed back a session cookie and an
+empty `access_token`: a working login and an unusable API. A project that wants
+Django sessions has to ask for them, because on an API that is the surprising
+choice rather than the safe one.
+
+Whichever mode is active, its app is installed for you. `DJANGO_OAUTH_MODE`
+remains the way to install *several* modes' tables at once, which is what a
+project migrating between them needs.
 
 | Mode | Refresh means | Reach for it when |
 | --- | --- | --- |

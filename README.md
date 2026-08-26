@@ -268,9 +268,14 @@ step one; `python manage.py check` warns when it is configured.
 
 Authentication does not invent its own token format. `DJANGO_AUTH_TOKEN_MODE` picks which of the
 storage modes above issues the credential, so a password login and a social login produce the
-same records and share one revocation story. It defaults to `DJANGO_OAUTH_MODE` (and to
-`rotation` when that is `all`); `none` signs in with a normal Django session instead. `check`
-reports a mode whose app is not installed.
+same records and share one revocation story. Every method ends by minting a signed JWT, and a
+token from any one of them is accepted by every endpoint in the project.
+
+Left unset, the mode follows `DJANGO_OAUTH_MODE` when that names one; otherwise it is `rotation`
+as soon as anything signs users in, and `none` only when nothing does. Enabling just a login
+method therefore gets you a real bearer token rather than a session cookie and an empty
+`access_token`. Ask for `none` explicitly to sign in with a Django session instead. The active
+mode's app is installed for you, and `check` reports a mode whose app is missing.
 
 Changing a password or completing a reset revokes every live credential for that account across
 all three mode tables.
