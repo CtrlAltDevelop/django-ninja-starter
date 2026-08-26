@@ -7,6 +7,7 @@ regenerating, and the suite says so.
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
@@ -15,6 +16,7 @@ from django.core.management.base import CommandError
 
 from infrastructure.common.management.commands.authdocs import (
     SECTIONS,
+    _routes_table,
     documented_apps,
 )
 
@@ -134,3 +136,32 @@ def test_check_mode_reports_drift_without_writing(tmp_path: Path) -> None:
         call_command("authdocs", "--check", docs_root=tmp_path)
 
     assert "stale nonsense" in page.read_text(encoding="utf-8")
+
+
+class _Api:
+    """Stands in for one mounted API version, schema and all."""
+
+    def __init__(self, version: str) -> None:
+        self.version = version
+
+    def get_openapi_schema(self) -> dict:
+        path = f"/api/{self.version}/auth/password/login"
+        return {"paths": {path: {"post": {"summary": "Sign in with a password"}}}}
+
+
+def test_a_second_api_version_does_not_document_every_route_twice() -> None:
+    """The shared routers are mounted into every version the project declares.
+
+    A project that runs `startapi --api-version v2` publishes each auth, OAuth and
+    accounts operation under both versions. They are the same route -- same verb,
+    same version-relative path, same summary -- and listing it once per version
+    put a duplicate row into every table on every page.
+    """
+    with patch("config.api.apis", {"v1": _Api("v1")}):
+        one_version = _routes_table("/auth/password")
+
+    with patch("config.api.apis", {"v1": _Api("v1"), "v2": _Api("v2")}):
+        two_versions = _routes_table("/auth/password")
+
+    assert "| `POST` | `/api/v1/auth/password/login` |" in one_version
+    assert two_versions == one_version

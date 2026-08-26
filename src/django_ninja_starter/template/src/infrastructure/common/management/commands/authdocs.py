@@ -96,21 +96,27 @@ def _documented_apps(root: Path) -> list[DocumentedApp]:
     return sorted(found, key=lambda app: app.path.as_posix())
 
 
-def _operations() -> dict[str, list[tuple[str, str, bool, str]]]:
+def _operations() -> dict[str, set[tuple[str, str, bool, str]]]:
     """Return ``(verb, path, needs auth, summary)`` grouped by URL prefix.
 
     Read from the OpenAPI schema rather than from the routers, so what is
     documented is what the API actually publishes.
+
+    The infrastructure routers are mounted into *every* API version, so a project
+    that adds a second version publishes each of these operations more than once
+    -- the same verb, the same version-relative path, the same summary. That is
+    one route documented once, not two, which is why the entries are a set: a
+    list gave each row back once per version the project happened to declare.
     """
     from config.api import apis
 
-    grouped: dict[str, list[tuple[str, str, bool, str]]] = {}
+    grouped: dict[str, set[tuple[str, str, bool, str]]] = {}
     for version, api in apis.items():
         schema = api.get_openapi_schema()
         for path, operations in schema["paths"].items():
             relative = path.removeprefix(f"/api/{version}")
             for verb, operation in operations.items():
-                grouped.setdefault(relative, []).append(
+                grouped.setdefault(relative, set()).add(
                     (
                         verb.upper(),
                         relative,
