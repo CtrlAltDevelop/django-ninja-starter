@@ -13,6 +13,9 @@ check:
 test:
 	pytest --cov
 
+docs:
+	DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py authdocs
+
 run:
 	python3 manage.py runserver
 

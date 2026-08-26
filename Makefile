@@ -1,4 +1,4 @@
-.PHONY: install check test package run migrate migrations superuser
+.PHONY: install check test docs package run migrate migrations superuser
 
 install:
 	python3 -m pip install -e '.[dev]'
@@ -12,6 +12,9 @@ check:
 
 test:
 	pytest --cov
+
+docs:
+	DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py authdocs
 
 package:
 	python3 -m build

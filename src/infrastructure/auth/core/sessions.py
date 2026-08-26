@@ -21,6 +21,7 @@ from django.contrib.auth import logout as django_logout
 from django.db import transaction
 from django.http import HttpRequest
 from django.utils import timezone
+from ninja.security import HttpBearer
 
 from infrastructure.common.app_labels import app_installed
 from infrastructure.oauth.core import jwt_tokens
@@ -44,6 +45,7 @@ __all__ = [
     "BEARER",
     "TOKEN_MODE_APPS",
     "IssuedCredentials",
+    "JwtBearer",
     "api_auth",
     "bearer_token",
     "client_ip",
@@ -380,9 +382,37 @@ def resolve_request_user(request: HttpRequest) -> Any | None:
     return user if user is not None and user.is_active else None
 
 
-def api_auth(request: HttpRequest) -> Any | None:
-    """Django Ninja ``auth=`` callable for endpoints that need a signed-in user."""
-    user = resolve_request_user(request)
-    if user is not None:
-        request.user = user
-    return user
+class JwtBearer(HttpBearer):
+    """The ``auth=`` for endpoints that need a signed-in caller.
+
+    A bearer *class* rather than a bare callable, because that is what puts a
+    security scheme into the OpenAPI document. Without it the schema says every
+    endpoint is public, Swagger's Authorize button has nothing to fill in, and
+    generated clients send no credential at all.
+
+    The ``none`` token mode issues no bearer token, so it is answered from the
+    Django session before the header is consulted -- otherwise every protected
+    endpoint would refuse a perfectly good session for want of a header it was
+    never going to send.
+    """
+
+    openapi_name = "JWT"
+    openapi_description = "A signed access token, as returned by any login endpoint."
+
+    def __call__(self, request: HttpRequest) -> Any | None:
+        if settings.AUTH_TOKEN_MODE == "none":
+            return self._adopt(request, resolve_request_user(request))
+        return super().__call__(request)
+
+    def authenticate(self, request: HttpRequest, token: str) -> Any | None:
+        return self._adopt(request, resolve_request_user(request))
+
+    @staticmethod
+    def _adopt(request: HttpRequest, user: Any | None) -> Any | None:
+        """Put the resolved account on the request, so a view can read request.user."""
+        if user is not None:
+            request.user = user
+        return user
+
+
+api_auth = JwtBearer()

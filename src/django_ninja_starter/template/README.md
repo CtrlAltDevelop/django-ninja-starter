@@ -2,6 +2,13 @@
 
 A production-oriented API built with Django and Django Ninja.
 
+Authentication is included and opt-in: login methods, second factors, social providers
+and token modes are each a separate app that installs nothing until you name it. Every
+login ends by minting a signed JWT.
+
+**[Read the documentation](docs/README.md)** — one page per app, covering its routes,
+models, admin, setup and usage.
+
 ## Quick start
 
 ```bash
@@ -148,14 +155,27 @@ SMS and email transports are swapped by dotted path (`DJANGO_AUTH_SMS_BACKEND`,
 before deploying. `magic_link` additionally requires `DJANGO_AUTH_MAGIC_LINK_BASE_URL`.
 
 Sign-in endpoints answer identically whether or not an account exists, mask destinations in
-responses, and record a hashed audit trail in `AuthEvent`. Run `python manage.py check` to catch
-an unusable configuration before deployment.
+responses, and record a hashed audit trail in `AuthEvent`.
+
+Each app declares the settings it cannot work without, so `python manage.py check` names
+exactly what the apps you enabled still need:
+
+```
+ERRORS:
+?: (auth_magic_link.AUTH_MAGIC_LINK_BASE_URL) Magic-link login needs
+   AUTH_MAGIC_LINK_BASE_URL: the page that reads the token out of the URL
+   HINT: Set DJANGO_AUTH_MAGIC_LINK_BASE_URL.
+```
+
+Each method, factor, provider and token mode has its own page under [`docs/`](docs/README.md).
+Start with [credentials and token modes](docs/credentials.md).
 
 ## Commands
 
 ```bash
 make check       # lint, format, types, Django checks, and migration drift
 make test        # tests with branch coverage
+make docs        # regenerate the reference sections of docs/
 make migrations  # create migrations
 make migrate     # apply migrations
 make superuser   # create an admin user

@@ -7,6 +7,13 @@ It includes environment-specific settings, secure production defaults, health ch
 OpenAPI documentation, tests, typing, linting, coverage, CI, and a feature-first source
 layout.
 
+Authentication is included and opt-in: four login methods, four second factors, four
+social providers and three token modes, each a separate app that installs nothing until
+you name it. Every login ends by minting a signed JWT.
+
+**[Read the documentation](docs/README.md)** — one page per app, covering its routes,
+models, admin, setup and usage.
+
 ## Requirements
 
 - Python 3.12 or newer
@@ -287,6 +294,10 @@ Phone numbers, verified addresses, enrolled factors, and a hashed audit trail (`
 stored under `infrastructure/auth/core`; identifiers in the audit log are digests, not a second
 user table.
 
+Each method, factor, provider and token mode has its own page under [`docs/`](docs/README.md)
+covering its routes, models, admin, setup and usage. Start with
+[credentials and token modes](docs/credentials.md).
+
 ## Included endpoints
 
 - `GET /api/v1/health/live` — confirms that the web process is serving requests
@@ -345,6 +356,7 @@ make that appropriate for your deployment.
 ```bash
 make check       # lint, formatting, types, Django checks, and migration drift
 make test        # tests with branch coverage (minimum 90%)
+make docs        # regenerate the reference sections of docs/
 make package     # build and validate wheel and source distribution
 make migrations  # create migrations
 make migrate     # apply migrations
