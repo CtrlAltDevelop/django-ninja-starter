@@ -61,6 +61,12 @@ src = ["src"]
 select = ["E", "F", "I", "UP", "B", "SIM", "DJ"]
 ignore = ["DJ001"]
 
+# Migrations are written by `makemigrations`, not by hand. Their long lines are
+# Django's own field help_text, reproduced verbatim; rewrapping them would only
+# be undone the next time the file is regenerated.
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["apps", "config", "infrastructure"]
 

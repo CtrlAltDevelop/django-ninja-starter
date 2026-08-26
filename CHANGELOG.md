@@ -6,6 +6,31 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-26
+
+### Added
+
+- **The project owns its user model.** An `accounts` app ships installed and
+  migrated from the first migration, because every table here points at
+  `AUTH_USER_MODEL` and swapping that in later is a migration nobody wants. It
+  brings a unique email, a profile the login flows fill in, and a `/users`
+  router mounted ahead of the auth ones. `DJANGO_AUTH_USER_MODEL` still lets a
+  project substitute its own model.
+- The login paths now feed that profile what they learn. Email code and magic
+  link confirm the address they just proved; OAuth fills in display name and
+  avatar where the person has not already set them -- filling blanks rather
+  than overwriting an answer they gave.
+- `examples/` -- a walkthrough of the assembled project, and a feature app
+  showing what a versioned router looks like beside it.
+- Isolation tests that boot the project with one app enabled at a time, in a
+  fresh interpreter, and sign somebody in. The main suite runs with everything
+  on, which is the one configuration nobody deploys.
+- Interoperability tests proving a credential from any method is accepted by
+  every protected endpoint, that ending one session closes all of them, and that
+  a second factor enrolled through one method gates the others too.
+- The published project URLs are pinned to the git remote, so a fork is told to
+  update its metadata rather than quietly publishing links to another repository.
+
 ### Changed
 
 - **The token mode now defaults to issuing tokens.** Left unset,
@@ -20,17 +45,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is wrong. The caller is authenticated -- that is how they reached the endpoint
   -- and 401 would send a client that refreshes on 401 round a loop renewing a
   perfectly good token over a typo.
-
-### Added
-
-- Isolation tests that boot the project with one app enabled at a time, in a
-  fresh interpreter, and sign somebody in. The main suite runs with everything
-  on, which is the one configuration nobody deploys.
-- Interoperability tests proving a credential from any method is accepted by
-  every protected endpoint, that ending one session closes all of them, and that
-  a second factor enrolled through one method gates the others too.
-- The published project URLs are pinned to the git remote, so a fork is told to
-  update its metadata rather than quietly publishing links to another repository.
+- A challenge subject that is not a usable primary key now reads as "no such
+  account" rather than raising. Subjects come out of the challenge store as
+  strings while the primary key is a UUID, and an unguarded `filter(pk=...)`
+  crashes on the mismatch instead of reporting a failed lookup.
+- The distribution version is single-sourced from the package, so `--version`
+  and the published metadata cannot drift apart.
 
 ## [0.2.0] - 2026-08-25
 

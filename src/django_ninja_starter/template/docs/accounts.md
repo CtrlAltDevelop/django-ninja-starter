@@ -210,7 +210,7 @@ it is the address on the account:
 ```python
 from infrastructure.accounts.profiles import confirm_email
 
-confirm_email(user, "zoe@example.com")   # -> True the first time, False after
+confirm_email(user, "zoe@example.com")  # -> True the first time, False after
 ```
 
 Reaching a *different* address is a fact about that address, not this one, which
@@ -223,7 +223,7 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 User.objects.create_user("zoe", email="zoe@example.com", password="…")
-User.objects.create_user("zoe")           # passwordless: password set unusable
+User.objects.create_user("zoe")  # passwordless: password set unusable
 User.objects.create_superuser("root", email="root@example.com", password="…")
 ```
 

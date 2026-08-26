@@ -6,6 +6,7 @@ it into the wheel, or a runtime dependency added to the reference project and
 forgotten in the template that ships to users.
 """
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -48,9 +49,19 @@ def template() -> dict:
     return _pyproject(TEMPLATE / "pyproject.toml")
 
 
-def test_the_module_version_matches_the_distribution_version(generator: dict) -> None:
-    """Two places state the version, and a release with them disagreeing is a mess."""
-    assert django_ninja_starter.__version__ == generator["project"]["version"]
+def test_the_distribution_version_comes_from_the_module(generator: dict) -> None:
+    """One place states the version, and the build is pointed at it.
+
+    A static ``version`` here would be a second statement of the same fact, and a
+    release with the two disagreeing reports one number to PyPI and another to
+    ``--version``.
+    """
+    assert "version" not in generator["project"]
+    assert "version" in generator["project"]["dynamic"]
+    assert generator["tool"]["setuptools"]["dynamic"]["version"] == {
+        "attr": "django_ninja_starter.__version__"
+    }
+    assert re.fullmatch(r"\d+\.\d+\.\d+", django_ninja_starter.__version__)
 
 
 def test_the_generator_itself_needs_nothing_installed(generator: dict) -> None:
