@@ -39,6 +39,7 @@ def build_apis() -> dict[str, NinjaAPI]:
                 tags=[route["tag"]],
             )
         for route in (
+            *settings.ACCOUNT_ROUTERS,
             *settings.OAUTH_PROVIDER_ROUTERS,
             *settings.AUTH_METHOD_ROUTERS,
             *settings.AUTH_TOKEN_ROUTERS,

@@ -1,5 +1,8 @@
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 
 from infrastructure.auth.core.identities import (
     IdentityError,
@@ -9,6 +12,7 @@ from infrastructure.auth.core.identities import (
     normalize_email,
     normalize_phone,
     user_by_email,
+    user_by_id,
     user_by_login,
     user_by_phone,
 )
@@ -50,13 +54,43 @@ def test_numbers_outside_e164_are_refused(raw: str) -> None:
 
 
 def test_an_email_shared_by_two_accounts_is_ambiguous(db: None) -> None:
-    """Stock Django lets two users share an address; picking one would be a guess."""
+    """The guard for a project that swapped in a model without a unique email.
+
+    The shipped model will not store the collision, so it is staged on the
+    queryset instead. Picking one of two matches would hand an attacker whichever
+    sorts first, which is why the branch exists at all.
+    """
+    user_model = get_user_model()
+    first = user_model._default_manager.create_user(username="a", email="a@example.com")
+    second = user_model._default_manager.create_user(username="b", email="b@example.com")
+
+    with patch.object(user_model._default_manager, "filter") as lookup:
+        lookup.return_value.__getitem__.return_value = [first, second]
+        with pytest.raises(IdentityError, match="More than one account"):
+            user_by_email("shared@example.com")
+
+
+def test_the_shipped_model_will_not_store_a_shared_address(db: None) -> None:
+    """Which is what makes the ambiguity above unreachable in practice."""
     user_model = get_user_model()
     user_model._default_manager.create_user(username="a", email="shared@example.com")
-    user_model._default_manager.create_user(username="b", email="shared@example.com")
 
-    with pytest.raises(IdentityError, match="More than one account"):
-        user_by_email("shared@example.com")
+    with pytest.raises(IntegrityError):
+        user_model._default_manager.create_user(username="b", email="shared@example.com")
+
+
+@pytest.mark.parametrize("subject", ["", "not-a-key", "999999"])
+def test_a_subject_that_is_not_a_key_is_no_account_rather_than_a_crash(
+    db: None, subject: str
+) -> None:
+    """Subjects come out of the challenge store as strings; the key may be a UUID."""
+    assert user_by_id(subject) is None
+
+
+def test_a_subject_that_is_a_key_finds_its_account(db: None) -> None:
+    user = get_user_model()._default_manager.create_user(username="zoe")
+
+    assert user_by_id(str(user.pk)) == user
 
 
 def test_email_lookup_ignores_case(db: None) -> None:

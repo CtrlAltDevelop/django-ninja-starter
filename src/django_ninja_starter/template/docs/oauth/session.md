@@ -19,7 +19,7 @@ _This app publishes no routes of its own._
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient`, nullable |
 | `session_key_hash` | Char | unique, not editable |
 | `device_id` | Char |  |
@@ -39,7 +39,7 @@ _This app publishes no routes of its own._
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient`, nullable |
 | `token_hash` | Char | unique, not editable |
 | `scopes` | JSON |  |
@@ -60,7 +60,7 @@ _This app publishes no routes of its own._
 | --- | --- | --- |
 | `id` | BigAuto | primary key |
 | `session` | ForeignKey | → `oauth_session.OAuthSession` |
-| `revoked_by` | ForeignKey | → `auth.User`, nullable |
+| `revoked_by` | ForeignKey | → `accounts.User`, nullable |
 | `reason` | Char |  |
 | `access_tokens_revoked` | PositiveInteger |  |
 | `ip_address` | GenericIPAddress | nullable |

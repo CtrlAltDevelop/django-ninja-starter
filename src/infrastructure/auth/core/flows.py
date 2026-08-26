@@ -10,11 +10,11 @@ from typing import Any
 
 from django.apps import apps
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.http import HttpRequest
 
 from infrastructure.auth.core.challenges import Challenge, get_challenge_store
 from infrastructure.auth.core.errors import AuthError
+from infrastructure.auth.core.identities import user_by_id
 from infrastructure.auth.core.models import AuthEvent, AuthEventType
 from infrastructure.auth.core.sessions import (
     IssuedCredentials,
@@ -122,7 +122,7 @@ def resolve_pending_login(ticket: str) -> tuple[Any, dict[str, Any]]:
     """
     store = get_challenge_store()
     challenge = store.read(ticket, purpose=PENDING_PURPOSE)
-    user = get_user_model()._default_manager.filter(pk=challenge.subject).first()
+    user = user_by_id(challenge.subject)
     if user is None or not user.is_active:
         store.discard(ticket)
         raise AuthError("This sign-in is no longer valid. Start again.", status=400)
@@ -201,11 +201,7 @@ def decoy_challenge(purpose: str, *, channel: str = "", destination: str = "") -
 
 def user_from_challenge(challenge: Any) -> Any:
     """Resolve the account a settled challenge was issued for."""
-    user = (
-        get_user_model()._default_manager.filter(pk=challenge.subject).first()
-        if challenge.subject
-        else None
-    )
+    user = user_by_id(challenge.subject)
     if user is None:
         raise AuthError("That code is not valid.", status=400)
     return user

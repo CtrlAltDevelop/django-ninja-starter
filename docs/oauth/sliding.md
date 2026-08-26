@@ -19,7 +19,7 @@ _This app publishes no routes of its own._
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient`, nullable |
 | `token_hash` | Char | unique, not editable |
 | `scopes` | JSON |  |

@@ -97,7 +97,7 @@ def test_a_username_that_cannot_be_allocated_is_an_error(db: None) -> None:
     """Every candidate collides, so the caller is told rather than looping forever."""
     with (
         patch("infrastructure.auth.core.identities.secrets.token_hex", return_value="deadbeef"),
-        patch("django.contrib.auth.models.UserManager.filter") as manager_filter,
+        patch("infrastructure.accounts.managers.UserManager.filter") as manager_filter,
     ):
         manager_filter.return_value.exists.return_value = True
         with pytest.raises(IdentityError, match="Could not allocate"):

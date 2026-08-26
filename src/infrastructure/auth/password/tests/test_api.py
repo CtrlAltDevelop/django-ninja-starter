@@ -1,7 +1,10 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 
 from infrastructure.auth.core import delivery
+from infrastructure.auth.core.identities import IdentityError
 from infrastructure.auth.core.models import AuthEvent
 from infrastructure.oauth.rotation.models import RotatingAccessToken, TokenFamily
 
@@ -285,33 +288,39 @@ def test_signup_refuses_a_malformed_email(db: None) -> None:
     assert response.status_code == 400
 
 
-def test_login_treats_an_ambiguous_email_as_a_failed_login(db: None) -> None:
-    """Two accounts share the address, so no single one can be signed in."""
-    user_model = get_user_model()
-    for name in ("a", "b"):
-        user_model._default_manager.create_user(
-            username=name, email="shared@example.com", password=PASSWORD
-        )
+AMBIGUOUS = IdentityError("More than one account uses this email address.")
 
-    response = Client().post(
-        LOGIN,
-        {"identifier": "shared@example.com", "password": PASSWORD},
-        content_type="application/json",
+
+def test_login_treats_an_ambiguous_email_as_a_failed_login(db: None) -> None:
+    """No single account can be signed in, so none is.
+
+    The shipped model makes the address unique, which is why the ambiguity is
+    raised from the lookup rather than stored. The branch stays reachable for a
+    project that swapped in a model without that constraint, and this is what it
+    has to do there: refuse, rather than pick whichever account sorts first.
+    """
+    get_user_model()._default_manager.create_user(
+        username="zoe", email="zoe@example.com", password=PASSWORD
     )
+
+    with patch("infrastructure.auth.core.identities.user_by_email", side_effect=AMBIGUOUS):
+        response = Client().post(
+            LOGIN,
+            {"identifier": "shared@example.com", "password": PASSWORD},
+            content_type="application/json",
+        )
 
     assert response.status_code == 401
 
 
 def test_forgot_treats_an_ambiguous_email_like_an_unknown_one(db: None) -> None:
-    user_model = get_user_model()
-    for name in ("a", "b"):
-        user_model._default_manager.create_user(name, email="shared@example.com")
-
-    response = Client().post(
-        "/api/v1/auth/password/forgot",
-        {"email": "shared@example.com"},
-        content_type="application/json",
-    )
+    """Same shape as an address with no account, and no code sent to either."""
+    with patch("infrastructure.auth.core.identities.user_by_email", side_effect=AMBIGUOUS):
+        response = Client().post(
+            "/api/v1/auth/password/forgot",
+            {"email": "shared@example.com"},
+            content_type="application/json",
+        )
 
     assert response.status_code == 200
     assert response.json()["ticket"]

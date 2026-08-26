@@ -15,6 +15,21 @@ ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if host.strip()
 ]
 
+# The account model everything else resolves to. Swapping it is supported --
+# AUTH_USER_MODEL is what every table references -- but doing so means taking
+# over the profile relation the login flows enrich.
+ACCOUNTS_APP = "infrastructure.accounts.apps.AccountsConfig"
+AUTH_USER_MODEL = os.getenv("DJANGO_AUTH_USER_MODEL", "accounts.User")
+ACCOUNTS_DEFAULT_LOCALE = os.getenv("DJANGO_ACCOUNTS_DEFAULT_LOCALE", "en-us")
+ACCOUNTS_DEFAULT_TIMEZONE = os.getenv("DJANGO_ACCOUNTS_DEFAULT_TIMEZONE", "UTC")
+ACCOUNT_ROUTERS = [
+    {
+        "prefix": "/users",
+        "router": "infrastructure.accounts.api.router",
+        "tag": "Users",
+    }
+]
+
 OAUTH_MODE = os.getenv("DJANGO_OAUTH_MODE", "none").lower()
 OAUTH_MODE_APPS = {
     "none": [],
@@ -253,6 +268,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Always installed, and always first among this project's own apps. Every
+    # other table here points at AUTH_USER_MODEL, and Django's advice is to own
+    # that model from the first migration rather than swap it in later.
+    ACCOUNTS_APP,
     *registered_app_configs(BASE_DIR / "src" / "config" / "api_registry.json"),
     *OAUTH_INSTALLED_APPS,
     *AUTH_INSTALLED_APPS,

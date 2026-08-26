@@ -32,7 +32,7 @@ Audit trail for sign-in activity.
 | `id` | BigAuto | primary key |
 | `event_type` | Char |  |
 | `method` | Char |  |
-| `user` | ForeignKey | → `auth.User`, nullable |
+| `user` | ForeignKey | → `accounts.User`, nullable |
 | `identifier_hash` | Char |  |
 | `ip_address` | GenericIPAddress | nullable |
 | `user_agent` | Text |  |
@@ -46,7 +46,7 @@ A number an account has proven it controls.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `number` | Char | unique |
 | `is_verified` | Boolean |  |
 | `is_primary` | Boolean |  |

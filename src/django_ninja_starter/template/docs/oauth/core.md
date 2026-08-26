@@ -19,7 +19,7 @@ _This app publishes no routes of its own._
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
 | `event_type` | Char |  |
-| `user` | ForeignKey | → `auth.User`, nullable |
+| `user` | ForeignKey | → `accounts.User`, nullable |
 | `client` | ForeignKey | → `oauth_core.OAuthClient`, nullable |
 | `token_fingerprint` | Char |  |
 | `ip_address` | GenericIPAddress | nullable |
@@ -33,7 +33,7 @@ _This app publishes no routes of its own._
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
 | `code_hash` | Char | unique, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient` |
 | `redirect_uri` | Text |  |
 | `scopes` | JSON |  |
@@ -70,7 +70,7 @@ _This app publishes no routes of its own._
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient` |
 | `granted_at` | DateTime | not editable |
 | `updated_at` | DateTime | not editable |
@@ -98,7 +98,7 @@ Single-use state for an outbound social authorization-code flow.
 | `binding_hash` | Char | not editable |
 | `nonce_hash` | Char | not editable |
 | `code_verifier_encrypted` | Text | not editable |
-| `user` | ForeignKey | → `auth.User`, nullable |
+| `user` | ForeignKey | → `accounts.User`, nullable |
 | `redirect_uri` | Char |  |
 | `next_url` | Char |  |
 | `requested_scopes` | JSON |  |

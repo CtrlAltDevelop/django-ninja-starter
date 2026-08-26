@@ -39,7 +39,7 @@ Active when `DJANGO_AUTH_TOKEN_MODE=rotation`, and the default when
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient`, nullable |
 | `token_hash` | Char | unique, not editable |
 | `scopes` | JSON |  |
@@ -60,7 +60,7 @@ Active when `DJANGO_AUTH_TOKEN_MODE=rotation`, and the default when
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient`, nullable |
 | `token_hash` | Char | unique, not editable |
 | `scopes` | JSON |  |
@@ -85,7 +85,7 @@ Active when `DJANGO_AUTH_TOKEN_MODE=rotation`, and the default when
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `client` | ForeignKey | → `oauth_core.OAuthClient`, nullable |
 | `scopes` | JSON |  |
 | `audience` | Char |  |

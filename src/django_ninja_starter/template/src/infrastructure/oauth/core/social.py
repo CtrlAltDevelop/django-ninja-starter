@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.module_loading import import_string
 
+from infrastructure.accounts.profiles import confirm_email, enrich_profile
 from infrastructure.oauth.core.crypto import decrypt_secret, encrypt_secret
 from infrastructure.oauth.core.models import AbstractSocialAccount, SocialLoginAttempt
 from infrastructure.oauth.core.tokens import hash_token
@@ -295,6 +296,16 @@ def _resolve_account(
         account.access_token_encrypted = ""
         account.refresh_token_encrypted = ""
     account.save()
+    # What the provider knows about the person belongs on the account, not only
+    # on the link row -- but only where the person has not said otherwise, which
+    # is why this fills blanks rather than assigning.
+    enrich_profile(
+        account.user,
+        display_name=profile.display_name,
+        avatar_url=profile.avatar_url,
+    )
+    if profile.email_verified:
+        confirm_email(account.user, profile.email)
     return account
 
 

@@ -8,6 +8,8 @@ themselves — see [keeping these pages honest](#keeping-these-pages-honest).
 
 ## Start here
 
+- **[Accounts](accounts.md)** — the user model every login resolves to, and the
+  profile attached to it. Always installed.
 - **[Credentials and token modes](credentials.md)** — what every login hands back,
   and how to choose between the three token modes. Read this first; every method
   below ends by minting one of these.
@@ -53,8 +55,9 @@ same endpoints at `/auth/token`, so clients do not change with the mode.
 
 ## Shared apps
 
-Installed automatically, no routes of their own.
+Installed automatically.
 
+- [`accounts`](accounts.md) — the user model and its profile, plus `/users/me`.
 - [`auth_core`](auth/core.md) — shared identity records, the challenge store,
   delivery backends, rate limits, and the audit trail.
 - [`oauth_core`](oauth/core.md) — clients, scopes, consents, social accounts, and

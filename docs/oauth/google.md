@@ -19,7 +19,7 @@ Authorization-code sign-in against Google, with PKCE and an ID token.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `subject` | Char | unique |
 | `email` | Char |  |
 | `email_verified` | Boolean |  |

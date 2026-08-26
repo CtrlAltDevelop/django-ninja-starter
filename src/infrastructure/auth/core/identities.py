@@ -41,13 +41,31 @@ def normalize_phone(raw: str) -> str:
     return value
 
 
+def user_by_id(subject: str) -> Any | None:
+    """Return the account this primary key names, or ``None`` if it names none.
+
+    The subject arrives from the challenge store as a string, and the primary key
+    it has to become depends on the user model: a UUID here, an integer under
+    Django's stock model, whatever a project chose. A value that cannot be one is
+    "no such account", not a crash -- and an unguarded ``filter(pk=...)`` gives a
+    crash, because Django validates the key before it queries.
+    """
+    if not subject:
+        return None
+    try:
+        return get_user_model()._default_manager.filter(pk=subject).first()
+    except (ValidationError, ValueError, TypeError):
+        return None
+
+
 def user_by_email(email: str) -> Any | None:
     """Return the single account using this address, or ``None``.
 
-    Django's stock user model does not make ``email`` unique, so an address that
-    several accounts share is ambiguous rather than a login. Refusing is the only
-    safe reading: picking one would hand an attacker whichever account sorts
-    first.
+    The shipped user model makes ``email`` unique, so this normally finds at most
+    one. The guard is for a project that has swapped ``AUTH_USER_MODEL`` for a
+    model that does not -- Django's stock one among them. There, an address
+    several accounts share is ambiguous rather than a login, and refusing is the
+    only safe reading: picking one would hand an attacker whichever sorts first.
     """
     user_model = get_user_model()
     if not hasattr(user_model, "email"):

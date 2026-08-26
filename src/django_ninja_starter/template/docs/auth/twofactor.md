@@ -33,7 +33,7 @@ A single-use way back in when every other factor is unavailable.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | BigAuto | primary key |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `code_hash` | Char | not editable |
 | `used_at` | DateTime | nullable |
 | `created_at` | DateTime | not editable |
@@ -45,7 +45,7 @@ One enrolled factor. At most one row per method per account.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
-| `user` | ForeignKey | → `auth.User` |
+| `user` | ForeignKey | → `accounts.User` |
 | `method` | Char |  |
 | `destination` | Char |  |
 | `secret_encrypted` | Text | not editable |

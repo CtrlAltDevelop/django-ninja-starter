@@ -83,7 +83,8 @@ def test_every_model_this_project_defines_is_registered() -> None:
     defined = {
         model._meta.label
         for model in apps.get_models()
-        if model._meta.app_label.startswith(("auth_", "oauth_"))
+        if model._meta.app_label == "accounts"
+        or model._meta.app_label.startswith(("auth_", "oauth_"))
     }
 
     assert defined - registered == set()

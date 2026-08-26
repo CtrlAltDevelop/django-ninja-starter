@@ -38,6 +38,7 @@ from infrastructure.common.admin import ReadOnlyAdmin, RevocableAdmin
 from infrastructure.common.appsettings import AppSettings
 
 SECTIONS = ("routes", "models", "admin", "settings")
+PROJECT_LABELS = frozenset({"accounts"})
 NONE = "_None._"
 
 
@@ -59,6 +60,7 @@ def _router_owners() -> dict[str, str]:
     """Map an app label to the URL prefix its router is mounted at."""
     owners: dict[str, str] = {}
     routes = (
+        *settings.ACCOUNT_ROUTERS,
         *settings.OAUTH_PROVIDER_ROUTERS,
         *settings.AUTH_METHOD_ROUTERS,
         *settings.AUTH_TOKEN_ROUTERS,
@@ -76,16 +78,19 @@ def _documented_apps(root: Path) -> list[DocumentedApp]:
     owners = _router_owners()
     found = []
     for config in apps.get_app_configs():
-        if not config.label.startswith(("auth_", "oauth_")):
+        if config.label not in PROJECT_LABELS and not config.label.startswith(("auth_", "oauth_")):
             continue
         family, _, name = config.label.partition("_")
+        # A label with no family prefix -- `accounts` -- is a page of its own at
+        # the top level rather than one inside a family directory.
+        page = root / family / f"{name.replace('_', '-')}.md" if name else root / f"{family}.md"
         spec = getattr(config, "settings_spec", None)
         found.append(
             DocumentedApp(
                 label=config.label,
                 spec=spec if isinstance(spec, AppSettings) else None,
                 prefix=owners.get(config.label, ""),
-                path=root / family / f"{name.replace('_', '-')}.md",
+                path=page,
             )
         )
     return sorted(found, key=lambda app: app.path.as_posix())

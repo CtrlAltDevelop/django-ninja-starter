@@ -11,6 +11,7 @@ from django.conf import settings
 from django.http import HttpRequest
 from ninja import Router
 
+from infrastructure.accounts.profiles import confirm_email
 from infrastructure.auth.core.challenges import get_challenge_store
 from infrastructure.auth.core.errors import AuthError
 from infrastructure.auth.core.flows import complete_login, record_event, send_code_challenge
@@ -78,6 +79,7 @@ def signup_verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
         method=METHOD,
         identifier=email,
     )
+    confirm_email(user, email)
     return login_out(complete_login(request, user, method=METHOD, identifier=email))
 
 
@@ -112,6 +114,7 @@ def login_verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
             method=METHOD,
             identifier=email,
         )
+    confirm_email(user, email)
     return login_out(complete_login(request, user, method=METHOD, identifier=email))
 
 
