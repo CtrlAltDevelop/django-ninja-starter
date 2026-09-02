@@ -187,3 +187,23 @@ def test_a_token_mode_can_be_chosen_without_any_oauth_provider(tmp_path: Path) -
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_notification_app_installs_with_no_authentication_at_all(tmp_path: Path) -> None:
+    """It is a feature app, not part of the login story.
+
+    Its API asks the project's own bearer auth who the caller is, and its socket
+    asks the same question of a token -- both behind an ImportError guard, so a
+    project that enabled notifications and nothing else has to boot rather than
+    fail on an import of apps it never turned on.
+    """
+    result = _check({"DJANGO_NOTIFICATIONS_ENABLED": "true"}, tmp_path / "db.sqlite3")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_notifications_left_unnamed_cost_no_tables(tmp_path: Path) -> None:
+    result = _run(["manage.py", "migrate", "--plan"], {}, tmp_path / "db.sqlite3")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "notifications" not in result.stdout

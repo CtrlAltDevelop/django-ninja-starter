@@ -48,6 +48,7 @@ from infrastructure.auth.twofactor.services import (
     unused_recovery_codes,
     verify_totp,
 )
+from infrastructure.common.responses import ResponseTitle
 
 router = Router()
 
@@ -70,7 +71,11 @@ def _chosen_method(metadata: dict[str, Any], methods: list[str], requested: str)
         return SecondFactorMethod.TOTP
     if len(candidates) == 1:
         return candidates[0]
-    raise AuthError("Specify which second factor you are using.", status=400)
+    raise AuthError(
+        "Specify which second factor you are using.",
+        status=400,
+        title=ResponseTitle.SECOND_FACTOR_UNSPECIFIED,
+    )
 
 
 @router.post(
@@ -83,7 +88,11 @@ def challenge(request: HttpRequest, payload: ChallengeIn) -> ChallengeOut:
     """Deliver an SMS or email code for a login that is waiting on a second factor."""
     user, metadata = resolve_pending_login(payload.login_ticket)
     if payload.method not in pending_methods(metadata):
-        raise AuthError("That second factor is not set up for this account.", status=400)
+        raise AuthError(
+            "That second factor is not set up for this account.",
+            status=400,
+            title=ResponseTitle.SECOND_FACTOR_NOT_SET_UP,
+        )
     factor = factor_for(user, payload.method)
     ticket, channel, destination = send_factor_code(user, factor)
     get_challenge_store().update_metadata(
@@ -120,7 +129,11 @@ def verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
     methods = pending_methods(metadata)
     method = _chosen_method(metadata, methods, payload.method)
     if method not in methods:
-        raise AuthError("That second factor is not set up for this account.", status=400)
+        raise AuthError(
+            "That second factor is not set up for this account.",
+            status=400,
+            title=ResponseTitle.SECOND_FACTOR_NOT_SET_UP,
+        )
 
     code_ticket = ""
     if method == SecondFactorMethod.TOTP:
@@ -130,7 +143,11 @@ def verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
     else:
         code_ticket = str(metadata.get("code_ticket", ""))
         if not code_ticket or metadata.get("code_method") != method:
-            raise AuthError("Request a code before verifying it.", status=400)
+            raise AuthError(
+                "Request a code before verifying it.",
+                status=400,
+                title=ResponseTitle.CODE_NOT_REQUESTED,
+            )
         try:
             redeem_factor_code(code_ticket, payload.code, user)
         except InvalidCode:
@@ -147,7 +164,7 @@ def verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
             user=user,
             method=method,
         )
-        raise AuthError("That code is not valid.", status=400)
+        raise AuthError("That code is not valid.", status=400, title=ResponseTitle.INVALID_CODE)
 
     store.discard(payload.login_ticket)
     if code_ticket:
@@ -220,9 +237,13 @@ def totp_confirm(request: HttpRequest, payload: CodeIn) -> MessageOut:
     require_enabled(SecondFactorMethod.TOTP)
     factor = SecondFactor.objects.filter(user=request.user, method=SecondFactorMethod.TOTP).first()
     if factor is None:
-        raise AuthError("Start authenticator enrolment first.", status=400)
+        raise AuthError(
+            "Start authenticator enrolment first.",
+            status=400,
+            title=ResponseTitle.ENROLMENT_NOT_STARTED,
+        )
     if not verify_totp(factor, payload.code):
-        raise AuthError("That code is not valid.", status=400)
+        raise AuthError("That code is not valid.", status=400, title=ResponseTitle.INVALID_CODE)
     factor.confirm()
     record_event(
         request,
@@ -267,7 +288,9 @@ def sms_confirm(request: HttpRequest, payload: TicketCodeIn) -> MessageOut:
     challenge = redeem_factor_code(payload.ticket, payload.code, request.user)
     factor = SecondFactor.objects.filter(user=request.user, method=SecondFactorMethod.SMS).first()
     if factor is None:
-        raise AuthError("Start SMS enrolment first.", status=400)
+        raise AuthError(
+            "Start SMS enrolment first.", status=400, title=ResponseTitle.ENROLMENT_NOT_STARTED
+        )
     factor.confirm()
     phone = PhoneNumber.objects.filter(user=request.user, number=challenge.destination).first()
     if phone is not None and not phone.is_verified:
@@ -309,7 +332,9 @@ def email_confirm(request: HttpRequest, payload: TicketCodeIn) -> MessageOut:
     redeem_factor_code(payload.ticket, payload.code, request.user)
     factor = SecondFactor.objects.filter(user=request.user, method=SecondFactorMethod.EMAIL).first()
     if factor is None:
-        raise AuthError("Start email enrolment first.", status=400)
+        raise AuthError(
+            "Start email enrolment first.", status=400, title=ResponseTitle.ENROLMENT_NOT_STARTED
+        )
     factor.confirm()
     record_event(
         request,
@@ -347,7 +372,11 @@ def recovery_generate(request: HttpRequest) -> RecoveryCodesOut:
 def remove(request: HttpRequest, method: str) -> MessageOut:
     factor = SecondFactor.objects.filter(user=request.user, method=method).first()
     if factor is None:
-        raise AuthError("That second factor is not set up for this account.", status=404)
+        raise AuthError(
+            "That second factor is not set up for this account.",
+            status=404,
+            title=ResponseTitle.SECOND_FACTOR_NOT_SET_UP,
+        )
     factor.delete()
     if method == SecondFactorMethod.RECOVERY:
         request.user.auth_recovery_codes.all().delete()

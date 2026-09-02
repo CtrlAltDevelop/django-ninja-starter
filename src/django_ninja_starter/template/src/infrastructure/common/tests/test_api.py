@@ -10,14 +10,14 @@ def test_liveness() -> None:
     response = Client().get("/api/v1/health/live")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "checks": {}}
+    assert response.json()["data"] == {"status": "ok", "checks": {}}
 
 
 def test_readiness(db: None) -> None:
     response = Client().get("/api/v1/health/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "checks": {"database": "ok"}}
+    assert response.json()["data"] == {"status": "ok", "checks": {"database": "ok"}}
 
 
 def test_versioned_swagger_lists_registered_openapi_specs() -> None:
@@ -43,7 +43,7 @@ def test_readiness_returns_503_when_database_is_unavailable(
     response = Client().get("/api/v1/health/ready")
 
     assert response.status_code == 503
-    assert response.json() == {
+    assert response.json()["data"] == {
         "status": "unavailable",
         "checks": {"database": "unavailable"},
     }

@@ -24,6 +24,7 @@ from infrastructure.auth.core.models import AuthEventType
 from infrastructure.auth.core.schemas import ChallengeOut, LoginOut, MessageOut, login_out, mask
 from infrastructure.auth.core.sessions import revoke_credentials
 from infrastructure.auth.email_code.schemas import LogoutIn, StartIn, VerifyIn
+from infrastructure.common.responses import ResponseTitle
 
 router = Router()
 METHOD = "email_code"
@@ -70,7 +71,11 @@ def signup_verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
     challenge = get_challenge_store().verify(payload.ticket, payload.code, purpose=SIGNUP_PURPOSE)
     email = challenge.destination
     if user_by_email(email) is not None:
-        raise AuthError("That address already has an account. Sign in instead.", status=409)
+        raise AuthError(
+            "That address already has an account. Sign in instead.",
+            status=409,
+            title=ResponseTitle.ACCOUNT_EXISTS,
+        )
     user = create_user_for_email(email)
     record_event(
         request,
@@ -105,7 +110,9 @@ def login_verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
     user = user_by_email(email)
     if user is None:
         if not settings.AUTH_AUTO_CREATE_USERS:
-            raise AuthError("No account uses that address.", status=404)
+            raise AuthError(
+                "No account uses that address.", status=404, title=ResponseTitle.ACCOUNT_NOT_FOUND
+            )
         user = create_user_for_email(email)
         record_event(
             request,

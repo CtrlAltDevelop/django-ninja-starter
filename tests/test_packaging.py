@@ -174,10 +174,17 @@ def test_the_template_carries_no_build_artefacts() -> None:
 
 
 def test_the_template_holds_no_unrendered_placeholder_outside_the_known_two() -> None:
-    """The CLI only substitutes two names; a third would ship as literal braces."""
+    """The CLI only substitutes two names; a third would ship as literal braces.
+
+    Django templates are exempt, and only they: their braces are addressed to
+    Django at render time, not to the generator at copy time. The CLI replaces
+    two literal strings and leaves everything else alone, so the two never meet.
+    """
     known = {"{{ project_name }}", "{{ project_title }}"}
     found = set()
     for path in shipped_files():
+        if "templates" in path.parts:
+            continue
         text = path.read_text(encoding="utf-8")
         start = 0
         while (start := text.find("{{", start)) != -1:

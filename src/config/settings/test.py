@@ -1,5 +1,7 @@
 import os
 
+os.environ.setdefault("DJANGO_CMS_ENABLED", "true")
+os.environ.setdefault("DJANGO_NOTIFICATIONS_ENABLED", "true")
 os.environ.setdefault("DJANGO_OAUTH_MODE", "all")
 os.environ.setdefault("DJANGO_AUTH_TOKEN_MODE", "rotation")
 os.environ.setdefault("DJANGO_AUTH_METHODS", "password,email_code,sms_code,magic_link")

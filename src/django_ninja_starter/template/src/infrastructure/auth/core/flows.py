@@ -24,6 +24,7 @@ from infrastructure.auth.core.sessions import (
 )
 from infrastructure.auth.core.throttling import fingerprint
 from infrastructure.common.app_labels import app_installed
+from infrastructure.common.responses import ResponseTitle
 
 PENDING_PURPOSE = "second_factor"
 TWO_FACTOR_APP = "auth_twofactor"
@@ -84,7 +85,9 @@ def complete_login(
 ) -> LoginResult:
     """Finish a login, or park it until the account clears a second factor."""
     if not user.is_active:
-        raise AuthError("This account is disabled.", status=403)
+        raise AuthError(
+            "This account is disabled.", status=403, title=ResponseTitle.ACCOUNT_DISABLED
+        )
     factors = enrolled_second_factors(user)
     if not factors:
         credentials = issue_credentials(request, user, method=method)
@@ -125,7 +128,11 @@ def resolve_pending_login(ticket: str) -> tuple[Any, dict[str, Any]]:
     user = user_by_id(challenge.subject)
     if user is None or not user.is_active:
         store.discard(ticket)
-        raise AuthError("This sign-in is no longer valid. Start again.", status=400)
+        raise AuthError(
+            "This sign-in is no longer valid. Start again.",
+            status=400,
+            title=ResponseTitle.SIGN_IN_EXPIRED,
+        )
     return user, dict(challenge.metadata)
 
 
@@ -203,5 +210,5 @@ def user_from_challenge(challenge: Any) -> Any:
     """Resolve the account a settled challenge was issued for."""
     user = user_by_id(challenge.subject)
     if user is None:
-        raise AuthError("That code is not valid.", status=400)
+        raise AuthError("That code is not valid.", status=400, title=ResponseTitle.INVALID_CODE)
     return user

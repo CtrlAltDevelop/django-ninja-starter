@@ -7,6 +7,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
 from infrastructure.auth.core.errors import AuthError
+from infrastructure.common.responses import ResponseTitle
 
 LOGIN_ATTEMPT_LIMIT = 10
 RESET_PURPOSE = "password_reset"
@@ -17,7 +18,9 @@ def enforce_password_policy(password: str, user: Any | None = None) -> None:
     try:
         validate_password(password, user)
     except ValidationError as error:
-        raise AuthError(" ".join(error.messages), status=400) from error
+        raise AuthError(
+            " ".join(error.messages), status=400, title=ResponseTitle.WEAK_PASSWORD
+        ) from error
 
 
 def burn_timing() -> None:

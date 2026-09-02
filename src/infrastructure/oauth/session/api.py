@@ -8,6 +8,8 @@ from ninja import Router
 
 from infrastructure.auth.core.sessions import api_auth, revoke_credentials
 from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
+from infrastructure.oauth.core.exchange import router as exchange_router
 from infrastructure.oauth.core.schemas import (
     CredentialsOut,
     MessageOut,
@@ -25,6 +27,9 @@ from infrastructure.oauth.session.services import (
 )
 
 router = Router()
+# Mode-independent: it only asks `issue_credentials` for whatever this mode
+# issues, so all three publish it at the same path.
+router.add_router("", exchange_router)
 
 
 @router.post(
@@ -36,7 +41,9 @@ router = Router()
 def refresh(request: HttpRequest, payload: RefreshIn) -> CredentialsOut:
     """Trade the session key for a fresh access token. The key itself is unchanged."""
     if not payload.refresh_token:
-        raise ApiError("A refresh token is required.", status=400)
+        raise ApiError(
+            "A refresh token is required.", status=400, title=ResponseTitle.TOKEN_REQUIRED
+        )
     return credentials_out(refresh_access(request, payload.refresh_token))
 
 
@@ -85,5 +92,5 @@ def sessions(request: HttpRequest) -> SessionListOut:
 def end_session(request: HttpRequest, session_id: str) -> MessageOut:
     """End a named session. Scoped to the caller, so one account cannot end another's."""
     if not revoke_session(request.user, session_id):
-        raise ApiError("No such session.", status=404)
+        raise ApiError("No such session.", status=404, title=ResponseTitle.SESSION_NOT_FOUND)
     return MessageOut(detail="Session ended.")

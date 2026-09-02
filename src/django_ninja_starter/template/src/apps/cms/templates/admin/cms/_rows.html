@@ -1,0 +1,41 @@
+{% load i18n %}
+
+{% for row in rows %}
+    <div class="flex flex-col gap-2{% if not row.field.is_active %} opacity-60{% endif %}">
+        <div class="flex flex-col gap-2 lg:flex-row lg:gap-4">
+            {% for input in row.inputs %}
+                {# `relative`, because the admin's date JS drops an absolutely #}
+                {# positioned timezone note beside its input, and the theme     #}
+                {# styles it to sit in the corner of the field it belongs to.   #}
+                {# Without a positioned wrapper it lands in the card's corner.  #}
+                <div class="flex flex-col gap-1 grow relative">
+                    <label for="{{ input.id_for_label }}" class="font-medium text-font-important-light text-sm dark:text-font-important-dark">
+                        {{ input.label }}
+                        {% if input.field.required %}<span class="text-red-600">*</span>{% endif %}
+                    </label>
+
+                    {{ input }}
+
+                    {% if input.help_text %}
+                        <span class="text-font-subtle-light text-xs dark:text-font-subtle-dark">{{ input.help_text }}</span>
+                    {% endif %}
+
+                    {% for error in input.errors %}
+                        <span class="text-red-600 text-xs dark:text-red-400">{{ error }}</span>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+
+        <span class="text-font-subtle-light text-xs dark:text-font-subtle-dark">
+            <code>{{ row.field.slug }}</code>
+            &middot; {{ row.field.get_field_type_display }}{% if row.field.multiple %} ({% trans "list" %}){% endif %}
+            {% if row.field.required %}&middot; {% trans "required" %}{% endif %}
+            {% if not row.field.is_active %}&middot; {% trans "hidden from the API" %}{% endif %}
+        </span>
+    </div>
+{% empty %}
+    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+        {% trans "No fields in this section yet." %}
+    </span>
+{% endfor %}

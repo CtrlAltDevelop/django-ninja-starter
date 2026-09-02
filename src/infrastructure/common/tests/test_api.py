@@ -10,22 +10,44 @@ def test_liveness() -> None:
     response = Client().get("/api/v1/health/live")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "checks": {}}
+    assert response.json()["data"] == {"status": "ok", "checks": {}}
 
 
 def test_readiness(db: None) -> None:
     response = Client().get("/api/v1/health/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "checks": {"database": "ok"}}
+    assert response.json()["data"] == {"status": "ok", "checks": {"database": "ok"}}
 
 
 def test_versioned_swagger_lists_registered_openapi_specs() -> None:
+    from infrastructure.common.registry import load_api_registry
+
     response = Client().get("/api/docs")
+    page = response.content.decode()
 
     assert response.status_code == 200
-    assert b'"urls"' in response.content
-    assert b"/api/v1/openapi.json" in response.content
+    assert '"urls"' in page
+    for version in load_api_registry():
+        assert f"/api/{version}/openapi.json" in page
+
+
+def test_the_swagger_page_can_actually_render_that_selector() -> None:
+    """The `urls` list is read by the topbar, which two other settings supply.
+
+    Without them the page still answers 200, still carries the list, and still
+    shows "No API definition provided" -- it never fetches a document at all.
+    So this asserts the parts that make the list mean something: the standalone
+    preset script, and the layout that renders the topbar reading it.
+    """
+    page = Client().get("/api/docs").content.decode()
+
+    assert "swagger-ui-standalone-preset.js" in page
+    assert '"layout": "StandaloneLayout"' in page
+    assert "SwaggerUIStandalonePreset" in page
+    # A member of the bundle rather than the standalone script's own global is
+    # undefined at runtime, which is the shape the original bug took.
+    assert "SwaggerUIBundle.SwaggerUIStandalonePreset" not in page
 
 
 def test_versioned_openapi_schema_contains_health_routes() -> None:
@@ -43,7 +65,7 @@ def test_readiness_returns_503_when_database_is_unavailable(
     response = Client().get("/api/v1/health/ready")
 
     assert response.status_code == 503
-    assert response.json() == {
+    assert response.json()["data"] == {
         "status": "unavailable",
         "checks": {"database": "unavailable"},
     }

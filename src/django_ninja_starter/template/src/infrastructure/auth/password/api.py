@@ -35,6 +35,7 @@ from infrastructure.auth.password.services import (
     enforce_password_policy,
     password_matches,
 )
+from infrastructure.common.responses import ResponseTitle
 
 router = Router()
 METHOD = "password"
@@ -51,7 +52,7 @@ def signup(request: HttpRequest, payload: SignupIn) -> LoginOut:
     username_field = user_model.USERNAME_FIELD
     identifier = payload.identifier.strip()
     if not identifier:
-        raise AuthError("Enter a username.", status=400)
+        raise AuthError("Enter a username.", status=400, title=ResponseTitle.USERNAME_REQUIRED)
     if username_field == "email":
         identifier = normalize_email(identifier)
     attributes = {username_field: identifier}
@@ -65,7 +66,9 @@ def signup(request: HttpRequest, payload: SignupIn) -> LoginOut:
                 password=payload.password,
             )
     except IntegrityError as error:
-        raise AuthError("That account already exists.", status=409) from error
+        raise AuthError(
+            "That account already exists.", status=409, title=ResponseTitle.ACCOUNT_EXISTS
+        ) from error
     record_event(
         request,
         AuthEventType.SIGNUP,
@@ -97,7 +100,9 @@ def login(request: HttpRequest, payload: LoginIn) -> LoginOut:
             method=METHOD,
             identifier=identifier,
         )
-        raise AuthError("Those credentials are not valid.", status=401)
+        raise AuthError(
+            "Those credentials are not valid.", status=401, title=ResponseTitle.INVALID_CREDENTIALS
+        )
     return login_out(complete_login(request, user, method=METHOD, identifier=identifier))
 
 
@@ -195,7 +200,11 @@ def change(request: HttpRequest, payload: ChangeIn) -> MessageOut:
     401 round a loop renewing a perfectly good token over a typo.
     """
     if not password_matches(request.user, payload.current_password):
-        raise AuthError("That is not the current password for this account.", status=400)
+        raise AuthError(
+            "That is not the current password for this account.",
+            status=400,
+            title=ResponseTitle.INCORRECT_PASSWORD,
+        )
     enforce_password_policy(payload.new_password, request.user)
     request.user.set_password(payload.new_password)
     request.user.save(update_fields=["password"])

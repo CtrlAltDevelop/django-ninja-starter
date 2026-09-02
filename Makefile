@@ -1,4 +1,4 @@
-.PHONY: install check test docs package run migrate migrations superuser
+.PHONY: install check test docs example package run serve migrate migrations superuser
 
 install:
 	python3 -m pip install -e '.[dev]'
@@ -6,12 +6,15 @@ install:
 check:
 	ruff check --no-cache .
 	ruff format --check --no-cache .
-	mypy src manage.py
+	mypy src manage.py examples/build.py
 	python3 manage.py check
 	python3 manage.py makemigrations --check --dry-run
 
 test:
 	pytest --cov
+
+example:
+	python3 examples/walkthrough.py --rebuild
 
 docs:
 	DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py authdocs
@@ -22,6 +25,12 @@ package:
 
 run:
 	python3 manage.py runserver
+
+# `runserver` is WSGI and will not serve the notification WebSocket; this will.
+# `config/asgi.py` defaults to production settings, the way a deployment expects.
+serve:
+	DJANGO_SETTINGS_MODULE=config.settings.development \
+		python3 -m uvicorn config.asgi:application --reload --app-dir src
 
 migrate:
 	python3 manage.py migrate

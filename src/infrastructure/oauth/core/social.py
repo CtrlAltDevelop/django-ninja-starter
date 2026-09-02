@@ -11,12 +11,13 @@ from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.module_loading import import_string
 
 from infrastructure.accounts.profiles import confirm_email, enrich_profile
+from infrastructure.common.responses import ResponseTitle, envelope_response
 from infrastructure.oauth.core.crypto import decrypt_secret, encrypt_secret
 from infrastructure.oauth.core.models import AbstractSocialAccount, SocialLoginAttempt
 from infrastructure.oauth.core.tokens import hash_token
@@ -144,7 +145,12 @@ def _safe_next_url(request: HttpRequest) -> str:
 
 def begin_social_login(request: HttpRequest, provider: SocialProvider) -> HttpResponse:
     if not provider.is_configured():
-        return JsonResponse({"detail": f"{provider.key} OAuth is not configured"}, status=503)
+        return envelope_response(
+            status=503,
+            errors=[f"{provider.key} OAuth is not configured"],
+            title=ResponseTitle.OAUTH_NOT_CONFIGURED,
+            description=f"{provider.key} OAuth is not configured",
+        )
 
     state = secrets.token_urlsafe(48)
     nonce = secrets.token_urlsafe(48) if provider.uses_nonce else ""
@@ -267,6 +273,13 @@ def _resolve_account(
             else:
                 raise OAuthProviderError("This provider account is linked to another user")
 
+    if not account.user.is_active:
+        # Every first-party login path refuses a disabled account in
+        # `complete_login`. A social callback has to say the same thing, or
+        # deactivating someone leaves them one provider redirect away from a
+        # perfectly good session.
+        raise OAuthProviderError("This account is disabled")
+
     account.email = _fitted(account, "email", profile.email)
     account.email_verified = profile.email_verified
     account.display_name = _fitted(account, "display_name", profile.display_name)
@@ -316,7 +329,12 @@ def finish_social_login(
 ) -> HttpResponse:
     state = callback_data.get("state", "")
     if not state:
-        return JsonResponse({"detail": "Missing OAuth state"}, status=400)
+        return envelope_response(
+            status=400,
+            errors=["Missing OAuth state"],
+            title=ResponseTitle.OAUTH_STATE_MISSING,
+            description="Missing OAuth state",
+        )
     attempt: SocialLoginAttempt | None = None
     try:
         attempt = _consume_attempt(provider, state)
@@ -341,11 +359,19 @@ def finish_social_login(
         )
         account = _resolve_account(provider, attempt, profile, tokens)
         login(request, account.user, backend="django.contrib.auth.backends.ModelBackend")
+        # Named so that a later /auth/token/exchange can record which provider
+        # this credential came from, rather than a generic "social".
+        request.session["social_auth_method"] = f"oauth_{provider.key}"
     except OAuthProviderError as error:
         if attempt is not None:
             attempt.error = str(error)[:255]
             attempt.save(update_fields=["error"])
-        response: HttpResponse = JsonResponse({"detail": str(error)}, status=400)
+        response: HttpResponse = envelope_response(
+            status=400,
+            errors=[str(error)],
+            title=ResponseTitle.OAUTH_FAILED,
+            description=str(error),
+        )
     else:
         response = HttpResponseRedirect(attempt.next_url)
     _write_binding_cookie(response, request, provider, "", 0)

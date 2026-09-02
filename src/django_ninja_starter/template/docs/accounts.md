@@ -95,7 +95,7 @@ promise the rest of the code leans on: **`user.profile` always exists.**
 | Model | Editable | Actions | Columns |
 | --- | --- | --- | --- |
 | `Profile` | Yes | — | `user`, `display_name`, `locale`, `timezone`, `marketing_opt_in`, `updated_at` |
-| `User` | Yes | — | `username`, `email`, `email_verified`, `is_active`, `is_staff`, `date_joined` |
+| `User` | Yes | — | `account`, `status`, `email_verified`, `role`, `date_joined` |
 <!-- /generated:admin -->
 
 `UserAdmin` subclasses Django's own rather than replacing it, so the parts that

@@ -13,6 +13,8 @@ method that owns them.
 from datetime import date
 from typing import Any
 
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.http import HttpRequest
 from ninja import Router
 
@@ -20,10 +22,38 @@ from infrastructure.accounts.models import Profile
 from infrastructure.accounts.schemas import AccountOut, MessageOut, ProfileIn, ProfileOut
 from infrastructure.auth.core.sessions import api_auth
 from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
 
 router = Router()
 
 DATE_FIELDS = {"date_of_birth"}
+URL_FIELDS = {"avatar_url"}
+_validate_url = URLValidator()
+
+
+def _checked(field: str, value: str) -> str:
+    """Refuse a value the column cannot hold, or a URL that is not one.
+
+    The widths come from the model rather than being restated here, so they
+    cannot drift apart from it. Without this the oversized value reaches the
+    database, where SQLite shrugs and PostgreSQL raises -- turning a client's
+    bad input into a 500 in exactly the deployments that matter.
+    """
+    max_length = Profile._meta.get_field(field).max_length
+    if max_length and len(value) > max_length:
+        raise ApiError(
+            f"{field} must be at most {max_length} characters.",
+            status=400,
+            title=ResponseTitle.VALIDATION_ERROR,
+        )
+    if field in URL_FIELDS and value:
+        try:
+            _validate_url(value)
+        except ValidationError as error:
+            raise ApiError(
+                f"{field} must be a valid URL.", status=400, title=ResponseTitle.VALIDATION_ERROR
+            ) from error
+    return value
 
 
 def _profile_out(profile: Profile) -> ProfileOut:
@@ -77,16 +107,24 @@ def update_profile(request: HttpRequest, payload: ProfileIn) -> AccountOut:
     profile = request.user.profile
     supplied = payload.dict(exclude_unset=True, exclude_none=True)
     if not supplied:
-        raise ApiError("Supply at least one field to update.", status=400)
+        raise ApiError(
+            "Supply at least one field to update.", status=400, title=ResponseTitle.VALIDATION_ERROR
+        )
 
     for field, value in supplied.items():
         if field in DATE_FIELDS and value:
             try:
                 value = date.fromisoformat(str(value))
             except ValueError as error:
-                raise ApiError(f"{field} must be an ISO date, such as 1990-04-23.", 400) from error
+                raise ApiError(
+                    f"{field} must be an ISO date, such as 1990-04-23.",
+                    400,
+                    title=ResponseTitle.VALIDATION_ERROR,
+                ) from error
         elif field in DATE_FIELDS:
             value = None
+        elif isinstance(value, str):
+            value = _checked(field, value)
         setattr(profile, field, value)
     profile.save(update_fields=[*supplied, "updated_at"])
 

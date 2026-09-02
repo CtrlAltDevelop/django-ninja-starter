@@ -59,6 +59,7 @@ dev = [
   "cryptography>=45,<48",
   "build>=1.2",
   "django-ninja>=1.4,<2.0",
+  "django-unfold>=0.104,<1.0",
   "httpx>=0.28,<1.0",
   "mypy>=1.15",
   "pytest>=8.3",
@@ -71,6 +72,8 @@ dev = [
   "fakeredis>=2.26,<3.0",
   "ruff>=0.11",
   "twine>=6.0",
+  "uvicorn>=0.52,<1.0",
+  "websockets>=15,<18",
 ]
 
 [tool.setuptools.dynamic]
@@ -89,6 +92,9 @@ pythonpath = ["src"]
 testpaths = ["src", "tests"]
 norecursedirs = ["src/django_ninja_starter/template"]
 addopts = "--strict-markers --strict-config"
+# The example-project tests each build a project and run a suite inside it.
+# `pytest -m "not slow"` is the fast loop; CI and `make test` run everything.
+markers = ["slow: builds an example project in a subprocess"]
 
 [tool.ruff]
 target-version = "py312"

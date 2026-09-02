@@ -109,7 +109,7 @@ class Command(BaseCommand):
             "def test_index() -> None:\n"
             f'    response = Client().get("/api/{version}{prefix}/")\n\n'
             "    assert response.status_code == 200\n"
-            '    assert response.json() == {"message": '
+            '    assert response.json()["data"] == {"message": '
             f'"{_class_name(app_name)} {version} API"}}\n',
         )
 

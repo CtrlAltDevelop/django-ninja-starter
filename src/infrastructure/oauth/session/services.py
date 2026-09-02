@@ -16,9 +16,11 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
 from infrastructure.oauth.core import jwt_tokens
 from infrastructure.oauth.core.credentials import (
     IssuedCredentials,
+    by_public_id,
     client_ip,
     sign_pair,
     token_model,
@@ -34,7 +36,7 @@ def refresh_access(request: HttpRequest, session_token: str) -> IssuedCredential
     try:
         handle = jwt_tokens.decode(session_token, token_type=jwt_tokens.REFRESH).handle
     except jwt_tokens.JwtError as error:
-        raise ApiError(str(error), status=401) from error
+        raise ApiError(str(error), status=401, title=ResponseTitle.TOKEN_INVALID) from error
     session_model = token_model(MODE, "OAuthSession")
     access_model = token_model(MODE, "SessionAccessToken")
 
@@ -46,9 +48,15 @@ def refresh_access(request: HttpRequest, session_token: str) -> IssuedCredential
             .first()
         )
         if session is None:
-            raise ApiError("That session key is not valid.", status=401)
+            raise ApiError(
+                "That session key is not valid.", status=401, title=ResponseTitle.TOKEN_INVALID
+            )
         if not session.is_active:
-            raise ApiError("This session has ended. Sign in again.", status=401)
+            raise ApiError(
+                "This session has ended. Sign in again.",
+                status=401,
+                title=ResponseTitle.SESSION_ENDED,
+            )
 
         now = timezone.now()
         access_lifetime = timedelta(seconds=settings.AUTH_ACCESS_TOKEN_TTL_SECONDS)
@@ -90,9 +98,9 @@ def revoke_session(user: Any, session_id: str, reason: str = "logout") -> bool:
     """End one of the account's own sessions. Returns whether one was found."""
     session_model = token_model(MODE, "OAuthSession")
     revocation_model = token_model(MODE, "SessionRevocation")
-    session = session_model.objects.filter(
-        pk=session_id, user=user, revoked_at__isnull=True
-    ).first()
+    session = by_public_id(
+        session_model.objects.filter(user=user, revoked_at__isnull=True), session_id
+    )
     if session is None:
         return False
     live_tokens = session.access_tokens.filter(revoked_at__isnull=True).count()

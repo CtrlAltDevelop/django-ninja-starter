@@ -1,0 +1,42 @@
+{% comment %}
+Django Ninja's Swagger page, plus the two things its version selector needs: the
+standalone preset script, and StandaloneLayout to render the topbar that reads
+`urls`. See infrastructure/common/docs.py for why this template exists at all.
+{% endcomment %}<!DOCTYPE html>
+<html>
+<head>
+    <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+    <link rel="icon" href="https://django-ninja.dev/img/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="https://django-ninja.dev/img/favicon.png" type="image/png">
+    <title>{{ api.title }}</title>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+    <script type="application/json" id="swagger-settings">
+        {{ swagger_settings | safe }}
+    </script>
+    <script>
+        const configObject = JSON.parse(document.getElementById("swagger-settings").textContent);
+
+        configObject.dom_id = "#swagger-ui";
+        // SwaggerUIStandalonePreset is a global of its own script, not a member
+        // of the bundle -- naming it wrongly is silently undefined.
+        configObject.presets = [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIStandalonePreset
+        ];
+        configObject.plugins = [SwaggerUIBundle.plugins.DownloadUrl];
+
+        // Session-mode logins are cookie-based, so "Try it out" needs the token.
+        configObject.requestInterceptor = (request) => {
+            request.headers["X-CSRFToken"] = "{{ csrf_token }}";
+            return request;
+        };
+
+        SwaggerUIBundle(configObject);
+    </script>
+</body>
+</html>

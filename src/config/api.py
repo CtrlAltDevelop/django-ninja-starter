@@ -2,10 +2,12 @@
 
 from django.conf import settings
 from django.utils.module_loading import import_string
-from ninja import NinjaAPI, Swagger
+from ninja import NinjaAPI
 
+from infrastructure.common.docs import VersionedSwagger
 from infrastructure.common.errors import register_error_handlers
 from infrastructure.common.registry import api_version_number, load_api_registry
+from infrastructure.common.responses import EnvelopeAPI, EnvelopeRenderer
 
 
 def build_apis() -> dict[str, NinjaAPI]:
@@ -19,18 +21,23 @@ def build_apis() -> dict[str, NinjaAPI]:
     apis: dict[str, NinjaAPI] = {}
 
     for version, configuration in registry.items():
-        api = NinjaAPI(
+        api = EnvelopeAPI(
             title="Django Ninja Starter API",
             version=api_version_number(version),
             urls_namespace=f"api-{version.replace('.', '-')}",
-            docs=Swagger(
+            docs=VersionedSwagger(
                 settings={
                     "persistAuthorization": True,
+                    # The selector, and the layout that renders it. Without
+                    # StandaloneLayout nothing reads `urls` and the page loads
+                    # empty.
+                    "layout": "StandaloneLayout",
                     "urls": swagger_urls,
                     "urls.primaryName": version,
                 }
             ),
             docs_url="/docs",
+            renderer=EnvelopeRenderer(),
         )
         for route in configuration["routes"]:
             api.add_router(
@@ -43,6 +50,8 @@ def build_apis() -> dict[str, NinjaAPI]:
             *settings.OAUTH_PROVIDER_ROUTERS,
             *settings.AUTH_METHOD_ROUTERS,
             *settings.AUTH_TOKEN_ROUTERS,
+            *settings.CMS_ROUTERS,
+            *settings.NOTIFICATIONS_ROUTERS,
         ):
             api.add_router(
                 route["prefix"],

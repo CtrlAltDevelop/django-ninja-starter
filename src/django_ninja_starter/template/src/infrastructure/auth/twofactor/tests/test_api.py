@@ -35,14 +35,14 @@ def _register(client: Client) -> dict[str, str]:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    token = response.json()["credentials"]["access_token"]
+    token = response.json()["data"]["credentials"]["access_token"]
     return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
 
 
 def _enroll_totp(client: Client, headers: dict[str, str]) -> str:
     enrolled = client.post("/api/v1/auth/2fa/totp/enroll", **headers)
     assert enrolled.status_code == 200, enrolled.content
-    secret = enrolled.json()["secret"]
+    secret = enrolled.json()["data"]["secret"]
     confirmed = client.post(
         "/api/v1/auth/2fa/totp/confirm",
         {"code": _totp_code(secret)},
@@ -60,7 +60,7 @@ def _sign_in(client: Client) -> dict:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    return response.json()
+    return response.json()["data"]
 
 
 def test_enrolment_is_not_real_until_a_code_confirms_it(db: None) -> None:
@@ -92,7 +92,7 @@ def test_a_confirmed_factor_turns_login_into_two_steps(db: None) -> None:
     )
 
     assert second_step.status_code == 200
-    assert second_step.json()["credentials"]["access_token"]
+    assert second_step.json()["data"]["credentials"]["access_token"]
 
 
 def test_an_authenticator_code_cannot_be_used_twice(db: None) -> None:
@@ -179,7 +179,7 @@ def test_an_sms_second_factor_sends_a_code_and_accepts_it(db: None) -> None:
     confirmed = client.post(
         "/api/v1/auth/2fa/sms/confirm",
         {
-            "ticket": enrolled.json()["ticket"],
+            "ticket": enrolled.json()["data"]["ticket"],
             "code": delivery.outbox[-1].body.rsplit(" ", 1)[1].rstrip("."),
         },
         content_type="application/json",
@@ -195,8 +195,8 @@ def test_an_sms_second_factor_sends_a_code_and_accepts_it(db: None) -> None:
         content_type="application/json",
     )
     assert sent.status_code == 200, sent.content
-    assert sent.json()["destination"] == "***0101"
-    assert sent.json()["ticket"] == ticket, "the client should keep using one ticket"
+    assert sent.json()["data"]["destination"] == "***0101"
+    assert sent.json()["data"]["ticket"] == ticket, "the client should keep using one ticket"
 
     code = delivery.outbox[-1].body.rsplit(" ", 1)[1].rstrip(".")
     response = client.post(
@@ -204,7 +204,7 @@ def test_an_sms_second_factor_sends_a_code_and_accepts_it(db: None) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["credentials"]["access_token"]
+    assert response.json()["data"]["credentials"]["access_token"]
 
 
 def test_a_sent_code_must_be_requested_before_it_is_verified(db: None) -> None:
@@ -226,7 +226,7 @@ def test_a_sent_code_must_be_requested_before_it_is_verified(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert "Request a code" in response.json()["detail"]
+    assert "Request a code" in response.json()["description"]
 
 
 def test_recovery_codes_work_once_each(db: None) -> None:
@@ -235,7 +235,7 @@ def test_recovery_codes_work_once_each(db: None) -> None:
     _enroll_totp(client, headers)
     generated = client.post("/api/v1/auth/2fa/recovery/generate", **headers)
     assert generated.status_code == 200, generated.content
-    codes = generated.json()["codes"]
+    codes = generated.json()["data"]["codes"]
     assert len(codes) == 10
 
     ticket = _sign_in(client)["login_ticket"]
@@ -260,7 +260,7 @@ def test_recovery_codes_work_once_each(db: None) -> None:
 def test_recovery_codes_are_stored_only_as_digests(db: None) -> None:
     client = Client()
     headers = _register(client)
-    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["codes"]
+    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["data"]["codes"]
 
     stored = set(RecoveryCode.objects.values_list("code_hash", flat=True))
     assert stored.isdisjoint(set(codes))
@@ -271,7 +271,7 @@ def test_recovery_is_never_chosen_by_inference(db: None) -> None:
     client = Client()
     headers = _register(client)
     _enroll_totp(client, headers)
-    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["codes"]
+    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["data"]["codes"]
     ticket = _sign_in(client)["login_ticket"]
 
     response = client.post(
@@ -285,7 +285,7 @@ def test_recovery_is_never_chosen_by_inference(db: None) -> None:
 def test_regenerating_recovery_codes_retires_the_old_set(db: None) -> None:
     client = Client()
     headers = _register(client)
-    first = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["codes"]
+    first = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["data"]["codes"]
     client.post("/api/v1/auth/2fa/recovery/generate", **headers)
     ticket = _sign_in(client)["login_ticket"]
 
@@ -304,7 +304,7 @@ def test_methods_lists_what_is_enrolled_and_masks_destinations(db: None) -> None
     _enroll_totp(client, headers)
     client.post("/api/v1/auth/2fa/email/enroll", content_type="application/json", **headers)
 
-    body = client.get("/api/v1/auth/2fa/methods", **headers).json()
+    body = client.get("/api/v1/auth/2fa/methods", **headers).json()["data"]
 
     listed = {item["method"]: item for item in body["methods"]}
     assert listed["totp"]["confirmed"] is True
@@ -381,7 +381,7 @@ def _enroll_email(client: Client, headers: dict[str, str]) -> None:
     assert enrolled.status_code == 200, enrolled.content
     confirmed = client.post(
         "/api/v1/auth/2fa/email/confirm",
-        {"ticket": enrolled.json()["ticket"], "code": _sent_code()},
+        {"ticket": enrolled.json()["data"]["ticket"], "code": _sent_code()},
         content_type="application/json",
         **headers,
     )
@@ -406,8 +406,8 @@ def test_an_email_second_factor_sends_a_code_and_accepts_it(db: None) -> None:
         content_type="application/json",
     )
     assert sent.status_code == 200, sent.content
-    assert sent.json()["destination"] == "z***@example.com"
-    assert sent.json()["channel"] == "email"
+    assert sent.json()["data"]["destination"] == "z***@example.com"
+    assert sent.json()["data"]["channel"] == "email"
 
     response = client.post(
         VERIFY,
@@ -416,7 +416,7 @@ def test_an_email_second_factor_sends_a_code_and_accepts_it(db: None) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["credentials"]["access_token"]
+    assert response.json()["data"]["credentials"]["access_token"]
 
 
 def test_email_enrolment_needs_an_address_on_the_account(db: None) -> None:
@@ -426,7 +426,7 @@ def test_email_enrolment_needs_an_address_on_the_account(db: None) -> None:
         {"identifier": "noaddress", "password": PASSWORD},
         content_type="application/json",
     )
-    token = response.json()["credentials"]["access_token"]
+    token = response.json()["data"]["credentials"]["access_token"]
 
     enrolled = client.post("/api/v1/auth/2fa/email/enroll", HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -473,7 +473,7 @@ def test_confirming_totp_before_enrolling_is_refused(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert "Start authenticator enrolment first." in response.json()["detail"]
+    assert "Start authenticator enrolment first." in response.json()["description"]
 
 
 def test_confirming_totp_with_a_wrong_code_is_refused(db: None) -> None:
@@ -515,7 +515,7 @@ def test_the_factor_must_be_named_when_two_could_be_meant(db: None) -> None:
     )
     client.post(
         "/api/v1/auth/2fa/sms/confirm",
-        {"ticket": enrolled.json()["ticket"], "code": _sent_code()},
+        {"ticket": enrolled.json()["data"]["ticket"], "code": _sent_code()},
         content_type="application/json",
         **headers,
     )
@@ -526,7 +526,7 @@ def test_the_factor_must_be_named_when_two_could_be_meant(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert "Specify which second factor" in response.json()["detail"]
+    assert "Specify which second factor" in response.json()["description"]
 
 
 def test_a_single_enrolled_factor_needs_no_naming(db: None) -> None:
@@ -560,7 +560,7 @@ def test_a_factor_the_account_has_not_enrolled_is_refused(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert "not set up" in response.json()["detail"]
+    assert "not set up" in response.json()["description"]
 
 
 def test_challenging_a_factor_the_account_lacks_is_refused(db: None) -> None:
@@ -610,13 +610,13 @@ def test_a_pending_ticket_is_void_once_the_account_is_disabled(db: None) -> None
     )
 
     assert response.status_code == 400
-    assert "no longer valid" in response.json()["detail"]
+    assert "no longer valid" in response.json()["description"]
 
 
 def test_recovery_codes_can_be_the_only_factor(db: None) -> None:
     client = Client()
     headers = _register(client)
-    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["codes"]
+    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["data"]["codes"]
     first_step = _sign_in(client)
 
     assert first_step["methods"] == ["recovery"]
@@ -633,7 +633,7 @@ def test_recovery_codes_can_be_the_only_factor(db: None) -> None:
 def test_recovery_codes_are_case_and_dash_insensitive(db: None) -> None:
     client = Client()
     headers = _register(client)
-    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["codes"]
+    codes = client.post("/api/v1/auth/2fa/recovery/generate", **headers).json()["data"]["codes"]
     typed = codes[0].lower().replace("-", " ")
     ticket = _sign_in(client)["login_ticket"]
 
@@ -661,7 +661,7 @@ def test_methods_reports_the_remaining_recovery_codes(db: None) -> None:
     headers = _register(client)
     client.post("/api/v1/auth/2fa/recovery/generate", **headers)
 
-    body = client.get("/api/v1/auth/2fa/methods", **headers).json()
+    body = client.get("/api/v1/auth/2fa/methods", **headers).json()["data"]
 
     assert body["unused_recovery_codes"] == 10
 
@@ -745,7 +745,7 @@ def test_a_lone_sent_code_factor_still_needs_its_code_requested(db: None) -> Non
     )
 
     assert response.status_code == 400
-    assert "Request a code before verifying it." in response.json()["detail"]
+    assert "Request a code before verifying it." in response.json()["description"]
 
 
 def test_confirming_sms_after_the_factor_was_removed_is_refused(db: None) -> None:
@@ -763,13 +763,13 @@ def test_confirming_sms_after_the_factor_was_removed_is_refused(db: None) -> Non
 
     response = client.post(
         "/api/v1/auth/2fa/sms/confirm",
-        {"ticket": enrolled.json()["ticket"], "code": code},
+        {"ticket": enrolled.json()["data"]["ticket"], "code": code},
         content_type="application/json",
         **headers,
     )
 
     assert response.status_code == 400
-    assert "Start SMS enrolment first." in response.json()["detail"]
+    assert "Start SMS enrolment first." in response.json()["description"]
 
 
 def test_confirming_email_after_the_factor_was_removed_is_refused(db: None) -> None:
@@ -781,13 +781,13 @@ def test_confirming_email_after_the_factor_was_removed_is_refused(db: None) -> N
 
     response = client.post(
         "/api/v1/auth/2fa/email/confirm",
-        {"ticket": enrolled.json()["ticket"], "code": code},
+        {"ticket": enrolled.json()["data"]["ticket"], "code": code},
         content_type="application/json",
         **headers,
     )
 
     assert response.status_code == 400
-    assert "Start email enrolment first." in response.json()["detail"]
+    assert "Start email enrolment first." in response.json()["description"]
 
 
 def test_confirming_sms_leaves_an_already_verified_number_alone(db: None) -> None:
@@ -806,7 +806,7 @@ def test_confirming_sms_leaves_an_already_verified_number_alone(db: None) -> Non
     )
     response = client.post(
         "/api/v1/auth/2fa/sms/confirm",
-        {"ticket": enrolled.json()["ticket"], "code": _sent_code()},
+        {"ticket": enrolled.json()["data"]["ticket"], "code": _sent_code()},
         content_type="application/json",
         **headers,
     )

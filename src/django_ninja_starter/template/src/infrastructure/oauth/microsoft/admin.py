@@ -1,12 +1,13 @@
 """Admin for linked Microsoft accounts."""
 
 from django.contrib import admin
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
 from infrastructure.oauth.microsoft.models import MicrosoftAccount
 
 
 @admin.register(MicrosoftAccount)
-class MicrosoftAccountAdmin(admin.ModelAdmin):
+class MicrosoftAccountAdmin(UnfoldModelAdmin):
     """Accounts linked through Microsoft.
 
     Provider tokens are stored encrypted and excluded here: the admin's job is to

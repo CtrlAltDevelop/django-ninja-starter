@@ -53,6 +53,7 @@ TWO_FACTOR_ROUTES = {
     ("DELETE", "/auth/2fa/{method}"),
 }
 TOKEN_ROUTES = {
+    ("POST", "/auth/token/exchange"),
     ("POST", "/auth/token/refresh"),
     ("POST", "/auth/token/revoke"),
     ("GET", "/auth/token/sessions"),

@@ -31,6 +31,7 @@ from infrastructure.auth.core.schemas import LoginOut, MessageOut, login_out, ma
 from infrastructure.auth.core.sessions import revoke_credentials
 from infrastructure.auth.core.throttling import guard_delivery
 from infrastructure.auth.magic_link.schemas import LogoutIn, StartIn, StartOut, VerifyIn
+from infrastructure.common.responses import ResponseTitle
 
 router = Router()
 METHOD = "magic_link"
@@ -105,7 +106,9 @@ def verify(request: HttpRequest, payload: VerifyIn) -> LoginOut:
     user = user_by_email(email)
     if user is None:
         if intent == LOGIN and not settings.AUTH_AUTO_CREATE_USERS:
-            raise AuthError("No account uses that address.", status=404)
+            raise AuthError(
+                "No account uses that address.", status=404, title=ResponseTitle.ACCOUNT_NOT_FOUND
+            )
         user = create_user_for_email(email)
         record_event(
             request,

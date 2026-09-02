@@ -16,10 +16,12 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
 from infrastructure.oauth.core import jwt_tokens
 from infrastructure.oauth.core.credentials import (
     IssuedCredentials,
     bearer_token,
+    by_public_id,
     sign_single,
     token_model,
 )
@@ -34,7 +36,7 @@ def slide(request: HttpRequest, presented: str = "") -> IssuedCredentials:
     try:
         claims = jwt_tokens.decode(token, token_type=jwt_tokens.ACCESS)
     except jwt_tokens.JwtError as error:
-        raise ApiError(str(error), status=401) from error
+        raise ApiError(str(error), status=401, title=ResponseTitle.TOKEN_INVALID) from error
 
     sliding_model = token_model(MODE, "SlidingToken")
     event_model = token_model(MODE, "SlidingTokenEvent")
@@ -44,10 +46,12 @@ def slide(request: HttpRequest, presented: str = "") -> IssuedCredentials:
         .first()
     )
     if record is None:
-        raise ApiError("That token is not valid.", status=401)
+        raise ApiError("That token is not valid.", status=401, title=ResponseTitle.TOKEN_INVALID)
     previous = record.expires_at
     if not record.slide():
-        raise ApiError("This session has ended. Sign in again.", status=401)
+        raise ApiError(
+            "This session has ended. Sign in again.", status=401, title=ResponseTitle.SESSION_ENDED
+        )
     event_model.objects.create(
         token=record,
         event_type="slid",
@@ -81,7 +85,9 @@ def revoke_token(user: Any, token_id: str, reason: str = "logout") -> bool:
     """Revoke one of the account's own tokens. Returns whether one was found."""
     sliding_model = token_model(MODE, "SlidingToken")
     event_model = token_model(MODE, "SlidingTokenEvent")
-    record = sliding_model.objects.filter(pk=token_id, user=user, revoked_at__isnull=True).first()
+    record = by_public_id(
+        sliding_model.objects.filter(user=user, revoked_at__isnull=True), token_id
+    )
     if record is None:
         return False
     record.revoke(reason)

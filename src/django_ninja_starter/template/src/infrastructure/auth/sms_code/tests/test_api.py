@@ -20,7 +20,7 @@ def _last_code() -> str:
 def _start(client: Client, url: str, phone: str = PHONE) -> str:
     response = client.post(url, {"phone": phone}, content_type="application/json")
     assert response.status_code == 200, response.content
-    return response.json()["ticket"]
+    return response.json()["data"]["ticket"]
 
 
 def test_signup_creates_an_account_owning_a_verified_number(db: None) -> None:
@@ -37,14 +37,14 @@ def test_signup_creates_an_account_owning_a_verified_number(db: None) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["credentials"]["access_token"]
+    assert response.json()["data"]["credentials"]["access_token"]
     assert PhoneNumber.objects.get(number=PHONE).is_verified is True
 
 
 def test_the_start_response_masks_the_number(db: None) -> None:
     response = Client().post(LOGIN_START, {"phone": PHONE}, content_type="application/json")
 
-    assert response.json()["destination"] == "***0101"
+    assert response.json()["data"]["destination"] == "***0101"
 
 
 def test_spacing_in_the_number_does_not_change_the_account(db: None) -> None:
@@ -128,7 +128,7 @@ def _credentials(client: Client) -> dict:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    return response.json()["credentials"]
+    return response.json()["data"]["credentials"]
 
 
 def test_login_creates_an_account_and_its_number_when_auto_creation_is_on(db: None) -> None:
@@ -142,7 +142,7 @@ def test_login_creates_an_account_and_its_number_when_auto_creation_is_on(db: No
     )
 
     assert response.status_code == 200
-    assert response.json()["credentials"]["access_token"]
+    assert response.json()["data"]["credentials"]["access_token"]
     record = PhoneNumber.objects.get(number=PHONE)
     assert record.is_verified is True
     assert AuthEvent.objects.filter(event_type=AuthEventType.SIGNUP, method="sms_code").exists()

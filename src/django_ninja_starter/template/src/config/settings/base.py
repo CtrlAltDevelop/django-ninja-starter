@@ -250,6 +250,61 @@ AUTH_JWT_ISSUER = os.getenv("DJANGO_AUTH_JWT_ISSUER", "{{ project_name }}")
 AUTH_JWT_AUDIENCE = os.getenv("DJANGO_AUTH_JWT_AUDIENCE", "")
 AUTH_JWT_LEEWAY_SECONDS = int(os.getenv("DJANGO_AUTH_JWT_LEEWAY_SECONDS", "30"))
 
+# The content app. Optional in the same way every login method is: naming it is
+# what installs it, and a project that does not name it carries no CMS tables,
+# publishes no CMS routes and never imports the package.
+CMS_ENABLED = os.getenv("DJANGO_CMS_ENABLED", "false").lower() == "true"
+CMS_APP = "apps.cms.apps.CmsConfig"
+CMS_INSTALLED_APPS = [CMS_APP] if CMS_ENABLED else []
+CMS_ROUTERS = (
+    [{"prefix": "/cms", "router": "apps.cms.api.v1.router", "tag": "CMS"}] if CMS_ENABLED else []
+)
+# The languages content may be written in. Deliberately not Django's LANGUAGES,
+# which lists every language it ships a name for: "the languages this content is
+# written in" has to mean the handful an editor is really expected to fill in.
+# Left empty, the app falls back to LANGUAGE_CODE on its own.
+CMS_LANGUAGES = [
+    code.strip().lower()
+    for code in os.getenv("DJANGO_CMS_LANGUAGES", "").split(",")
+    if code.strip()
+]
+CMS_PREVIEW_TTL_SECONDS = int(os.getenv("DJANGO_CMS_PREVIEW_TTL_SECONDS", str(60 * 60 * 24)))
+
+# The notification app. Optional the same way the CMS is: naming it installs its
+# tables, its routes and its socket, and a project that does not name it never
+# imports the package.
+NOTIFICATIONS_ENABLED = os.getenv("DJANGO_NOTIFICATIONS_ENABLED", "false").lower() == "true"
+NOTIFICATIONS_APP = "apps.notifications.apps.NotificationsConfig"
+NOTIFICATIONS_INSTALLED_APPS = [NOTIFICATIONS_APP] if NOTIFICATIONS_ENABLED else []
+NOTIFICATIONS_ROUTERS = (
+    [
+        {
+            "prefix": "/notifications",
+            "router": "apps.notifications.api.v1.router",
+            "tag": "Notifications",
+        }
+    ]
+    if NOTIFICATIONS_ENABLED
+    else []
+)
+# Where the WebSocket is mounted. A setting rather than a constant because it is
+# the one part of this app a reverse proxy has to be told about, and a proxy is
+# usually easier to point at the app than the other way round.
+NOTIFICATIONS_WS_PATH = os.getenv("DJANGO_NOTIFICATIONS_WS_PATH", "/ws/notifications")
+# How a notification created in one process reaches sockets held open by another.
+# The default fans out inside a single process only, which is right for
+# development and wrong for anything running more than one worker -- the app's
+# settings contract says so out loud.
+NOTIFICATIONS_BROKER = os.getenv(
+    "DJANGO_NOTIFICATIONS_BROKER", "apps.notifications.broadcast.MemoryBroker"
+)
+NOTIFICATIONS_REDIS_URL = os.getenv("DJANGO_NOTIFICATIONS_REDIS_URL", AUTH_REDIS_URL)
+NOTIFICATIONS_CHANNEL_PREFIX = os.getenv("DJANGO_NOTIFICATIONS_CHANNEL_PREFIX", "notifications")
+# How many unread notifications a socket is caught up with on connect. The list
+# endpoint is where the rest of the history lives; this is only so that a client
+# that reconnects does not have to make an HTTP call to find out what it missed.
+NOTIFICATIONS_SOCKET_BACKLOG = int(os.getenv("DJANGO_NOTIFICATIONS_SOCKET_BACKLOG", "20"))
+
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")
 OAUTH_STATE_TTL_SECONDS = int(os.getenv("DJANGO_OAUTH_STATE_TTL_SECONDS", "600"))
 OAUTH_HTTP_TIMEOUT_SECONDS = float(os.getenv("DJANGO_OAUTH_HTTP_TIMEOUT_SECONDS", "10"))
@@ -262,6 +317,13 @@ OAUTH_STORE_PROVIDER_TOKENS = (
 OAUTH_USER_RESOLVER = os.getenv("DJANGO_OAUTH_USER_RESOLVER", "")
 
 INSTALLED_APPS = [
+    # Unfold themes the admin by overriding its templates, so it has to be found
+    # before the app whose templates it replaces. Its contrib apps are the same
+    # arrangement for filters, form widgets and nested inlines.
+    "unfold",
+    "unfold.contrib.filters",
+    "unfold.contrib.forms",
+    "unfold.contrib.inlines",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -275,7 +337,48 @@ INSTALLED_APPS = [
     *registered_app_configs(BASE_DIR / "src" / "config" / "api_registry.json"),
     *OAUTH_INSTALLED_APPS,
     *AUTH_INSTALLED_APPS,
+    *CMS_INSTALLED_APPS,
+    *NOTIFICATIONS_INSTALLED_APPS,
 ]
+
+# The admin's appearance, all of it. The three callbacks are dotted paths rather
+# than imports because settings are read before the app registry is ready, and
+# each of them asks a question only the running project can answer: which apps
+# are installed, whether this is production, and what the numbers are today.
+UNFOLD = {
+    "SITE_TITLE": "{{ project_title }}",
+    "SITE_HEADER": "{{ project_title }}",
+    "SITE_SUBHEADER": "Content, accounts and credentials",
+    "SITE_SYMBOL": "rocket_launch",
+    "SITE_URL": "/api/docs",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": False,
+    "SHOW_BACK_BUTTON": True,
+    "ENVIRONMENT": "infrastructure.common.adminui.environment_badge",
+    "DASHBOARD_CALLBACK": "infrastructure.common.adminui.dashboard",
+    "BORDER_RADIUS": "6px",
+    "COLORS": {
+        "primary": {
+            "50": "oklch(97.1% 0.014 254)",
+            "100": "oklch(93.2% 0.032 255)",
+            "200": "oklch(88.2% 0.059 254)",
+            "300": "oklch(80.9% 0.105 252)",
+            "400": "oklch(70.7% 0.165 254)",
+            "500": "oklch(62.3% 0.214 259)",
+            "600": "oklch(54.6% 0.245 262)",
+            "700": "oklch(48.8% 0.243 264)",
+            "800": "oklch(42.4% 0.199 265)",
+            "900": "oklch(37.9% 0.146 265)",
+            "950": "oklch(28.2% 0.091 267)",
+        },
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": True,
+        "navigation": "infrastructure.common.adminui.sidebar_navigation",
+    },
+    "COMMAND": {"search_models": True, "show_history": True},
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -291,7 +394,10 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # Project-wide overrides win over any app's, which is what lets the
+        # dashboard replace the admin's front page without depending on where
+        # this project's apps happen to sit in INSTALLED_APPS.
+        "DIRS": [BASE_DIR / "src" / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [

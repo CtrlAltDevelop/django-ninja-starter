@@ -14,7 +14,7 @@ from datetime import timedelta
 from typing import Any, Final
 
 from django.apps import apps
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.http import HttpRequest
 
 from infrastructure.common.app_labels import app_installed
@@ -68,6 +68,20 @@ def token_model(mode: str, name: str) -> Any:
             f"DJANGO_AUTH_TOKEN_MODE={mode} needs DJANGO_OAUTH_MODE to enable {app_label}."
         )
     return apps.get_model(app_label, name)
+
+
+def by_public_id(queryset: Any, public_id: str) -> Any | None:
+    """Return the record this id names, or ``None`` if it names none.
+
+    The id arrives from the URL as a string and the primary key it has to become
+    is a UUID. A value that cannot be one is "no such session", not a crash --
+    and an unguarded ``filter(pk=...)`` gives a crash, because Django validates
+    the key before it queries.
+    """
+    try:
+        return queryset.filter(pk=public_id).first()
+    except (ValidationError, ValueError, TypeError):
+        return None
 
 
 def credential_handle(token: str, *, token_type: str) -> str:

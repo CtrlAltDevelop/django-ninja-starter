@@ -1,0 +1,111 @@
+{% extends 'admin/base.html' %}
+
+{% comment %}
+The admin's front page, replaced. Django's is a list of models, which answers
+"what exists" and never "what needs doing" -- so an editor lands on a menu and
+has to go looking for the page they were asked to change.
+
+The cards above the model list are the numbers that change what somebody does
+next: how much of the site is translated, which required content is still empty,
+whether sign-ins have started failing. Each is filled in by
+infrastructure.common.adminui.dashboard, each is permission-checked there, and
+each is missing rather than empty when its app is not installed.
+{% endcomment %}
+
+{% load i18n unfold %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block branding %}
+    {% include "unfold/helpers/site_branding.html" %}
+{% endblock %}
+
+{% block content %}
+    {% if content_numbers or account_numbers %}
+        <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 lg:grid-cols-4">
+            {% if content_numbers %}
+                {% component "unfold/components/card.html" with href=content_numbers.pages_link icon="web" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Published pages" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ content_numbers.pages }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {{ content_numbers.sections }} {% trans "sections" %}{% if content_numbers.drafts %} · {{ content_numbers.drafts }} {% trans "draft(s)" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+
+                {% component "unfold/components/card.html" with icon="text_fields" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Content fields" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ content_numbers.fields }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "across" %} {{ content_numbers.languages|length }} {% trans "language(s)" %}</span>
+                {% endcomponent %}
+
+                {% component "unfold/components/card.html" with icon="warning" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Required, still empty" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ content_numbers.required_missing }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {% if content_numbers.required_missing %}{% trans "fields a page still needs" %}{% else %}{% trans "everything required is written" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+            {% endif %}
+
+            {% if account_numbers %}
+                {% component "unfold/components/card.html" with href=account_numbers.link icon="person" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Accounts" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ account_numbers.total }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{{ account_numbers.recent }} {% trans "joined this week" %}</span>
+                {% endcomponent %}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    {% if content_numbers or sign_in_numbers %}
+        <div class="grid grid-cols-1 gap-4 mb-8 lg:grid-cols-2">
+            {% if content_numbers %}
+                {% component "unfold/components/card.html" with title=_("Translation coverage") %}
+                    <div class="flex flex-col gap-4">
+                        {% for row in content_numbers.coverage %}
+                            {% component "unfold/components/progress.html" with title=row.language description=row.percent|stringformat:"s"|add:"%" value=row.percent %}{% endcomponent %}
+                        {% endfor %}
+                        <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                            {% trans "A field with no translation falls back to the default language, so a page always renders." %}
+                        </span>
+                    </div>
+                {% endcomponent %}
+            {% endif %}
+
+            {% if sign_in_numbers %}
+                {% component "unfold/components/card.html" with title=_("Sign-ins, last 7 days") %}
+                    <div class="flex flex-col gap-4">
+                        <div class="flex flex-row gap-8">
+                            <div class="flex flex-col">
+                                <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Succeeded" %}</span>
+                                <h2 class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ sign_in_numbers.succeeded }}</h2>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Failed" %}</span>
+                                <h2 class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ sign_in_numbers.failed }}</h2>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Success rate" %}</span>
+                                <h2 class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ sign_in_numbers.success_rate }}%</h2>
+                            </div>
+                        </div>
+
+                        {% for row in sign_in_numbers.by_method %}
+                            {% component "unfold/components/progress.html" with title=row.method description=row.count value=row.count %}{% endcomponent %}
+                        {% empty %}
+                            <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Nobody has signed in this week." %}</span>
+                        {% endfor %}
+                    </div>
+                {% endcomponent %}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <div class="flex flex-col lg:flex-row lg:gap-8">
+        <div class="grow">
+            {% include "unfold/helpers/app_list_default.html" %}
+        </div>
+
+        {% include "unfold/helpers/history.html" %}
+    </div>
+{% endblock %}

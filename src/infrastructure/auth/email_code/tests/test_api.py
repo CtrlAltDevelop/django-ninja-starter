@@ -19,7 +19,7 @@ def _last_code() -> str:
 def _start(client: Client, url: str, email: str = "zoe@example.com") -> str:
     response = client.post(url, {"email": email}, content_type="application/json")
     assert response.status_code == 200, response.content
-    return response.json()["ticket"]
+    return response.json()["data"]["ticket"]
 
 
 def test_signup_sends_a_code_and_creates_the_account(db: None) -> None:
@@ -35,7 +35,7 @@ def test_signup_sends_a_code_and_creates_the_account(db: None) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["credentials"]["access_token"]
+    assert response.json()["data"]["credentials"]["access_token"]
     assert get_user_model()._default_manager.filter(email="zoe@example.com").exists()
 
 
@@ -44,7 +44,7 @@ def test_the_start_response_masks_the_destination(db: None) -> None:
         LOGIN_START, {"email": "zoe@example.com"}, content_type="application/json"
     )
 
-    assert response.json()["destination"] == "z***@example.com"
+    assert response.json()["data"]["destination"] == "z***@example.com"
 
 
 def test_the_same_response_comes_back_whether_or_not_an_account_exists(db: None) -> None:
@@ -53,10 +53,10 @@ def test_the_same_response_comes_back_whether_or_not_an_account_exists(db: None)
 
     known = client.post(
         LOGIN_START, {"email": "zoe@example.com"}, content_type="application/json"
-    ).json()
+    ).json()["data"]
     unknown = client.post(
         LOGIN_START, {"email": "ghost@example.com"}, content_type="application/json"
-    ).json()
+    ).json()["data"]
 
     assert known.keys() == unknown.keys()
     assert known["expires_in"] == unknown["expires_in"]
@@ -201,7 +201,7 @@ def _credentials(client: Client) -> dict:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    return response.json()["credentials"]
+    return response.json()["data"]["credentials"]
 
 
 def test_logout_revokes_the_presented_token(db: None) -> None:
@@ -213,7 +213,7 @@ def test_logout_revokes_the_presented_token(db: None) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {"detail": "Signed out."}
+    assert response.json()["data"] == {"detail": "Signed out."}
     assert TokenFamily.objects.get().revoked_at is not None
     assert AuthEvent.objects.filter(event_type=AuthEventType.LOGOUT, method="email_code").exists()
 

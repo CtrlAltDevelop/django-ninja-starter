@@ -1,6 +1,7 @@
 """Admin for server-side sessions and their access tokens."""
 
 from django.contrib import admin
+from unfold.admin import TabularInline
 
 from infrastructure.common.admin import ReadOnlyAdmin, RevocableAdmin
 from infrastructure.oauth.session.models import (
@@ -10,7 +11,7 @@ from infrastructure.oauth.session.models import (
 )
 
 
-class SessionAccessTokenInline(admin.TabularInline):
+class SessionAccessTokenInline(TabularInline):
     """The tokens a session has minted, shown where they make sense: under it."""
 
     model = SessionAccessToken

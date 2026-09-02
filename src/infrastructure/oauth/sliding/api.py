@@ -8,6 +8,8 @@ from ninja import Router
 
 from infrastructure.auth.core.sessions import api_auth, revoke_credentials
 from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
+from infrastructure.oauth.core.exchange import router as exchange_router
 from infrastructure.oauth.core.schemas import (
     CredentialsOut,
     MessageOut,
@@ -25,6 +27,9 @@ from infrastructure.oauth.sliding.services import (
 )
 
 router = Router()
+# Mode-independent: it only asks `issue_credentials` for whatever this mode
+# issues, so all three publish it at the same path.
+router.add_router("", exchange_router)
 
 
 @router.post(
@@ -87,5 +92,5 @@ def sessions(request: HttpRequest) -> SessionListOut:
 def end_session(request: HttpRequest, session_id: str) -> MessageOut:
     """Revoke a named token. Scoped to the caller, so one account cannot end another's."""
     if not revoke_token(request.user, session_id):
-        raise ApiError("No such session.", status=404)
+        raise ApiError("No such session.", status=404, title=ResponseTitle.SESSION_NOT_FOUND)
     return MessageOut(detail="Session ended.")

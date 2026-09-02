@@ -25,7 +25,7 @@ def _login(client: Client, identifier: str = "zoe") -> dict[str, Any]:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    credentials: dict[str, Any] = response.json()["credentials"]
+    credentials: dict[str, Any] = response.json()["data"]["credentials"]
     return credentials
 
 
@@ -40,7 +40,7 @@ def test_refreshing_returns_a_new_pair(db: None) -> None:
     response = _refresh(client, original["refresh_token"])
 
     assert response.status_code == 200, response.content
-    fresh = response.json()
+    fresh = response.json()["data"]
     assert fresh["access_token"] != original["access_token"]
     assert fresh["refresh_token"] != original["refresh_token"]
     assert fresh["session_id"] == original["session_id"]
@@ -48,12 +48,12 @@ def test_refreshing_returns_a_new_pair(db: None) -> None:
 
 def test_a_refreshed_access_token_authenticates(db: None) -> None:
     client = Client()
-    fresh = _refresh(client, _login(client)["refresh_token"]).json()
+    fresh = _refresh(client, _login(client)["refresh_token"]).json()["data"]
 
     response = client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {fresh['access_token']}")
 
     assert response.status_code == 200, response.content
-    assert response.json()["mode"] == "rotation"
+    assert response.json()["data"]["mode"] == "rotation"
 
 
 def test_rotation_records_its_ancestry(db: None) -> None:
@@ -76,14 +76,14 @@ def test_a_spent_refresh_token_cannot_be_spent_twice(db: None) -> None:
     response = _refresh(client, original["refresh_token"])
 
     assert response.status_code == 401
-    assert "security" in response.json()["detail"]
+    assert "security" in response.json()["description"]
 
 
 def test_replaying_a_spent_token_ends_the_whole_family(db: None) -> None:
     """The thief and the real client are indistinguishable, so both are cut off."""
     client = Client()
     original = _login(client)
-    successor = _refresh(client, original["refresh_token"]).json()
+    successor = _refresh(client, original["refresh_token"]).json()["data"]
 
     _refresh(client, original["refresh_token"])
 
@@ -134,7 +134,7 @@ def test_refreshing_after_a_revoked_session_is_refused(db: None) -> None:
     response = _refresh(client, credentials["refresh_token"])
 
     assert response.status_code == 401
-    assert "Sign in again" in response.json()["detail"]
+    assert "Sign in again" in response.json()["description"]
 
 
 def test_revoking_reports_success_even_for_an_unknown_token(db: None) -> None:
@@ -148,7 +148,9 @@ def test_sessions_lists_what_the_login_created(db: None) -> None:
     client = Client()
     credentials = _login(client)
 
-    body = client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}").json()
+    body = client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}").json()[
+        "data"
+    ]
 
     assert [entry["session_id"] for entry in body["sessions"]] == [credentials["session_id"]]
     assert body["sessions"][0]["auth_method"] == "password"
@@ -203,6 +205,21 @@ def test_only_the_owning_account_sees_its_sessions(db: None) -> None:
     credentials = _login(client, "zoe")
     _login(Client(), "someone-else")
 
-    body = client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}").json()
+    body = client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}").json()[
+        "data"
+    ]
 
     assert len(body["sessions"]) == 1
+
+
+def test_ending_a_malformed_session_id_is_a_not_found(db: None) -> None:
+    """A path segment that is not a UUID is no session, not a server error."""
+    client = Client()
+    credentials = _login(client)
+
+    response = client.delete(
+        f"{SESSIONS}/not-a-uuid",
+        HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}",
+    )
+
+    assert response.status_code == 404

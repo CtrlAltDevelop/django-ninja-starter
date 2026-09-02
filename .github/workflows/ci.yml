@@ -31,3 +31,12 @@ jobs:
           /tmp/django-ninja-starter-wheel/bin/python manage.py startapi example --api-version v2
           PATH="/tmp/django-ninja-starter-wheel/bin:$PATH" make check
           PATH="/tmp/django-ninja-starter-wheel/bin:$PATH" make test
+      - name: Build and tour the example project from that wheel
+        # The wheel's own django-ninja-starter is first on the path here, so
+        # this is the published generator building the example, not the
+        # checkout's copy of it.
+        run: |
+          /tmp/django-ninja-starter-wheel/bin/python examples/build.py \
+            --into /tmp/example-tour --rebuild
+          /tmp/django-ninja-starter-wheel/bin/python examples/walkthrough.py \
+            --project /tmp/example-tour

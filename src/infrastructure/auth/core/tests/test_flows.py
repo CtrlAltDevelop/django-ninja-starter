@@ -205,4 +205,4 @@ def test_an_identity_error_becomes_a_400(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert "valid email" in response.json()["detail"]
+    assert "valid email" in response.json()["description"]

@@ -21,6 +21,7 @@ dependencies = [
   "cryptography>=45,<48",
   "Django>=5.2,<7.0",
   "django-ninja>=1.4,<2.0",
+  "django-unfold>=0.104,<1.0",
   "PyJWT>=2.10,<3.0",
   "python-dotenv>=1.1,<2.0",
 ]
@@ -32,7 +33,11 @@ oauth = ["httpx>=0.28,<1.0"]
 redis = ["redis>=5.0,<7.0"]
 # Authenticator-app second factors.
 totp = ["pyotp>=2.9,<3.0"]
-all = ["{{ project_name }}[oauth,redis,totp]"]
+# An ASGI server and a WebSocket protocol implementation, for the notification
+# socket. `runserver` is WSGI and will not serve it, and uvicorn on its own
+# speaks no WebSocket -- it needs one of these alongside it.
+asgi = ["uvicorn>=0.52,<1.0", "websockets>=15,<18"]
+all = ["{{ project_name }}[oauth,redis,totp,asgi]"]
 dev = [
   "{{ project_name }}[all]",
   "fakeredis>=2.26,<3.0",

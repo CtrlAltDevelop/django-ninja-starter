@@ -1,6 +1,7 @@
 """Admin for OAuth clients, scopes, consents, and the audit trail."""
 
 from django.contrib import admin
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
 from infrastructure.common.admin import ReadOnlyAdmin
 from infrastructure.oauth.core.models import (
@@ -14,7 +15,7 @@ from infrastructure.oauth.core.models import (
 
 
 @admin.register(OAuthScope)
-class OAuthScopeAdmin(admin.ModelAdmin):
+class OAuthScopeAdmin(UnfoldModelAdmin):
     list_display = ("name", "is_default", "is_active", "description")
     list_filter = ("is_default", "is_active")
     search_fields = ("name", "description")
@@ -22,7 +23,7 @@ class OAuthScopeAdmin(admin.ModelAdmin):
 
 
 @admin.register(OAuthClient)
-class OAuthClientAdmin(admin.ModelAdmin):
+class OAuthClientAdmin(UnfoldModelAdmin):
     """Registered clients. The client secret is stored hashed and never shown."""
 
     list_display = (
@@ -43,7 +44,7 @@ class OAuthClientAdmin(admin.ModelAdmin):
 
 
 @admin.register(OAuthConsent)
-class OAuthConsentAdmin(admin.ModelAdmin):
+class OAuthConsentAdmin(UnfoldModelAdmin):
     """What a user has agreed a client may do on their behalf."""
 
     list_display = ("user", "client", "granted_at", "expires_at", "revoked_at")

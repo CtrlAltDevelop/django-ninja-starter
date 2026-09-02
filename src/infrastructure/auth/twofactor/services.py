@@ -19,6 +19,7 @@ from infrastructure.auth.core.identities import account_email, account_phone, no
 from infrastructure.auth.core.models import PhoneNumber
 from infrastructure.auth.core.throttling import guard_delivery
 from infrastructure.auth.twofactor.models import RecoveryCode, SecondFactor, SecondFactorMethod
+from infrastructure.common.responses import ResponseTitle
 
 CODE_PURPOSE = "second_factor_code"
 TOTP_PERIOD = 30
@@ -32,7 +33,11 @@ DELIVERABLE = {SecondFactorMethod.SMS, SecondFactorMethod.EMAIL}
 def require_enabled(method: str) -> None:
     """Reject a factor the deployment has not turned on."""
     if method not in settings.AUTH_SECOND_FACTORS:
-        raise AuthError(f"The {method} second factor is not enabled.", status=404)
+        raise AuthError(
+            f"The {method} second factor is not enabled.",
+            status=404,
+            title=ResponseTitle.SECOND_FACTOR_NOT_ENABLED,
+        )
 
 
 def confirmed_factors(user: Any) -> list[SecondFactor]:
@@ -44,7 +49,11 @@ def factor_for(user: Any, method: str) -> SecondFactor:
         user=user, method=method, confirmed_at__isnull=False
     ).first()
     if factor is None:
-        raise AuthError(f"No {method} second factor is set up for this account.", status=400)
+        raise AuthError(
+            f"No {method} second factor is set up for this account.",
+            status=400,
+            title=ResponseTitle.SECOND_FACTOR_NOT_SET_UP,
+        )
     return factor
 
 
@@ -58,7 +67,11 @@ def begin_totp(user: Any) -> tuple[SecondFactor, str, str]:
         defaults={"last_counter": 0},
     )
     if factor.confirmed_at is not None:
-        raise AuthError("An authenticator app is already set up for this account.", status=409)
+        raise AuthError(
+            "An authenticator app is already set up for this account.",
+            status=409,
+            title=ResponseTitle.SECOND_FACTOR_EXISTS,
+        )
     factor.set_secret(secret)
     factor.last_counter = 0
     factor.save(update_fields=["secret_encrypted", "last_counter"])
@@ -151,7 +164,9 @@ def enroll_sms(user: Any, phone: str) -> SecondFactor:
     number = normalize_phone(phone)
     owner = PhoneNumber.objects.filter(number=number).select_related("user").first()
     if owner is not None and owner.user_id != user.pk:
-        raise AuthError("That phone number is already in use.", status=409)
+        raise AuthError(
+            "That phone number is already in use.", status=409, title=ResponseTitle.PHONE_IN_USE
+        )
     if owner is None:
         PhoneNumber.objects.create(user=user, number=number, is_verified=False)
     factor, _ = SecondFactor.objects.get_or_create(user=user, method=SecondFactorMethod.SMS)
@@ -165,7 +180,11 @@ def enroll_email(user: Any) -> SecondFactor:
     require_enabled(SecondFactorMethod.EMAIL)
     address = account_email(user)
     if not address:
-        raise AuthError("This account has no email address.", status=400)
+        raise AuthError(
+            "This account has no email address.",
+            status=400,
+            title=ResponseTitle.ACCOUNT_HAS_NO_EMAIL,
+        )
     factor, _ = SecondFactor.objects.get_or_create(user=user, method=SecondFactorMethod.EMAIL)
     factor.destination = address
     factor.save(update_fields=["destination"])
@@ -189,10 +208,18 @@ def send_factor_code(user: Any, factor: SecondFactor) -> tuple[str, str, str]:
     Returns the ticket that redeems it, the channel, and the raw destination.
     """
     if factor.method not in DELIVERABLE:
-        raise AuthError(f"The {factor.method} factor does not use a sent code.", status=400)
+        raise AuthError(
+            f"The {factor.method} factor does not use a sent code.",
+            status=400,
+            title=ResponseTitle.SECOND_FACTOR_NOT_CODE_BASED,
+        )
     destination = factor_destination(user, factor)
     if not destination:
-        raise AuthError("This factor has no destination on file.", status=400)
+        raise AuthError(
+            "This factor has no destination on file.",
+            status=400,
+            title=ResponseTitle.SECOND_FACTOR_NO_DESTINATION,
+        )
     channel = "sms" if factor.method == SecondFactorMethod.SMS else "email"
     guard_delivery(f"2fa:{channel}", destination)
     code = generate_numeric_code()
@@ -216,5 +243,9 @@ def redeem_factor_code(ticket: str, code: str, user: Any) -> Challenge:
     """Settle a delivered code, refusing one minted for a different account."""
     challenge = get_challenge_store().verify(ticket, code, purpose=CODE_PURPOSE)
     if challenge.subject != str(user.pk):
-        raise AuthError("That code was issued for a different account.", status=400)
+        raise AuthError(
+            "That code was issued for a different account.",
+            status=400,
+            title=ResponseTitle.INVALID_CODE,
+        )
     return challenge

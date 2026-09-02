@@ -1,4 +1,4 @@
-.PHONY: install check test run migrate migrations superuser
+.PHONY: install check test run serve migrate migrations superuser
 
 install:
 	python3 -m pip install -e '.[dev]'
@@ -18,6 +18,12 @@ docs:
 
 run:
 	python3 manage.py runserver
+
+# `runserver` is WSGI and will not serve the notification WebSocket; this will.
+# `config/asgi.py` defaults to production settings, the way a deployment expects.
+serve:
+	DJANGO_SETTINGS_MODULE=config.settings.development \
+		python3 -m uvicorn config.asgi:application --reload --app-dir src
 
 migrate:
 	python3 manage.py migrate

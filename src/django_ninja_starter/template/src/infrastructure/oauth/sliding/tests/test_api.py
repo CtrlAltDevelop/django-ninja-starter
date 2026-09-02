@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.test import Client
 from django.utils import timezone
 
@@ -35,7 +36,7 @@ def _login(client: Client, identifier: str = "zoe") -> dict[str, Any]:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    credentials: dict[str, Any] = response.json()["credentials"]
+    credentials: dict[str, Any] = response.json()["data"]["credentials"]
     return credentials
 
 
@@ -63,7 +64,7 @@ def test_refreshing_pushes_the_idle_deadline_out(db: None) -> None:
     assert response.status_code == 200, response.content
     token.refresh_from_db()
     assert token.expires_at > timezone.now() + timedelta(seconds=60)
-    assert response.json()["expires_in"] > 60
+    assert response.json()["data"]["expires_in"] > 60
 
 
 def test_refreshing_returns_the_same_token_value(db: None) -> None:
@@ -75,7 +76,7 @@ def test_refreshing_returns_the_same_token_value(db: None) -> None:
         REFRESH,
         {"refresh_token": credentials["access_token"]},
         content_type="application/json",
-    ).json()
+    ).json()["data"]
 
     assert fresh["refresh_token"] == ""
     assert (
@@ -124,7 +125,7 @@ def test_refreshing_a_revoked_token_is_refused(db: None) -> None:
     )
 
     assert response.status_code == 401
-    assert "Sign in again" in response.json()["detail"]
+    assert "Sign in again" in response.json()["description"]
 
 
 def test_a_token_past_its_absolute_lifetime_cannot_slide(db: None) -> None:
@@ -156,7 +157,7 @@ def test_revoking_a_listed_token_stops_it_working(db: None) -> None:
     client = Client()
     credentials = _login(client)
     header = {"HTTP_AUTHORIZATION": f"Bearer {credentials['access_token']}"}
-    body = client.get(SESSIONS, **header).json()
+    body = client.get(SESSIONS, **header).json()["data"]
 
     assert body["mode"] == "sliding"
     assert (
@@ -200,4 +201,30 @@ def test_a_signed_token_for_a_row_that_no_longer_exists_is_refused(db: None) -> 
     )
 
     assert response.status_code == 401
-    assert "not valid" in response.json()["detail"]
+    assert "not valid" in response.json()["description"]
+
+
+def test_ending_a_malformed_session_id_is_a_not_found(db: None) -> None:
+    """A path segment that is not a UUID is no session, not a server error."""
+    client = Client()
+    credentials = _login(client)
+
+    response = client.delete(
+        f"{SESSIONS}/not-a-uuid",
+        HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}",
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_browser_session_can_be_exchanged_for_this_mode_s_credential(db: None) -> None:
+    """The exchange is mode-independent, so it has to issue into this mode's tables."""
+    user = get_user_model()._default_manager.create_user(username="zoe")
+    client = Client()
+    client.force_login(user)
+
+    response = client.post("/api/v1/auth/token/exchange")
+
+    assert response.status_code == 200, response.content
+    assert response.json()["data"]["token_type"] == "bearer"
+    assert SlidingToken.objects.filter(user=user).count() == 1
