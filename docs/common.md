@@ -73,6 +73,28 @@ that installs the app and mounts its router. `config/api.py` builds one
 `NinjaAPI` per registered version and attaches every registry router plus the
 routers each optional app publishes, so a new version is a key in one JSON file.
 
+### Naming a group in Swagger
+
+Every router is attached under a tag, and the tag is declared beside the router
+that owns it -- in `api_registry.json` for a feature app, in `settings/base.py`
+for the apps the starter ships:
+
+```json
+{
+  "prefix": "/orders",
+  "router": "apps.orders.api.v1.router",
+  "tag": "Orders",
+  "description": "Place an order, read one back, and cancel one."
+}
+```
+
+`config/api.py` collects those into the document's own `tags` list, which is
+what makes Swagger's groups more than an alphabetical pile of accordions: the
+`description` is printed under the group heading, and the order the routers are
+attached in is the order the groups appear. A tag belonging to an app this
+deployment did not enable is not in the list at all, for the same reason its
+routes are not.
+
 ### Refusing a request
 
 ```python

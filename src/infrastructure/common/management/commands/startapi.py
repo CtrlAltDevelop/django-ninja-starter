@@ -66,6 +66,10 @@ class Command(BaseCommand):
             "prefix": prefix,
             "router": router_path,
             "tag": _class_name(app_name),
+            # The group heading and blurb Swagger shows for this app. A
+            # placeholder in the same spirit as the example endpoint below:
+            # true as written, and worth replacing with what the app is for.
+            "description": f"Endpoints published by the {app_name} app.",
         }
         routes = registry.setdefault(version, {"routes": []})["routes"]
         if any(item["prefix"] == prefix or item["router"] == router_path for item in routes):

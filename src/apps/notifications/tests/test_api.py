@@ -128,3 +128,27 @@ def test_reading_a_notification_that_does_not_exist_is_a_404(client: Client, ali
     missing = "00000000-0000-0000-0000-000000000000"
 
     assert client.post(f"{LIST}/{missing}/read", **_bearer(alice)).status_code == 404
+
+
+def test_the_socket_is_documented_in_the_tag_swagger_renders(client: Client) -> None:
+    """The one part of this app that cannot be an operation still has to be findable.
+
+    OpenAPI has no vocabulary for a duplex connection and Swagger has no
+    transport to open one, so publishing a path for the socket would render an
+    operation whose "Try it out" is guaranteed to fail. The group heading these
+    four endpoints already sit under is the honest place for it -- which only
+    works while the description actually says where the socket is and what it
+    speaks.
+    """
+    from django.conf import settings
+
+    schema = client.get("/api/v1/openapi.json").json()
+    tag = next(item for item in schema["tags"] if item["name"] == "Notifications")
+
+    assert settings.NOTIFICATIONS_WS_PATH in tag["description"]
+    for command in ("authenticate", "read_all", "unread", "ping"):
+        assert command in tag["description"], command
+    for frame in ("ready", "authenticated", "notification", "pong", "error"):
+        assert frame in tag["description"], frame
+    # No path may claim to be the socket: that is the promise this replaces.
+    assert not [path for path in schema["paths"] if path.endswith(settings.NOTIFICATIONS_WS_PATH)]

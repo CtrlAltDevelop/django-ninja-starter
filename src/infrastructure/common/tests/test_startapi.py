@@ -46,6 +46,7 @@ def test_startapi_creates_and_registers_versioned_router(tmp_path: Path) -> None
             "prefix": "/order-items",
             "router": "apps.order_items.api.v2_1.router",
             "tag": "OrderItems",
+            "description": "Endpoints published by the order_items app.",
         }
     ]
 

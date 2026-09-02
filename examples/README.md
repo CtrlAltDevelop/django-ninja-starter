@@ -36,11 +36,222 @@ python examples/build.py --rebuild
 
 ## The tour
 
-`walkthrough.py` prints a transcript of the calls a real client would make:
-sign-up and sign-in on all four methods, enrolling and using all four second
-factors, the notes app across both versions, the CMS in two languages, the
-notification API and its WebSocket, refresh and revoke, the social start
-endpoints, the audit trail, the JWT claims and both OpenAPI documents.
+`walkthrough.py` prints a transcript of the calls a real client would make,
+against every app the `.env` above turns on. Sixteen sections, in the order the
+tour runs them:
+
+| # | Section | Apps | What it shows |
+| --- | --- | --- | --- |
+| 1 | What is installed | `config.settings` | The environment variables that decided the rest of this list |
+| 2 | What those apps demand | `common` | `manage.py check`, reporting on the apps you turned on and nothing else |
+| 3 | Health | `common` | The two probes a load balancer and an orchestrator ask different questions with |
+| 4 | Password login | `auth_password` | Sign up, sign in, change, and the forgotten-password round trip |
+| 5 | Accounts and profiles | `accounts` | The user model every login resolves to, and a partial `PATCH` of the profile |
+| 6 | A feature app of your own | `apps.notes` | One model at two API versions, rows scoped to the caller |
+| 7 | Content, in two languages | `apps.cms` | Pages, sections, typed fields, menus, drafts and preview links |
+| 8 | Notifications | `apps.notifications` | The stored history over HTTP, then three live sockets |
+| 9 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
+| 10 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
+| 11 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
+| 12 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
+| 13 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
+| 14 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
+| 15 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
+| 16 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
+
+The rest of this section is what each one calls, and the property it is there to
+demonstrate. Every path below is printed by the tour, and is the path a real
+client uses.
+
+### Password login — `auth_password`
+
+The one method with a secret the user chose, and the only one with a recovery
+flow, because it is the only one with something to forget.
+
+| Call | What to notice |
+| --- | --- |
+| `POST /api/v1/auth/password/signup` | Hands back credentials directly: sign-up *is* a login |
+| `POST /api/v1/auth/password/login` | The identifier is the username **or** the email address |
+| `POST /api/v1/auth/password/login` (wrong password) | A 401 that says nothing about which half was wrong |
+| `POST /api/v1/auth/password/change` | Retires every credential the account had, including the one that made the call |
+| `POST /api/v1/auth/password/forgot` | The answer is identical whether or not the address exists — an enumerable endpoint is a user list |
+| `POST /api/v1/auth/password/reset` | Ticket plus the delivered code; the tour reads the code out of the outbox the way an inbox would |
+
+`DJANGO_AUTH_PASSWORD_RESET_BASE_URL` in `env.example` is the page the emailed
+reset link points at — your front end, not this API.
+
+### Accounts and profiles — `accounts`
+
+`GET /api/v1/users/me` and `PATCH /api/v1/users/me/profile`. The profile is
+partial: an omitted field is left alone, an empty string clears it. Always
+installed, and the table every login method resolves to.
+
+### One-time code by email — `auth_email_code`
+
+No password at all. Two steps for signing up and the same two for signing in.
+
+| Call | What to notice |
+| --- | --- |
+| `POST /api/v1/auth/email-code/signup/start` | Returns a ticket; the code goes to the address |
+| `POST /api/v1/auth/email-code/signup/verify` | Only the ticket and the code together are a login |
+| `POST /api/v1/auth/email-code/login/start` | Signing in later is the identical pair of calls |
+| `POST /api/v1/auth/email-code/login/verify` (wrong code) | Refused, and the ticket counts the attempt against itself |
+| `POST /api/v1/auth/email-code/logout` | Takes the credential in the body — all the server needs to retire it |
+
+### One-time code by SMS — `auth_sms_code`
+
+`POST /api/v1/auth/sms-code/signup/start` and `/verify`, over a phone number.
+This is the one identifier that produces an account with no email address at
+all, which is why it exists as its own app rather than a flag on the one above.
+
+### Magic link — `auth_magic_link`
+
+`POST /api/v1/auth/magic-link/signup/start`, then
+`POST /api/v1/auth/magic-link/verify` with the token out of the link. The client
+never sees a code: the token in the URL is the whole credential. The tour then
+replays the same link and gets a **410**, because the record is spent.
+
+### Second factors — `auth_twofactor`
+
+One app, four factors, all four toured. Enrolment is never real until a code
+confirms it, so a half-finished setup cannot lock an account out.
+
+| Call | What to notice |
+| --- | --- |
+| `POST /api/v1/auth/2fa/totp/enroll` → `/totp/confirm` | The server hands over a secret; the authenticator proves it arrived |
+| `POST /api/v1/auth/2fa/sms/enroll` → `/sms/confirm` | Enrol, receive a code, confirm |
+| `POST /api/v1/auth/2fa/email/enroll` → `/email/confirm` | The same shape over the inbox |
+| `POST /api/v1/auth/2fa/recovery/generate` | Shown once; the server keeps only digests |
+| `GET /api/v1/auth/2fa/methods` | What this account has enrolled |
+| `POST /api/v1/auth/password/login` | Now returns a `login_ticket` instead of credentials |
+| `POST /api/v1/auth/2fa/challenge` | Ask for a code on another enrolled factor instead |
+| `POST /api/v1/auth/2fa/verify` | Toured three times: with TOTP, with the SMS code, and with a recovery code |
+| `DELETE /api/v1/auth/2fa/sms` | Unenrol one factor, and read the list back |
+
+A recovery code is spent on use, which the tour shows by listing the factors
+again afterwards.
+
+### Token mode — `oauth_core` + `oauth_sliding` / `oauth_session` / `oauth_rotation`
+
+All three modes publish the same endpoints under `/auth/token`, so a client does
+not change when a deployment changes its mind. The example runs `rotation`.
+
+| Call | What to notice |
+| --- | --- |
+| `GET /api/v1/auth/token/sessions` | Every live credential for the account, as a device list would show it |
+| `POST /api/v1/auth/token/refresh` | In `sliding` mode the body is empty and the header carries it |
+| `DELETE /api/v1/auth/token/sessions/{session_id}` | End another session, scoped to the caller's own account |
+| `POST /api/v1/auth/token/revoke` | The presented credential stops working immediately |
+
+Re-run the whole tour under a different mode with one switch:
+
+```bash
+DJANGO_AUTH_TOKEN_MODE=sliding python examples/walkthrough.py
+```
+
+`DJANGO_AUTH_TOKEN_MODE=none` is toured too: the section says out loud that the
+mode signs callers in with a Django session cookie and publishes no
+`/auth/token` endpoints, because there is no credential to refresh or revoke.
+
+### Social sign-in — `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github`
+
+`GET /api/v1/oauth/{provider}/start` for each of the four, each answering
+**302**. Start is the half this project owns: state, PKCE where the provider
+supports it, and a redirect the browser follows.
+
+The callback is answered by the provider against a real client id, so it is the
+one thing an offline tour cannot show. [`docs/oauth/`](../docs/oauth) has the
+setup for each, including why Apple posts its callback instead of redirecting.
+
+### Content, in two languages — `apps.cms`
+
+Enabled by `DJANGO_CMS_ENABLED=true` alone. The tour first builds a site the way
+an editor in the admin would — a page with sections and typed fields, a nested
+section, a library footer placed onto the page, a menu, and a second page left
+as a draft — and then reads all of it back over the public API, unauthenticated.
+
+| Call | What to notice |
+| --- | --- |
+| `GET /api/v1/cms/pages` | What a menu is built from; `id` is what the detail route takes |
+| `GET /api/v1/cms/site` | Name, tagline, logo, contact, and the languages on offer |
+| `GET /api/v1/cms/pages/home` | The page's own sections and the shared footer in one list, each field carrying the type of its value |
+| `GET /api/v1/cms/pages/home?language=fa` | The headline is translated, the image is not — so it falls back field by field rather than leaving a hole in the layout |
+| `GET /api/v1/cms/menus/main` | Navigation is content, so adding a page to it is not a deploy |
+| `GET /api/v1/cms/pages/about-us` | A draft is a **404** |
+| `GET /api/v1/cms/pages/about-us?preview=…` | The same draft through a signed preview link |
+| `GET /api/v1/cms/pages/home` with `Accept-Language: fa` | What decides for a client that asks for nothing in particular |
+
+### Notifications — `apps.notifications`
+
+Enabled by `DJANGO_NOTIFICATIONS_ENABLED=true` alone. Two halves: the history a
+client reads when it opens, and the live feed it holds a connection to.
+
+Over HTTP:
+
+| Call | What to notice |
+| --- | --- |
+| `GET /api/v1/notifications/unread-count` | The badge a client renders; zero before anything is said |
+| `notify_user(...)` / `notify_everyone(...)` | **Not** an endpoint. A notification is created by the code that has something to say, so it is a function call, not a `POST` |
+| `GET /api/v1/notifications` | Newest first: what was addressed to this account and what was addressed to everybody, in one list. Another account's is simply absent — the queryset starts scoped and no parameter widens it |
+| `POST /api/v1/notifications/{id}/read` | Read state is per account, so a global notification is read by each person separately |
+| `GET /api/v1/notifications?unread=true` | The query a notification tray actually makes on open |
+| `POST /api/v1/notifications/{id}/read` (somebody else's) | A **404**, the same answer an id that never existed gets |
+| `POST /api/v1/notifications/read-all` | Clearing the tray |
+
+Then three sockets on `DJANGO_NOTIFICATIONS_WS_PATH`, because the socket has
+three things worth showing:
+
+1. **No credential at all.** The connection is accepted and joins the channel
+   everybody is on, then receives a broadcast. This is the design, not a
+   fallback: a page renders announcements to a visitor who never signs in.
+2. **Unlocked mid-connection.** The `authenticate` command adds this account's
+   own channel to the connection that already had the public one, so a client
+   opens one socket rather than one per audience. Authenticating also replays
+   the backlog — oldest first, bounded by
+   `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG`, so a client away for a year is not
+   sent a year; the list endpoint above holds the rest. The tour then creates a
+   private notification and watches it arrive, reads it over the socket (so a
+   second tab needs no HTTP call), sends a mistyped id and gets an `error`
+   **frame rather than a close**, and proves the point with a `ping`.
+3. **A credential in the handshake.** `?token=` — the one a browser can set — is
+   honoured at connect, so a client that already knows who it is does not wait a
+   round trip.
+
+### A feature app of your own — `apps.notes`
+
+The app `build.py` adds, and the only one here that the starter does not ship.
+
+| Call | What to notice |
+| --- | --- |
+| `POST /api/v1/notes/` | Two notes, one of them pinned |
+| `GET /api/v1/notes/` | v1 lists whole notes, pinned ones ahead of newer ones |
+| `GET /api/v2/notes/?q=oat` | v2 is the same rows through a lighter list, and can search them |
+| `GET /api/v1/notes/{id}` after `DELETE` | A **404** — which is exactly how another account's note reads, because a 403 would tell a stranger the id exists |
+
+See [the notes page](../docs/notes.md) for the app itself, and
+[**The notes app**](#the-notes-app) below for what to copy out of it.
+
+### What was recorded — `auth_core`, `oauth_core`
+
+Every step above left an audit row, and the tour counts them by method and event
+type. Then it decodes the credential it is holding and prints the claims a
+resource server can check before touching the database: subject, mode, methods,
+session id, expiry, and the `jti` handle — the only secret, and hashed in the
+database.
+
+### The document all of that produced — `config.api`
+
+One `NinjaAPI` per registered version, every enabled app's router attached. The
+tour reads `/api/{version}/openapi.json` for each version in the registry and
+prints the document's own tag list -- every group Swagger renders, in the order
+it renders them, with the line printed under each heading and the number of
+operations inside it. An operation whose tag the document never declared would
+be printed as one, and there are none. `v2` carries only
+the routers registered for it plus the ones every version shares, which is why
+the notes app appears in both documents and the health router in one. Swagger is
+at `/api/docs`, with a selector for both.
+
+## How the tour runs
 
 It drives Django's test client in-process rather than a running server, because
 the codes these flows send out are the point of the demo and only a process
@@ -69,24 +280,18 @@ different configuration:
 DJANGO_AUTH_TOKEN_MODE=sliding python examples/walkthrough.py
 ```
 
+An app that is not enabled is not skipped silently: the CMS and notification
+sections still print their heading and say which variable would have turned them
+on.
+
 ## The two feature apps that ship
 
 `cms/` and `notifications/` are not in this directory. They come out of the
 generator inside every project it writes, and the `.env` above is the whole of
 what turns them on — which is the property worth seeing, so the tour reads their
-settings back before it calls them.
-
-The CMS section builds a site the way the admin would: a page with sections and
-typed fields, a library footer placed on it, a menu, a draft reachable only
-through a signed preview link, and the same page in Persian falling back
-field by field. Then it reads all of it over the public API.
-
-The notifications section does the HTTP half — the list, the badge, marking one
-read, and another account's notification answering 404 — and then holds three
-sockets open: one anonymous connection receiving a broadcast with no credential
-at all, one that authenticates mid-connection and picks up its backlog, and one
-that presents a token in the handshake. It also sends a bad id, because the
-answer being a frame rather than a close is the part a client depends on.
+settings back before it calls them. Their full reference is
+[`docs/cms.md`](../docs/cms.md) and
+[`docs/notifications.md`](../docs/notifications.md).
 
 ## The notes app
 

@@ -13,6 +13,7 @@ Active when `DJANGO_AUTH_TOKEN_MODE=rotation`, and the default when
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/auth/token/exchange` | None | Exchange a browser session for a bearer credential |
+| `POST` | `/api/v1/auth/token/from-session` | None | Mint a bearer credential for the signed-in admin session |
 | `POST` | `/api/v1/auth/token/refresh` | None | Exchange a refresh token for a new pair |
 | `POST` | `/api/v1/auth/token/revoke` | None | Revoke the presented credential |
 | `GET` | `/api/v1/auth/token/sessions` | Bearer | List this account's live sessions |

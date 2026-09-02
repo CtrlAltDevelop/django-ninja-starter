@@ -54,6 +54,7 @@ TWO_FACTOR_ROUTES = {
 }
 TOKEN_ROUTES = {
     ("POST", "/auth/token/exchange"),
+    ("POST", "/auth/token/from-session"),
     ("POST", "/auth/token/refresh"),
     ("POST", "/auth/token/revoke"),
     ("GET", "/auth/token/sessions"),

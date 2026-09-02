@@ -22,11 +22,19 @@ ACCOUNTS_APP = "infrastructure.accounts.apps.AccountsConfig"
 AUTH_USER_MODEL = os.getenv("DJANGO_AUTH_USER_MODEL", "accounts.User")
 ACCOUNTS_DEFAULT_LOCALE = os.getenv("DJANGO_ACCOUNTS_DEFAULT_LOCALE", "en-us")
 ACCOUNTS_DEFAULT_TIMEZONE = os.getenv("DJANGO_ACCOUNTS_DEFAULT_TIMEZONE", "UTC")
+# Swagger groups its operations by tag and prints the description under the
+# group heading, so both are declared here, beside the router they belong to. A
+# router whose app is not installed contributes neither, which is what keeps the
+# document's tag list to the apps this deployment actually publishes.
 ACCOUNT_ROUTERS = [
     {
         "prefix": "/users",
         "router": "infrastructure.accounts.api.router",
         "tag": "Users",
+        "description": (
+            "The account every login resolves to, and the profile the login "
+            "flows enrich as they learn things."
+        ),
     }
 ]
 
@@ -71,11 +79,41 @@ if OAUTH_MODE != "none" or OAUTH_PROVIDERS:
 OAUTH_INSTALLED_APPS.extend(OAUTH_MODE_APPS[OAUTH_MODE])
 OAUTH_INSTALLED_APPS.extend(OAUTH_PROVIDER_APPS[provider] for provider in OAUTH_PROVIDERS)
 
+# Written out rather than title-cased from the provider name, because `.title()`
+# spells GitHub "Github" -- and the tag is the group heading a reader sees, next
+# to an admin that spells it correctly.
+OAUTH_PROVIDER_TAGS = {
+    "google": {
+        "tag": "OAuth - Google",
+        "description": "Sign in with Google. OIDC, so the profile comes out of the ID token.",
+    },
+    "apple": {
+        "tag": "OAuth - Apple",
+        "description": (
+            "Sign in with Apple. The callback is a cross-site form POST, and the "
+            "name arrives once, on the first sign-in only."
+        ),
+    },
+    "microsoft": {
+        "tag": "OAuth - Microsoft",
+        "description": (
+            "Sign in with Microsoft. The tenant this deployment names decides who "
+            "may sign in at all."
+        ),
+    },
+    "github": {
+        "tag": "OAuth - GitHub",
+        "description": (
+            "Sign in with GitHub. Not OIDC, so the profile is fetched over REST "
+            "after the token is exchanged."
+        ),
+    },
+}
 OAUTH_PROVIDER_ROUTERS = [
     {
         "prefix": f"/oauth/{provider}",
         "router": f"infrastructure.oauth.{provider}.api.router",
-        "tag": f"OAuth - {provider.title()}",
+        **OAUTH_PROVIDER_TAGS[provider],
     }
     for provider in OAUTH_PROVIDERS
 ]
@@ -152,11 +190,43 @@ AUTH_INSTALLED_APPS.extend(AUTH_METHOD_APPS[method] for method in AUTH_METHODS)
 if AUTH_SECOND_FACTORS:
     AUTH_INSTALLED_APPS.append("infrastructure.auth.twofactor.apps.AuthTwoFactorConfig")
 
+# As with the providers above: spelled out, because title-casing `sms_code`
+# produces "Sms Code" and the app's own verbose name does not.
+AUTH_METHOD_TAGS = {
+    "password": {
+        "tag": "Auth - Password",
+        "description": (
+            "Sign up and sign in with a password, change it, and recover a "
+            "forgotten one. The identifier is the username or the email address."
+        ),
+    },
+    "email_code": {
+        "tag": "Auth - Email Code",
+        "description": (
+            "Sign up and sign in with a one-time code emailed to the address. "
+            "Start returns a ticket; only the ticket and the code together are a login."
+        ),
+    },
+    "sms_code": {
+        "tag": "Auth - SMS Code",
+        "description": (
+            "Sign up and sign in with a one-time code sent by SMS. The one "
+            "identifier that produces an account with no email address at all."
+        ),
+    },
+    "magic_link": {
+        "tag": "Auth - Magic Link",
+        "description": (
+            "Sign up and sign in by following an emailed link. Good exactly "
+            "once: the token in the URL is the whole credential."
+        ),
+    },
+}
 AUTH_METHOD_ROUTERS = [
     {
         "prefix": f"/auth/{method.replace('_', '-')}",
         "router": f"infrastructure.auth.{method}.api.router",
-        "tag": f"Auth - {method.replace('_', ' ').title()}",
+        **AUTH_METHOD_TAGS[method],
     }
     for method in AUTH_METHODS
 ]
@@ -166,6 +236,11 @@ if AUTH_SECOND_FACTORS:
             "prefix": "/auth/2fa",
             "router": "infrastructure.auth.twofactor.api.router",
             "tag": "Auth - Two Factor",
+            "description": (
+                "Enrol, confirm and use the second factors this deployment "
+                "allows. Enrolment is not real until a code confirms it, and a "
+                "login with one enrolled finishes at /auth/2fa/verify."
+            ),
         }
     )
 
@@ -206,10 +281,25 @@ AUTH_TOKEN_ROUTERS = (
         {
             "prefix": "/auth/token",
             "router": f"infrastructure.oauth.{AUTH_TOKEN_MODE}.api.router",
+            # Named for the prefix rather than for the mode behind it, because a
+            # client reads the same group whichever mode is active -- which is
+            # the whole point of publishing them at one prefix.
             "tag": "Auth - Token",
+            "description": (
+                "Refresh, revoke and list credentials, and trade a browser "
+                f"session for one. Answered here by the {AUTH_TOKEN_MODE} mode."
+            ),
         }
     ]
 )
+# Whether an admin session may be traded for a bearer token, which is what lets
+# the Swagger page authorise itself for somebody already signed into the admin.
+# Staff-only wherever it is on; turning it off unpublishes the route entirely, so
+# nothing advertises a bridge this deployment does not want.
+AUTH_SESSION_TOKEN_FOR_STAFF = (
+    os.getenv("DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF", "true").lower() == "true"
+)
+
 AUTH_REDIS_URL = os.getenv("DJANGO_AUTH_REDIS_URL", "redis://127.0.0.1:6379/0")
 AUTH_CHALLENGE_STORE = os.getenv(
     "DJANGO_AUTH_CHALLENGE_STORE",
@@ -257,7 +347,20 @@ CMS_ENABLED = os.getenv("DJANGO_CMS_ENABLED", "false").lower() == "true"
 CMS_APP = "apps.cms.apps.CmsConfig"
 CMS_INSTALLED_APPS = [CMS_APP] if CMS_ENABLED else []
 CMS_ROUTERS = (
-    [{"prefix": "/cms", "router": "apps.cms.api.v1.router", "tag": "CMS"}] if CMS_ENABLED else []
+    [
+        {
+            "prefix": "/cms",
+            "router": "apps.cms.api.v1.router",
+            "tag": "CMS",
+            "description": (
+                "Read the site an editor built: published pages, their sections "
+                "and typed fields, menus, and the site metadata. Public, and "
+                "translated per field with a fallback."
+            ),
+        }
+    ]
+    if CMS_ENABLED
+    else []
 )
 # The languages content may be written in. Deliberately not Django's LANGUAGES,
 # which lists every language it ships a name for: "the languages this content is
@@ -276,21 +379,58 @@ CMS_PREVIEW_TTL_SECONDS = int(os.getenv("DJANGO_CMS_PREVIEW_TTL_SECONDS", str(60
 NOTIFICATIONS_ENABLED = os.getenv("DJANGO_NOTIFICATIONS_ENABLED", "false").lower() == "true"
 NOTIFICATIONS_APP = "apps.notifications.apps.NotificationsConfig"
 NOTIFICATIONS_INSTALLED_APPS = [NOTIFICATIONS_APP] if NOTIFICATIONS_ENABLED else []
+# Where the WebSocket is mounted. A setting rather than a constant because it is
+# the one part of this app a reverse proxy has to be told about, and a proxy is
+# usually easier to point at the app than the other way round. Declared above the
+# router because the tag below quotes it.
+NOTIFICATIONS_WS_PATH = os.getenv("DJANGO_NOTIFICATIONS_WS_PATH", "/ws/notifications")
+# The socket, written into the tag rather than into a route. OpenAPI describes
+# request/response over HTTP and has no vocabulary for a long-lived duplex
+# connection, and Swagger has no transport to open one -- so a path published for
+# it would render an operation whose "Try it out" cannot work. This is the half
+# that can be told truthfully: the same group heading a reader is already looking
+# at, in Markdown, saying what the socket is and what it accepts. AsyncAPI is the
+# format that describes the rest.
+NOTIFICATIONS_SOCKET_DOCS = f"""
+
+### The live feed: `{NOTIFICATIONS_WS_PATH}`
+
+A WebSocket, so it is not an operation on this page. `runserver` is WSGI and will
+not serve it; any ASGI server will.
+
+**It is useful before it is authenticated.** Connect with no credential at all
+and you receive what was addressed to everybody. `{{"command": "authenticate",
+"token": "..."}}` adds your own channel to the same connection and replays your
+unread backlog, so a client opens one socket rather than one per audience. A
+credential offered in the handshake -- `?token=`, a `bearer` subprotocol, an
+`Authorization` header, a session cookie -- is honoured at connect instead.
+
+Every frame is JSON, with a `command` going up and a `type` coming down.
+Commands: `authenticate`, `read`, `read_all`, `unread`, `ping`. Frame types:
+`ready`, `authenticated`, `notification`, `read`, `read_all`, `unread`, `pong`,
+`error`. **Errors are frames, not closes** -- a mistyped id costs one message,
+not the connection -- and their `title` is the same vocabulary the endpoints
+below answer with.
+
+The app's own `docs/notifications.md` carries the frame-by-frame reference.
+"""
 NOTIFICATIONS_ROUTERS = (
     [
         {
             "prefix": "/notifications",
             "router": "apps.notifications.api.v1.router",
             "tag": "Notifications",
+            "description": (
+                "The history a client reads when it opens, and the read state it "
+                "keeps. Nothing here creates a notification -- the code with "
+                "something to say does -- and new ones arrive over the socket."
+                + NOTIFICATIONS_SOCKET_DOCS
+            ),
         }
     ]
     if NOTIFICATIONS_ENABLED
     else []
 )
-# Where the WebSocket is mounted. A setting rather than a constant because it is
-# the one part of this app a reverse proxy has to be told about, and a proxy is
-# usually easier to point at the app than the other way round.
-NOTIFICATIONS_WS_PATH = os.getenv("DJANGO_NOTIFICATIONS_WS_PATH", "/ws/notifications")
 # How a notification created in one process reaches sockets held open by another.
 # The default fans out inside a single process only, which is right for
 # development and wrong for anything running more than one worker -- the app's

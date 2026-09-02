@@ -173,26 +173,33 @@ def test_the_template_carries_no_build_artefacts() -> None:
     assert strays == []
 
 
+# What a placeholder looks like: doubled braces around a bare name, with or
+# without the spaces the CLI happens to write. Anything else between doubled
+# braces is not something the generator could substitute even in principle.
+PLACEHOLDER = re.compile(r"\{\{[\w. ]*\}\}")
+
+
 def test_the_template_holds_no_unrendered_placeholder_outside_the_known_two() -> None:
     """The CLI only substitutes two names; a third would ship as literal braces.
 
-    Django templates are exempt, and only they: their braces are addressed to
-    Django at render time, not to the generator at copy time. The CLI replaces
-    two literal strings and leaves everything else alone, so the two never meet.
+    Two kinds of doubled brace are none of this test's business, because neither
+    is addressed to the generator. Django templates render theirs at request
+    time, and are skipped wholesale. An f-string writes ``{{`` to emit a single
+    brace -- the socket documentation in ``settings.base`` quotes a JSON frame
+    that way -- and Python resolves that at import, before any of this ships.
+
+    So what is matched is the shape of a placeholder rather than the braces
+    alone. ``{{project_name}}`` is still caught: the CLI replaces two exact
+    strings, so a placeholder spelled without its spaces is one that would ship
+    unrendered.
     """
     known = {"{{ project_name }}", "{{ project_title }}"}
-    found = set()
-    for path in shipped_files():
-        if "templates" in path.parts:
-            continue
-        text = path.read_text(encoding="utf-8")
-        start = 0
-        while (start := text.find("{{", start)) != -1:
-            end = text.find("}}", start)
-            if end == -1:
-                break
-            found.add(text[start : end + 2])
-            start = end + 2
+    found = {
+        placeholder
+        for path in shipped_files()
+        if "templates" not in path.parts
+        for placeholder in PLACEHOLDER.findall(path.read_text(encoding="utf-8"))
+    }
 
     assert found <= known, found - known
 

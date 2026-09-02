@@ -45,6 +45,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import Any
@@ -1123,9 +1124,17 @@ def section_openapi(api: Api) -> None:
             for operation in operations.values():
                 for tag in operation.get("tags", ["untagged"]):
                     by_tag[tag] = by_tag.get(tag, 0) + 1
-        for tag, count in sorted(by_tag.items()):
-            print(f"  {count:>3} operations  {tag}")
         total = sum(by_tag.values())
+        # In the document's own order, which is the order Swagger renders the
+        # groups in, with the line it prints under each heading.
+        for tag in schema["tags"]:
+            count = by_tag.pop(tag["name"], 0)
+            blurb = textwrap.shorten(tag.get("description", ""), width=40, placeholder="…")
+            print(f"  {count:>3} ops  {tag['name']:<19} {DIM}{blurb}{OFF}")
+        for name, count in sorted(by_tag.items()):
+            # A group Swagger would render with no heading text and no place in
+            # the order. Nothing should reach here; if it does, say so.
+            print(f"  {count:>3} ops  {name:<19} {RED}undeclared tag{OFF}")
         print(f"  {BOLD}{total} operations across {len(schema['paths'])} paths{OFF}")
         schemes = ", ".join(schema["components"].get("securitySchemes", {}))
         print(f"  {DIM}{version}: security schemes: {schemes}{OFF}\n")

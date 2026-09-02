@@ -39,6 +39,14 @@ make run
 Open <http://127.0.0.1:8000/api/docs> for interactive API documentation. Use Swagger's
 top-bar selector to switch between registered API versions.
 
+Signed into the admin as staff, the page authorises itself: it trades that
+session for a bearer token and fills **Authorize** in, because the API reads
+`Authorization` and ignores cookies. The session is left alone, and
+`DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF=false` removes the route entirely. A line
+above the topbar says which of those you got — authorised as whom, or not signed
+in, or signed in without staff.
+[How it works](docs/signing-in.md#trying-the-api-out-from-the-admin).
+
 ## Create a versioned API
 
 ```bash

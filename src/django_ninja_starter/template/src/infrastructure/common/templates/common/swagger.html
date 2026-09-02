@@ -9,8 +9,69 @@ standalone preset script, and StandaloneLayout to render the topbar that reads
     <link rel="icon" href="https://django-ninja.dev/img/favicon.svg" type="image/svg+xml">
     <link rel="icon" href="https://django-ninja.dev/img/favicon.png" type="image/png">
     <title>{{ api.title }}</title>
+    <style>
+        /* One line above the topbar, saying where this page's Authorize came
+           from. Coloured by state so the difference between "authorised" and
+           "nothing happened" is legible without reading the sentence. */
+        .session-status {
+            margin: 0;
+            padding: 10px 16px;
+            font: 14px/1.4 sans-serif;
+            border-bottom: 1px solid #d8d8d8;
+            background: #f5f5f5;
+            color: #3b4151;
+        }
+        .session-status a { color: inherit; }
+        .session-status[data-state="authorized"] {
+            background: #e8f6ee; border-color: #b8e0c8; color: #1f5c3a;
+        }
+        .session-status[data-state="anonymous"],
+        .session-status[data-state="denied"],
+        .session-status[data-state="tokenless"],
+        .session-status[data-state="unpublished"] {
+            background: #fdf6e3; border-color: #eadfb8; color: #6b5a17;
+        }
+        .session-status[data-state="failed"] {
+            background: #fdeceb; border-color: #f3c6c3; color: #8a2b25;
+        }
+        /* Swagger UI 5 follows the reader's colour scheme, so a line pinned to
+           the light palette would sit on a dark page as a bright stripe. */
+        @media (prefers-color-scheme: dark) {
+            .session-status {
+                background: #1b1b1b; border-color: #3b3b3b; color: #d9d9d9;
+            }
+            .session-status[data-state="authorized"] {
+                background: #16301f; border-color: #2c5c3d; color: #8fd8ab;
+            }
+            .session-status[data-state="anonymous"],
+            .session-status[data-state="denied"],
+            .session-status[data-state="tokenless"],
+            .session-status[data-state="unpublished"] {
+                background: #322a12; border-color: #5c4f22; color: #e0c973;
+            }
+            .session-status[data-state="failed"] {
+                background: #3a1c1a; border-color: #6b302c; color: #f0a49c;
+            }
+        }
+    </style>
 </head>
 <body>
+    {% comment %}
+    Rendered from what Django already knows about the reader, so the page is
+    truthful on first paint rather than after a round trip -- and so the two
+    cases that can only end in a refusal (nobody signed in, signed in but not
+    staff) never issue the request at all.
+    {% endcomment %}
+    <p id="session-status"
+       class="session-status"
+       role="status"
+       aria-live="polite"
+       data-username="{{ session_username }}"
+       data-login-url="{{ admin_login_url }}"
+       {% if not session_signed_in %}data-state="anonymous">Not signed in to the admin, so Authorize is yours to fill in.{% if admin_login_url %} <a href="{{ admin_login_url }}">Sign in to the admin</a> and this page will authorise itself.{% endif %}
+       {% elif not session_is_staff %}data-state="denied">Signed in as {{ session_username }}, which is not a staff account -- Authorize is yours to fill in.
+       {% else %}data-state="pending">Signed in as {{ session_username }} -- asking for a token for this session...{% endif %}</p>
+
     <div id="swagger-ui"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
@@ -31,12 +92,143 @@ standalone preset script, and StandaloneLayout to render the topbar that reads
         configObject.plugins = [SwaggerUIBundle.plugins.DownloadUrl];
 
         // Session-mode logins are cookie-based, so "Try it out" needs the token.
+        const csrfToken = "{{ csrf_token }}";
         configObject.requestInterceptor = (request) => {
-            request.headers["X-CSRFToken"] = "{{ csrf_token }}";
+            request.headers["X-CSRFToken"] = csrfToken;
             return request;
         };
 
-        SwaggerUIBundle(configObject);
+        // The session-to-token bridge. Somebody reading this page is very often
+        // already signed into the admin in the next tab, and under every token
+        // mode but `none` that session buys them nothing here: the API reads the
+        // Authorization header and ignores cookies. So ask the server to mint a
+        // token for the session, and fill Authorize in for them.
+        //
+        // No refusal is fatal -- the page has always worked without this, and it
+        // has to go on working without it -- but none of them is silent either.
+        // Each one ends in a sentence in the banner above saying which refusal it
+        // was, because a page that looks identical whether it authorised itself,
+        // declined to, or failed to is a page nobody can debug.
+        const SESSION_TOKEN_PATH = "/auth/token/from-session";
+
+        const statusBar = document.getElementById("session-status");
+        // The server's reading of the reader. Only a staff session can end in a
+        // token, so only a staff session is worth a request; the other two states
+        // are already final, and firing anyway would put a guaranteed 401 in the
+        // log for every anonymous reader.
+        const signedInAsStaff = {{ session_is_staff|yesno:"true,false" }};
+
+        // Plain text, and one anchor built rather than interpolated, so nothing
+        // the server rendered into a data attribute can become markup here.
+        function setStatus(state, message, linkText) {
+            statusBar.dataset.state = state;
+            statusBar.textContent = message;
+            const loginUrl = statusBar.dataset.loginUrl;
+            if (linkText && loginUrl) {
+                const anchor = document.createElement("a");
+                anchor.href = loginUrl;
+                anchor.textContent = linkText;
+                statusBar.append(" ", anchor, ".");
+            }
+        }
+
+        // Whichever scheme the document declares as HTTP bearer, by name, because
+        // `preauthorizeApiKey` addresses it by name and the name is the class
+        // that produced it -- not something worth hardcoding in a template.
+        function bearerSchemeName(spec) {
+            const schemes = (spec.components || {}).securitySchemes || {};
+            return Object.keys(schemes).find(
+                (name) => schemes[name].type === "http" && schemes[name].scheme === "bearer"
+            );
+        }
+
+        async function authorizeFromAdminSession(ui) {
+            if (!signedInAsStaff) {
+                return;  // The banner already says why, and says it correctly.
+            }
+            const username = statusBar.dataset.username;
+            let spec;
+            let documentUrl;
+            try {
+                spec = ui.specSelectors.specJson().toJS();
+                documentUrl = ui.specSelectors.url();
+            } catch (error) {
+                // A Swagger UI that names these differently: leave it be, and
+                // claim nothing about a request that was never made.
+                setStatus("unpublished", "Could not read this document's security schemes.");
+                return;
+            }
+            const scheme = bearerSchemeName(spec);
+            const path = Object.keys(spec.paths || {}).find(
+                (candidate) => candidate.endsWith(SESSION_TOKEN_PATH)
+            );
+            // Not published, or nothing to authorize: ask for nothing at all,
+            // rather than provoking a 404 in the log of every reader.
+            if (!scheme || !path) {
+                setStatus(
+                    "unpublished",
+                    "This deployment publishes no session-to-token bridge, so Authorize is yours to fill in."
+                );
+                return;
+            }
+            const endpoint = documentUrl.replace(/\/openapi\.json(\?.*)?$/, SESSION_TOKEN_PATH);
+            let response;
+            try {
+                response = await fetch(endpoint, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {"Content-Type": "application/json", "X-CSRFToken": csrfToken},
+                    body: "{}"
+                });
+            } catch (error) {
+                setStatus("failed", "Could not reach " + SESSION_TOKEN_PATH + " to mint a token.");
+                return;
+            }
+            // The statuses the route itself documents, each said back in the
+            // reader's terms. Anything else is a server fault, and is reported
+            // as one rather than as a refusal.
+            if (response.status === 401) {
+                // Signed in when the page was rendered, not any more.
+                setStatus("anonymous", "Your admin session has ended.", "Sign in again");
+                return;
+            }
+            if (response.status === 403) {
+                setStatus("denied", "Only staff may mint a token from a session.");
+                return;
+            }
+            if (response.status === 409) {
+                setStatus(
+                    "tokenless",
+                    "This deployment issues no bearer tokens -- your session cookie is the "
+                    + "credential, so Try it out already works."
+                );
+                return;
+            }
+            if (!response.ok) {
+                setStatus("failed", "The token endpoint answered " + response.status + ".");
+                return;
+            }
+            let token;
+            try {
+                token = ((await response.json()).data || {}).access_token;
+            } catch (error) {
+                token = undefined;
+            }
+            if (!token) {
+                setStatus("failed", "The token endpoint answered with no access token.");
+                return;
+            }
+            ui.preauthorizeApiKey(scheme, token);
+            setStatus("authorized", "Authorized as " + username + ", from your admin session.");
+        }
+
+        // `onComplete` rather than straight after the constructor: the security
+        // schemes are not in the store until the document has been fetched and
+        // resolved, and authorizing against a scheme that is not there yet is a
+        // no-op that looks exactly like success.
+        configObject.onComplete = () => authorizeFromAdminSession(ui);
+
+        const ui = SwaggerUIBundle(configObject);
     </script>
 </body>
 </html>

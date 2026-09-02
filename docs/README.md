@@ -31,6 +31,11 @@ themselves — see [keeping these pages honest](#keeping-these-pages-honest).
 - **[Credentials and token modes](credentials.md)** — what every login hands back,
   and how to choose between the three token modes. Read this first; every method
   below ends by minting one of these.
+- **[The example project](../examples/README.md)** — every app on this page turned
+  on in one generated project, and a printed transcript of the calls against each
+  one: all four login methods including the forgotten-password round trip, all
+  four second factors, the social redirects, the CMS in two languages, and
+  notifications over HTTP and over a socket.
 
 ## Login methods
 

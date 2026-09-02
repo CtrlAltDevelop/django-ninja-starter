@@ -28,6 +28,109 @@ def test_versioned_swagger_lists_registered_openapi_specs() -> None:
     assert b"/api/v1/openapi.json" in response.content
 
 
+def test_the_page_says_so_when_nobody_is_signed_into_the_admin() -> None:
+    """A reader the server cannot identify is told, rather than left guessing.
+
+    The session-to-token bridge can only answer 401 for this reader, so the page
+    must neither promise an Authorize it will not fill in nor fire the request:
+    it says what is missing, and offers the admin login that would fix it.
+    """
+    page = Client().get("/api/docs").content.decode()
+
+    assert 'data-state="anonymous"' in page
+    assert "Not signed in to the admin" in page
+    assert "/admin/login/?next=" in page
+    # The one flag the script reads before deciding whether to ask at all.
+    assert "const signedInAsStaff = false;" in page
+
+
+def test_the_page_greets_a_staff_session_and_goes_looking_for_a_token(db: None) -> None:
+    from django.contrib.auth import get_user_model
+
+    staff = get_user_model()._default_manager.create_user(
+        username="docsreader", email="docsreader@example.test", password="irrelevant"
+    )
+    staff.is_staff = True
+    staff.save(update_fields=["is_staff"])
+    client = Client()
+    client.force_login(staff)
+
+    page = client.get("/api/docs").content.decode()
+
+    assert 'data-state="pending"' in page
+    assert "Signed in as docsreader" in page
+    assert "const signedInAsStaff = true;" in page
+
+
+def test_a_signed_in_reader_who_is_not_staff_is_told_which_refusal_it_is(db: None) -> None:
+    """403 is not 401, and the difference is the whole of what to do next.
+
+    An ordinary user holding a session gets no token from the bridge either, but
+    for a reason signing in again cannot fix -- so the page names that reason and
+    spends no request discovering it.
+    """
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model()._default_manager.create_user(
+        username="reader", email="reader@example.test", password="irrelevant"
+    )
+    client = Client()
+    client.force_login(user)
+
+    page = client.get("/api/docs").content.decode()
+
+    assert 'data-state="denied"' in page
+    assert "not a staff account" in page
+    assert "const signedInAsStaff = false;" in page
+
+
+def test_every_operation_is_grouped_under_a_described_tag() -> None:
+    """No operation may fall outside the document's own tag list.
+
+    Swagger renders a group per tag whether or not the document declares one,
+    so an undeclared tag is not a visibly broken page -- it is a group with no
+    description, sorted wherever the paths happened to land. This is the check
+    that a new router cannot arrive that way: it has to say which group it joins
+    and what that group is for.
+    """
+    schema = Client().get("/api/v1/openapi.json").json()
+    declared = {tag["name"]: tag.get("description", "") for tag in schema["tags"]}
+    used = {
+        tag
+        for operations in schema["paths"].values()
+        for operation in operations.values()
+        for tag in operation.get("tags", [])
+    }
+
+    assert used, "the document published no tagged operations at all"
+    assert used <= set(declared), f"operations tagged but not described: {used - set(declared)}"
+    assert not set(declared) - used, f"tags described but unused: {set(declared) - used}"
+    assert all(declared.values()), f"tags with no description: {sorted(declared)}"
+
+
+def test_tag_names_match_the_names_their_apps_carry_in_the_admin() -> None:
+    """The same app, spelled the same way in both places a reader meets it.
+
+    Deriving a tag by title-casing an app label produces "Auth - Sms Code" and
+    "OAuth - Github", next to an admin whose sidebar spells both correctly. A
+    tag that differs from an app's verbose name only in case is that bug.
+    """
+    from django.apps import apps
+
+    schema = Client().get("/api/v1/openapi.json").json()
+    verbose_names = {str(config.verbose_name) for config in apps.get_app_configs()}
+    folded = {name.casefold(): name for name in verbose_names}
+
+    for tag in schema["tags"]:
+        spelled = folded.get(tag["name"].casefold())
+        # A tag naming no app at all -- Users, Auth - Token, Health -- is
+        # deliberate: it is named for what a client reads, not for the app that
+        # happens to answer it.
+        assert spelled is None or spelled == tag["name"], (
+            f"the document says {tag['name']!r} and the admin says {spelled!r}"
+        )
+
+
 def test_versioned_openapi_schema_contains_health_routes() -> None:
     response = Client().get("/api/v1/openapi.json")
 

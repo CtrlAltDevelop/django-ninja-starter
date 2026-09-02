@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -16,6 +16,10 @@ class ApiRoute(TypedDict):
     prefix: str
     router: str
     tag: str
+    # The line Swagger prints under the tag's group heading. Optional, because a
+    # registry written before this existed is still a valid registry -- an
+    # absent one leaves the group with a heading and no blurb.
+    description: NotRequired[str]
 
 
 class ApiVersion(TypedDict):

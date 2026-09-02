@@ -119,6 +119,48 @@ carrying two independent credentials, only one of which logout can reach. Under
 `DJANGO_AUTH_TOKEN_MODE=none` there is nothing to exchange — the cookie *is* the
 credential — and the endpoint answers `409`.
 
+## Trying the API out from the admin
+
+The same gap catches somebody reading the documentation. Sign into the admin,
+open `/api/docs`, press **Try it out**, and the answer is `401`: the session
+cookie in your browser is not something the API reads.
+
+So the Swagger page closes it for you. On load it asks for a token for whoever
+is signed in, and fills **Authorize** in with what comes back:
+
+```bash
+curl -X POST .../api/v1/auth/token/from-session --cookie 'sessionid=...'
+```
+
+Unlike `/exchange`, this one **leaves the session alone** — being logged out of
+the admin as the price of opening the docs page would be a poor trade — and it is
+**staff only**, because "signed into the admin" is the case it exists for.
+
+No refusal breaks the page, but none of them is silent either: a line above the
+topbar says which state you are in, because a page that looks identical whether it
+authorised itself, declined to, or failed to is a page nobody can debug.
+
+| What the page says | Why |
+| --- | --- |
+| Authorized as *you*, from your admin session | The mint succeeded and **Authorize** is filled in |
+| Not signed in to the admin, with a link to sign in | No session, so the route could only answer `401` |
+| Signed in as *you*, which is not a staff account | A session, but not a staff one: `403` |
+| This deployment issues no bearer tokens | `none` mode — the cookie already *is* the credential, so `409` |
+| This deployment publishes no session-to-token bridge | `DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF=false`, so the route is not in the document |
+
+The first two states Django knows before the page is sent — who you are, and
+whether you are staff — so they are rendered into that line directly, and the two
+that could only ever end in a refusal never issue the request at all. Anonymous
+readers therefore cost no `401` in the log, and the page is truthful on first
+paint rather than after a round trip.
+
+Each mint is a real credential, so it is recorded in [the audit
+trail](auth/core.md) as a login with the method `admin_session`.
+
+`DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF=false` removes the route altogether — not
+published, not in the OpenAPI document, and the docs page goes back to asking you
+to paste a token in by hand.
+
 ## Then: the part that never changes
 
 Everything below is identical for all nine methods and all three token modes.

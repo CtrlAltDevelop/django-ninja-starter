@@ -70,6 +70,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `docs/notifications.md` -- the routes, the socket protocol, the two models and
   the setup, with the generated tables kept honest by `manage.py authdocs`.
 
+- **The Swagger page authorises itself for a staff member already signed into the
+  admin.** Under every token mode but `none` the API reads `Authorization` and
+  ignores cookies, so an admin session got a `401` from "Try it out" and the
+  reader had to go and mint a token by hand. `POST /auth/token/from-session`
+  turns that session into a real credential -- through the same
+  `issue_credentials` every login uses, into the same tables, with the same
+  revocation story -- and the docs page fills **Authorize** in with it on load.
+  Unlike the social `/exchange` beside it, the session is *not* consumed: being
+  logged out of the admin for opening the documentation would be a poor trade.
+  It is staff-only, it is recorded in the audit trail as a login with the method
+  `admin_session`, and `DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF=false` unpublishes
+  the route rather than leaving it to answer `403` -- nothing should document a
+  bridge it will refuse to walk. Every refusal leaves the page as it was.
 - `infrastructure/common/responses.py` -- the envelope, the `ResponseTitle` enum
   and the English gloss for each member, the renderer that wraps outgoing bodies,
   and the rewrite that makes the published OpenAPI document say so.

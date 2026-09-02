@@ -86,6 +86,17 @@ make run
 Open <http://127.0.0.1:8000/api/docs> for interactive API documentation. Swagger's
 top bar lets you select any registered API version.
 
+If you are signed into the admin as a staff user, the page authorises itself:
+under every token mode but `none` the API reads `Authorization` and ignores
+cookies, so an admin session would otherwise get a `401` from **Try it out**. The
+page trades that session for a real token and fills **Authorize** in. It leaves
+the session alone, it is staff-only, and
+`DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF=false` removes the route entirely. A line
+above the topbar says which of those you got — authorised as whom, or not signed
+in, or signed in without staff — so the page never looks the same whether it
+worked or not.
+[How it works](docs/signing-in.md#trying-the-api-out-from-the-admin).
+
 ## Create a versioned API
 
 Use the included Django management command to scaffold and register a feature API:
@@ -449,6 +460,7 @@ variables as needed:
 | `DJANGO_AUTH_AUTO_CREATE_USERS` | Create an account on first passwordless sign-in | `true` |
 | `DJANGO_AUTH_TOTP_ISSUER` | Name shown in authenticator apps | `Django Ninja Starter` |
 | `DJANGO_AUTH_RECOVERY_CODE_COUNT` | Codes issued per batch, from 5 through 30 | `10` |
+| `DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF` | Let a staff session be traded for a bearer token, which is what lets `/api/docs` authorise itself | `true` |
 | `DJANGO_CMS_ENABLED` | Install the CMS: its tables, routes and admin | `false` |
 | `DJANGO_CMS_LANGUAGES` | Languages content may be written in, most preferred first | `LANGUAGE_CODE` |
 | `DJANGO_CMS_PREVIEW_TTL_SECONDS` | How long a preview link opens a draft for | `86400` |
