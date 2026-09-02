@@ -21,11 +21,33 @@ def test_readiness(db: None) -> None:
 
 
 def test_versioned_swagger_lists_registered_openapi_specs() -> None:
+    from infrastructure.common.registry import load_api_registry
+
     response = Client().get("/api/docs")
+    page = response.content.decode()
 
     assert response.status_code == 200
-    assert b'"urls"' in response.content
-    assert b"/api/v1/openapi.json" in response.content
+    assert '"urls"' in page
+    for version in load_api_registry():
+        assert f"/api/{version}/openapi.json" in page
+
+
+def test_the_swagger_page_can_actually_render_that_selector() -> None:
+    """The `urls` list is read by the topbar, which two other settings supply.
+
+    Without them the page still answers 200, still carries the list, and still
+    shows "No API definition provided" -- it never fetches a document at all.
+    So this asserts the parts that make the list mean something: the standalone
+    preset script, and the layout that renders the topbar reading it.
+    """
+    page = Client().get("/api/docs").content.decode()
+
+    assert "swagger-ui-standalone-preset.js" in page
+    assert '"layout": "StandaloneLayout"' in page
+    assert "SwaggerUIStandalonePreset" in page
+    # A member of the bundle rather than the standalone script's own global is
+    # undefined at runtime, which is the shape the original bug took.
+    assert "SwaggerUIBundle.SwaggerUIStandalonePreset" not in page
 
 
 def test_the_page_says_so_when_nobody_is_signed_into_the_admin() -> None:
@@ -82,6 +104,64 @@ def test_a_signed_in_reader_who_is_not_staff_is_told_which_refusal_it_is(db: Non
     assert 'data-state="denied"' in page
     assert "not a staff account" in page
     assert "const signedInAsStaff = false;" in page
+
+
+def test_redoc_renders_the_same_schema_the_default_swagger_page_opens_on() -> None:
+    """The reading view of the pair, on the document Swagger opens on.
+
+    Two pages over one schema is only a feature if they agree about which schema
+    it is, so this pins ReDoc to the same version `/api/docs` starts at rather
+    than to whichever one happened to be registered last.
+    """
+    from infrastructure.common.registry import load_api_registry
+
+    default_version = next(iter(load_api_registry()))
+
+    response = Client().get("/api/redoc")
+    page = response.content.decode()
+
+    assert response.status_code == 200
+    assert "redoc.standalone.js" in page
+    assert f"/api/{default_version}/openapi.json" in page
+
+
+def test_redoc_publishes_a_page_for_each_registered_version() -> None:
+    """ReDoc has no selector, so each version is a page of its own.
+
+    It renders the one document it is handed. A project with two registered
+    versions reaches the second through the path, not through a topbar.
+    """
+    from infrastructure.common.registry import load_api_registry
+
+    for version in load_api_registry():
+        page = Client().get(f"/api/{version}/redoc")
+
+        assert page.status_code == 200
+        assert f"/api/{version}/openapi.json" in page.content.decode()
+
+
+def test_redoc_refuses_a_version_nobody_registered() -> None:
+    """A version in the path that is not in the registry is a 404, not a page.
+
+    The route sits ahead of the version includes so that it can answer for any
+    `/api/<something>/redoc`, which means it is the one that has to say no.
+    """
+    assert Client().get("/api/v99/redoc").status_code == 404
+
+
+def test_the_swagger_page_offers_redoc_and_can_follow_the_selector_there() -> None:
+    """The link is beside Swagger, and means whichever version is on screen.
+
+    The topbar switches documents without reloading, so a link resolved at
+    render time would send a reader who is looking at v2 to v1's reference. The
+    page carries the addressable form of the URL for the script to fill in.
+    """
+    page = Client().get("/api/docs").content.decode()
+
+    assert 'href="/api/redoc"' in page
+    assert 'data-version-url="/api/__version__/redoc"' in page
+    # And substitutes it, rather than carrying a placeholder nothing replaces.
+    assert 'redocLink.dataset.versionUrl.replace("__version__"' in page
 
 
 def test_every_operation_is_grouped_under_a_described_tag() -> None:

@@ -6,6 +6,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **ReDoc sits beside Swagger.** `/api/redoc` renders the same schema as a
+  reference to read, using the ReDoc page Django Ninja already ships. It has no
+  version selector of its own -- it renders the single document it is handed --
+  so each registered version is its own page at `/api/<version>/redoc`, a
+  version nobody registered is a `404` naming itself rather than a router's own
+  miss, and the Swagger page carries a link across that follows whichever
+  document its top bar is showing.
+
 ### Changed
 
 - **Every JSON response now arrives in one envelope.** A body used to be the

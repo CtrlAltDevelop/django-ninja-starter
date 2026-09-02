@@ -14,6 +14,11 @@ So this subclass renders a template of our own that loads the standalone preset
 alongside the bundle and asks for ``StandaloneLayout``. Everything else is Django
 Ninja's page. The alternative -- dropping ``urls`` -- would render fine and lose
 the selector, which is the feature.
+
+ReDoc needs none of that -- Django Ninja ships it, and it renders one document
+with no selector to wire up -- so ``urls.py`` publishes it as it comes, a page
+per version. The only thing added here is the link over to it, so a reader who
+lands on Swagger knows the reference exists.
 """
 
 import json
@@ -92,6 +97,19 @@ def session_status(request: HttpRequest) -> dict[str, Any]:
     }
 
 
+def _page_url(name: str, **kwargs: str) -> str:
+    """Reverse a documentation page, or return "" for a project without it.
+
+    The two pages link to each other and ``urls.py`` is the project's to edit:
+    dropping either one has to render as no link on the page that survives,
+    rather than as a 500 raised while describing it.
+    """
+    try:
+        return reverse(name, kwargs=kwargs or None)
+    except NoReverseMatch:
+        return ""
+
+
 class VersionedSwagger(Swagger):
     """Swagger UI able to switch between every registered API version."""
 
@@ -107,6 +125,12 @@ class VersionedSwagger(Swagger):
             {
                 "swagger_settings": json.dumps(self.settings, indent=1),
                 "api": api,
+                "redoc_url": _page_url("api-redoc"),
+                # The same page addressed by version, with a placeholder the
+                # script substitutes: the topbar switches documents without
+                # reloading, so which version the link means is only known at
+                # the moment a reader follows it.
+                "redoc_version_url": _page_url("api-version-redoc", version="__version__"),
                 **session_status(request),
             },
         )

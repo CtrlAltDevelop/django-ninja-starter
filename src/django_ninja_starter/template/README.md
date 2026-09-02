@@ -37,7 +37,10 @@ make run
 ```
 
 Open <http://127.0.0.1:8000/api/docs> for interactive API documentation. Use Swagger's
-top-bar selector to switch between registered API versions.
+top-bar selector to switch between registered API versions, or
+<http://127.0.0.1:8000/api/redoc> to read the same schema as a reference. ReDoc
+has no selector, so each version is its own page -- `/api/v1/redoc` -- and
+Swagger links across to whichever one its top bar is showing.
 
 Signed into the admin as staff, the page authorises itself: it trades that
 session for a bearer token and fills **Authorize** in, because the API reads

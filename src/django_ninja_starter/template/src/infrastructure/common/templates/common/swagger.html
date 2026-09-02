@@ -34,9 +34,26 @@ standalone preset script, and StandaloneLayout to render the topbar that reads
         .session-status[data-state="failed"] {
             background: #fdeceb; border-color: #f3c6c3; color: #8a2b25;
         }
+        /* The way over to the other reading of the same documents. Its own
+           line rather than a corner of the status bar: setStatus() rewrites
+           that paragraph's text content, which would take an anchor sitting
+           inside it along with it. */
+        .docs-nav {
+            margin: 0;
+            padding: 10px 16px;
+            font: 14px/1.4 sans-serif;
+            border-bottom: 1px solid #d8d8d8;
+            background: #fafafa;
+            color: #3b4151;
+        }
+        .docs-nav a { color: #4990e2; }
         /* Swagger UI 5 follows the reader's colour scheme, so a line pinned to
            the light palette would sit on a dark page as a bright stripe. */
         @media (prefers-color-scheme: dark) {
+            .docs-nav {
+                background: #1b1b1b; border-color: #3b3b3b; color: #d9d9d9;
+            }
+            .docs-nav a { color: #7ab6ff; }
             .session-status {
                 background: #1b1b1b; border-color: #3b3b3b; color: #d9d9d9;
             }
@@ -56,6 +73,13 @@ standalone preset script, and StandaloneLayout to render the topbar that reads
     </style>
 </head>
 <body>
+    {% if redoc_url %}
+    <p class="docs-nav">Reading rather than calling?
+       <a id="redoc-link"
+          href="{{ redoc_url }}"
+          data-version-url="{{ redoc_version_url }}">Open the same schema in ReDoc</a>.</p>
+    {% endif %}
+
     {% comment %}
     Rendered from what Django already knows about the reader, so the page is
     truthful on first paint rather than after a round trip -- and so the two
@@ -227,6 +251,29 @@ standalone preset script, and StandaloneLayout to render the topbar that reads
         // resolved, and authorizing against a scheme that is not there yet is a
         // no-op that looks exactly like success.
         configObject.onComplete = () => authorizeFromAdminSession(ui);
+
+        // ReDoc has no selector -- it renders the document it is handed -- so the
+        // version lives in its path, and the link is resolved when it is followed
+        // rather than when the page was rendered. Without this a reader who
+        // switched the topbar to v2 would land on v1's reference.
+        const redocLink = document.getElementById("redoc-link");
+        if (redocLink && redocLink.dataset.versionUrl) {
+            redocLink.addEventListener("click", () => {
+                let selected;
+                try {
+                    selected = ui.specSelectors.url();
+                } catch (error) {
+                    return;  // Where the link already points is still a real page.
+                }
+                const match = /\/api\/([^/]+)\/openapi\.json/.exec(selected || "");
+                if (match) {
+                    redocLink.setAttribute(
+                        "href",
+                        redocLink.dataset.versionUrl.replace("__version__", encodeURIComponent(match[1]))
+                    );
+                }
+            });
+        }
 
         const ui = SwaggerUIBundle(configObject);
     </script>

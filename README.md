@@ -84,7 +84,10 @@ make run
 ```
 
 Open <http://127.0.0.1:8000/api/docs> for interactive API documentation. Swagger's
-top bar lets you select any registered API version.
+top bar lets you select any registered API version, and
+<http://127.0.0.1:8000/api/redoc> renders the same schema as a reference to read.
+ReDoc has no selector, so each version is its own page -- `/api/v1/redoc` -- and
+Swagger links across to whichever one its top bar is showing.
 
 If you are signed into the admin as a staff user, the page authorises itself:
 under every token mode but `none` the API reads `Authorization` and ignores
