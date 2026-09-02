@@ -60,6 +60,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in the handshake, as `?token=`, a `bearer` subprotocol, an `Authorization`
   header or a session cookie -- adds that account's own channel to the *same*
   connection. One socket carries both audiences.
+- Every command accepts that same `token`, not only `authenticate`. A client
+  holding a credential can make `{"command": "unread", "token": "..."}` its
+  first frame rather than spending a round trip saying who it is first: it is
+  signed in exactly as `authenticate` would have signed it in, same
+  `authenticated` frame and same backlog, and then the command runs. The token
+  is resolved *before* the command, so a refusal never half-happens; one naming
+  a different account conflicts as it would on `authenticate`; and an absent,
+  null or empty one leaves the command to meet whatever answer it would have
+  met alone.
 - It is a plain ASGI application rather than Channels, so `config/asgi.py` now
   routes `websocket` scopes to `config/sockets.py` and everything else to Django.
   Note that `runserver` is WSGI and will never serve it; use an ASGI server.

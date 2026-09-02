@@ -403,7 +403,8 @@ and you receive what was addressed to everybody. `{{"command": "authenticate",
 "token": "..."}}` adds your own channel to the same connection and replays your
 unread backlog, so a client opens one socket rather than one per audience. A
 credential offered in the handshake -- `?token=`, a `bearer` subprotocol, an
-`Authorization` header, a session cookie -- is honoured at connect instead.
+`Authorization` header, a session cookie -- is honoured at connect instead, and
+any command may carry the same `token` to sign in before it runs.
 
 Every frame is JSON, with a `command` going up and a `type` coming down.
 Commands: `authenticate`, `read`, `read_all`, `unread`, `ping`. Frame types:

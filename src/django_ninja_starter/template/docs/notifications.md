@@ -81,15 +81,29 @@ credential that identifies nobody is *not* a refusal: the connection opens
 anonymously, since denying the public feed over a bad private credential helps
 no one.
 
+**Any command may carry the token, not only `authenticate`.** A client holding a
+credential can make `{"command": "unread", "token": "…"}` its first frame: it is
+signed in exactly as `authenticate` would have signed it in — same
+`authenticated` frame, same backlog — and then the command runs. The token is
+checked *before* the command, so a refusal never half-happens, and a token
+naming a different account conflicts here as it would there. Sending it on a
+connection already signed in as that account is honoured silently: there is
+nothing to announce, and the client asked a question rather than for an
+acknowledgement.
+
 ### What the client sends
 
 | Command | Answered with | Notes |
 | --- | --- | --- |
-| `{"command": "authenticate", "token": "…"}` | `authenticated`, then the unread backlog | Again with the same account is a no-op, so a refreshed token needs no reconnect |
+| `{"command": "authenticate", "token": "…"}` | `authenticated`, then the unread backlog | Again with the same account is answered rather than ignored, so a refreshed token needs no reconnect |
 | `{"command": "read", "id": "…"}` | `read` | Needs an account |
 | `{"command": "read_all"}` | `read_all` | Needs an account |
 | `{"command": "unread"}` | `unread` | Needs an account |
 | `{"command": "ping"}` | `pong` | For holding an idle connection open through a proxy |
+
+Every one of them also accepts a `token`, which signs the connection in before
+the command runs. An absent, null or empty one is not a failed credential: the
+command meets whatever answer it would have met on its own.
 
 ### What the server sends
 
@@ -98,7 +112,7 @@ Every frame is a JSON object with a `type`.
 | Frame | When | Payload |
 | --- | --- | --- |
 | `ready` | Once, on connect | `authenticated`, `user`, `unread` |
-| `authenticated` | After a successful `authenticate` | `user`, `unread` |
+| `authenticated` | After a successful `authenticate`, or the first command to carry a token | `user`, `unread` |
 | `notification` | A notification was created for a channel this connection is on, and on catch-up | `notification` |
 | `read` | After `read` | `id`, `unread` |
 | `read_all` | After `read_all` | `count`, `unread` |
@@ -135,8 +149,8 @@ translates one set of strings.
 
 | Title | Raised by |
 | --- | --- |
-| `TOKEN_INVALID` | An `authenticate` token that identifies nobody |
-| `CONFLICT` | `authenticate` as a *different* account on a connection already signed in — there is no honest way to serve two people down one socket, so open a second |
+| `TOKEN_INVALID` | A token that identifies nobody, on `authenticate` or on any command carrying one |
+| `CONFLICT` | A token for a *different* account on a connection already signed in — there is no honest way to serve two people down one socket, so open a second |
 | `AUTHENTICATION_REQUIRED` | `read`, `read_all` or `unread` before authenticating |
 | `NOT_FOUND` | A notification id that does not exist, or belongs to somebody else — the same answer for both, since saying which would confirm another account's mail |
 | `BAD_REQUEST` | A binary frame, a body that is not a JSON object, an unknown command, or an id that is not a UUID |

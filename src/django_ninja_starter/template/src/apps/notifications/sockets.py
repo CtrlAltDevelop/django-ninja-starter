@@ -212,11 +212,19 @@ class NotificationSocket:
             "unread": self._unread,
             "ping": self._ping,
         }
-        handler = handlers.get(str(frame.get("command", "")))
+        command = str(frame.get("command", ""))
+        handler = handlers.get(command)
         if handler is None:
             await self._send_error(BAD_REQUEST, "Unknown command.")
             return
         try:
+            # Before the command, so a token that will not do refuses the whole
+            # frame rather than letting the command run as somebody else -- or,
+            # worse, as nobody. Compared by name rather than against the bound
+            # method, which is a new object on every attribute access and would
+            # never match itself.
+            if command != "authenticate":
+                await self._sign_in_if_offered(frame)
             await handler(frame)
         except SocketError as error:
             await self._send_error(error.title, error.description)
@@ -229,22 +237,28 @@ class NotificationSocket:
             )
         return self._user
 
-    async def _authenticate(self, frame: dict[str, Any]) -> None:
-        """Prove who you are, and start receiving what was addressed to you.
+    async def _account_for(self, token: str) -> Any:
+        """The account a token names, or a refusal the client can be told about.
 
-        Authenticating twice as the same account is allowed and does nothing --
-        a client that refreshed its token should not have to reconnect.
-        Authenticating as somebody *else* is refused: this connection is already
-        joined to the first account's channel, and there is no honest way to
-        serve two people down one socket.
+        Shared by the ``authenticate`` command and by a token riding on any other
+        command, so the two refuse in the same words for the same reasons: a
+        token that names nobody, and a token that names somebody other than
+        whoever this connection already belongs to. The second is a conflict
+        rather than a switch, because the connection is already joined to the
+        first account's channel and there is no honest way to serve two people
+        down one socket.
         """
-        user = await sync_to_async(user_from_token)(str(frame.get("token", "")))
+        user = await sync_to_async(user_from_token)(token)
         if user is None:
             raise SocketError(TOKEN_INVALID, "That token does not identify anybody.")
         if self._user is not None and self._user.pk != user.pk:
             raise SocketError(
                 CONFLICT, "This connection is already signed in. Open a new one instead."
             )
+        return user
+
+    async def _welcome(self, user: Any) -> None:
+        """Adopt an account, say so, and hand over what it missed while away."""
         await self._adopt(user)
         await self._send_json(
             {
@@ -254,6 +268,37 @@ class NotificationSocket:
             }
         )
         await self._catch_up()
+
+    async def _sign_in_if_offered(self, frame: dict[str, Any]) -> None:
+        """Honour a ``token`` carried by a command that is not ``authenticate``.
+
+        Optional, so a connection that authenticated at the handshake or in an
+        earlier frame goes on sending bare commands. Signing in this way is
+        indistinguishable from having sent ``authenticate`` first -- the client
+        gets the same ``authenticated`` frame and the same backlog ahead of its
+        command's own reply -- so a client has one set of frames to handle
+        however it chose to present its credential.
+
+        Already signed in as the same account: nothing to announce, and the
+        client did not ask for an acknowledgement. A different account still
+        conflicts, because piggybacking a token is a shorter way to authenticate
+        and not a way around what authenticating refuses.
+        """
+        token = str(frame.get("token") or "").strip()
+        if not token:
+            return
+        user = await self._account_for(token)
+        if self._user is None:
+            await self._welcome(user)
+
+    async def _authenticate(self, frame: dict[str, Any]) -> None:
+        """Prove who you are, and start receiving what was addressed to you.
+
+        Authenticating twice as the same account changes nothing, but is still
+        answered -- a client that refreshed its token should neither have to
+        reconnect nor be left waiting for a reply that never comes.
+        """
+        await self._welcome(await self._account_for(str(frame.get("token", ""))))
 
     async def _read(self, frame: dict[str, Any]) -> None:
         user = self._require_user()

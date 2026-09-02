@@ -217,6 +217,30 @@ def test_authenticating_catches_a_client_up_on_what_it_missed(alice: Any) -> Non
     assert run(scenario()) == ["Older", "Newer"]
 
 
+def test_the_catch_up_carries_the_broadcasts_it_missed_as_well(alice: Any) -> None:
+    """Signing in adds a channel; it does not narrow the connection to that channel.
+
+    Everything unread this account is entitled to see arrives, both audiences in
+    one stream and oldest first -- so a client that connected after an
+    announcement went out still learns about it, rather than only ever seeing
+    the broadcasts published while it happened to be connected.
+    """
+    token = access_token(alice)
+    notify_everyone("Scheduled maintenance")
+    notify_user(alice, "Your export is ready")
+
+    async def scenario() -> list[str]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        await client.command({"command": "authenticate", "token": token})
+        subjects = [(await client.next_frame())["notification"]["subject"] for _ in range(2)]
+        await client.close()
+        return subjects
+
+    assert run(scenario()) == ["Scheduled maintenance", "Your export is ready"]
+
+
 def test_the_catch_up_can_be_turned_off(alice: Any) -> None:
     notify_user(alice, "Older")
     token = access_token(alice)
@@ -284,6 +308,116 @@ def test_authenticating_as_somebody_else_is_refused(alice: Any, bob: Any) -> Non
 
     refusal = run(scenario())
     assert refusal["title"] == "CONFLICT"
+
+
+# -- a token on any command -------------------------------------------------
+
+
+def test_a_token_on_any_command_signs_in_before_running_it(alice: Any) -> None:
+    """One frame, not two: the credential travels with the question it is for.
+
+    What comes back is exactly what an `authenticate` followed by the command
+    would have sent, in that order, so a client handles one set of frames
+    however it chose to present its token.
+    """
+    notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+
+    async def scenario() -> list[dict[str, Any]]:
+        client = socket()
+        await client.open()
+        assert (await client.next_frame())["authenticated"] is False
+        await client.send({"command": "unread", "token": token})
+        frames = [await client.next_frame() for _ in range(3)]
+        await client.close()
+        return frames
+
+    signed_in, caught_up, counted = run(scenario())
+    assert signed_in["type"] == "authenticated"
+    assert signed_in["user"]["username"] == "alice"
+    assert caught_up["notification"]["subject"] == "Your export is ready"
+    assert counted == {"type": "unread", "count": 1}
+
+
+def test_a_command_carrying_a_token_for_who_is_already_here_just_runs(alice: Any) -> None:
+    """No second welcome. The client did not ask to be told anything twice."""
+    notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+    refreshed = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.next_frame()
+        counted = await client.command({"command": "unread", "token": refreshed})
+        await client.close()
+        return counted
+
+    assert run(scenario()) == {"type": "unread", "count": 1}
+
+
+def test_a_token_that_identifies_nobody_refuses_the_command_with_it(alice: Any) -> None:
+    """The refusal comes before the command, so nothing half-happens.
+
+    `read_all` is the one worth proving it on: a token checked afterwards, or
+    not at all, would leave the badge cleared by a frame that was answered with
+    an error.
+    """
+    notify_user(alice, "Your export is ready")
+
+    async def scenario() -> dict[str, Any]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        refusal = await client.command({"command": "read_all", "token": "nope"})
+        await client.close()
+        return refusal
+
+    refusal = run(scenario())
+    assert refusal["type"] == "error"
+    assert refusal["title"] == "TOKEN_INVALID"
+    assert unread_count(alice) == 1, "the command ran anyway"
+
+
+def test_a_command_carrying_somebody_elses_token_is_the_same_conflict(alice: Any, bob: Any) -> None:
+    """Piggybacking a token is a shorter way to authenticate, not a way around it."""
+    notify_user(bob, "For bob only")
+    alices = access_token(alice)
+    bobs = access_token(bob)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={alices}")
+        await client.open()
+        await client.next_frame()
+        refusal = await client.command({"command": "unread", "token": bobs})
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "CONFLICT"
+
+
+@pytest.mark.parametrize("token", [None, "", "   "])
+def test_a_command_with_an_empty_token_is_a_command_with_no_token(
+    token: str | None, announcement: Notification
+) -> None:
+    """Nothing to honour is not the same as a credential that failed.
+
+    A client that sends `token: null` when it has none should meet the ordinary
+    refusal for the command it sent, not be told its absent token was invalid.
+    """
+
+    async def scenario() -> dict[str, Any]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        refusal = await client.command(
+            {"command": "read", "id": str(announcement.pk), "token": token}
+        )
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "AUTHENTICATION_REQUIRED"
 
 
 # -- reading over the socket ------------------------------------------------
