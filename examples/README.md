@@ -21,8 +21,8 @@ alone is enough.
 1. Generates `example-api` with the packaged generator.
 2. Copies `env.example` in as the project's `.env` — four login methods, four
    second factors, four social providers and all three token modes installed
-   with `rotation` issuing, plus both feature apps the template ships: the
-   **CMS** and **notifications**.
+   with `rotation` issuing, plus all three feature apps the template ships: the
+   **CMS**, **notifications** and the **shop**.
 3. Runs the project's own `manage.py startapi notes --api-version v1` and `v2`,
    then copies `notes/` over the scaffolding it wrote.
 4. Runs `migrate`, so `make run` inside the built project serves the API.
@@ -37,7 +37,7 @@ python examples/build.py --rebuild
 ## The tour
 
 `walkthrough.py` prints a transcript of the calls a real client would make,
-against every app the `.env` above turns on. Sixteen sections, in the order the
+against every app the `.env` above turns on. Eighteen sections, in the order the
 tour runs them:
 
 | # | Section | Apps | What it shows |
@@ -50,14 +50,16 @@ tour runs them:
 | 6 | A feature app of your own | `apps.notes` | One model at two API versions, rows scoped to the caller |
 | 7 | Content, in two languages | `apps.cms` | Pages, sections, typed fields, menus, drafts and preview links |
 | 8 | Notifications | `apps.notifications` | The stored history over HTTP, then three live sockets |
-| 9 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
-| 10 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
-| 11 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
-| 12 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
-| 13 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
-| 14 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
-| 15 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
-| 16 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
+| 9 | A shop | `apps.shop` | A public catalogue, then a basket, an order and a settled invoice that are nobody's but the caller's |
+| 10 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
+| 11 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
+| 12 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
+| 13 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
+| 14 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
+| 15 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
+| 16 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
+| 17 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
+| 18 | The admin, every app of it | all apps | Every model any installed app registered, opened as a superuser |
 
 The rest of this section is what each one calls, and the property it is there to
 demonstrate. Every path below is printed by the tour, and is the path a real
@@ -170,10 +172,16 @@ an editor in the admin would — a page with sections and typed fields, a nested
 section, a library footer placed onto the page, a menu, and a second page left
 as a draft — and then reads all of it back over the public API, unauthenticated.
 
+The hero deliberately carries one field of each family — text, a text area, an
+image, a gallery of images, a choice, a colour and a reference to another page —
+because a type is only worth having if it changes what an editor types into, and
+a page of three text fields never shows that. Section 18 opens the content
+screen those fields produce.
+
 | Call | What to notice |
 | --- | --- |
 | `GET /api/v1/cms/pages` | What a menu is built from; `id` is what the detail route takes |
-| `GET /api/v1/cms/site` | Name, tagline, logo, contact, and the languages on offer |
+| `GET /api/v1/cms/site` | Name, tagline, logo, contact, the languages on offer, and the Open Graph card a link to the site becomes. No meta keywords — nothing has read them for over a decade |
 | `GET /api/v1/cms/pages/home` | The page's own sections and the shared footer in one list, each field carrying the type of its value |
 | `GET /api/v1/cms/pages/home?language=fa` | The headline is translated, the image is not — so it falls back field by field rather than leaving a hole in the layout |
 | `GET /api/v1/cms/menus/main` | Navigation is content, so adding a page to it is not a deploy |
@@ -217,6 +225,44 @@ three things worth showing:
    honoured at connect, so a client that already knows who it is does not wait a
    round trip.
 
+### A shop — `apps.shop`
+
+Enabled by `DJANGO_SHOP_ENABLED=true` alone, and the largest app here. Two
+halves governed differently: a catalogue anybody may read with no credential at
+all, and a basket, an order and an invoice that are nobody's but the caller's.
+The tour builds the catalogue an admin would — a category tree with attributes,
+a brand, two sellers, a laptop on sale, a shirt that is only buyable through a
+variant, a coupon, a shipping method and a draft nobody announced — and then
+shops in it.
+
+Public, no token anywhere:
+
+| Call | What to notice |
+| --- | --- |
+| `GET /api/v1/shop/categories` | The tree, with a count on each node |
+| `GET /api/v1/shop/products?category=electronics&sort=price_low` | A category includes everything underneath it, so `electronics` finds the laptop filed under `electronics/laptops` |
+| `GET /api/v1/shop/products?attribute=screen-size:14` | Attribute filters read `code:value`, are repeatable, and every one given has to match |
+| `GET /api/v1/shop/products/unannounced` | A draft is a **404**: it is in the table and in nothing public |
+| `GET /api/v1/shop/products/featherbook-14` | The price after the running discount, every seller who can fill it, and which one wins the buy box |
+| `GET /api/v1/shop/listings/bestsellers` | A filter over the live catalogue rather than a stored list, so it cannot go stale |
+| `POST /api/v1/shop/products/featherbook-14/view` | Popularity is a public fact, so recording a look needs nobody's name |
+
+With a bearer token, and only ever about the caller:
+
+| Call | What to notice |
+| --- | --- |
+| `POST /api/v1/shop/cart/items` | Without a seller named, the basket takes the one the product page was showing |
+| `POST /api/v1/shop/cart/items` (a variant) | A product with variants is bought through one, never through the product |
+| `POST /api/v1/shop/cart/items` (out of stock) | Refused, with the number that is actually left |
+| `PATCH /api/v1/shop/cart/items/{id}` | Quantities change on the line, and the basket re-totals itself |
+| `PUT /api/v1/shop/products/{slug}/like`, `POST …/reviews` | One opinion each per product. Moderation is on, so the review is not public yet — and the author can still see their own |
+| `POST /api/v1/shop/checkout` | One atomic step: price the basket, hold the stock, write an immutable order, issue its invoice |
+| `GET /api/v1/shop/cart` | Empty afterwards — what was in it is on the order now |
+| `GET /api/v1/shop/orders/{number}/invoice` | A document, not a view of the order: address, prices and totals are copied, so editing either afterwards cannot rewrite what somebody was charged |
+| `POST /api/v1/shop/orders/{number}/payment/confirm` | The seam a real gateway's callback is pointed at. This starter wires up none, so payments are `manual` and settled here or in the admin |
+| `POST /api/v1/shop/orders/{number}/cancel` | Refused once it is paid for |
+| `GET /api/v1/shop/orders/S00000000XXXX0000` | Somebody else's number is a **404**, not a 403 |
+
 ### A feature app of your own — `apps.notes`
 
 The app `build.py` adds, and the only one here that the starter does not ship.
@@ -251,6 +297,24 @@ the routers registered for it plus the ones every version shares, which is why
 the notes app appears in both documents and the health router in one. Swagger is
 at `/api/docs`, with a selector for both.
 
+### The admin, every app of it — all apps
+
+The API is half of what this project is. The other half is the screen the people
+who run it use, and the last section signs in as a superuser and opens all of
+it — walked from Django's own registry rather than from a list written in the
+tour, so an app added tomorrow is covered without editing the file, and one that
+ships a broken changelist fails the run.
+
+With the `.env` above that is **56 models across 16 app labels, 61 pages**, all
+of them rendering. Three are worth opening on their own, because none is an
+ordinary Django change form:
+
+| Screen | What to notice |
+| --- | --- |
+| `admin/cms/page/{id}/content/` | The CMS content screen: sections in reader order, one language at a time, and the input each field type deserves. The tour asserts the page really contains an upload button, a URL box, a text area, a colour picker, a dropdown and a multi-file input — the six the hero's field types should have produced |
+| `admin/notifications/notification/add/` | Writing to everybody is a form, not a shell session |
+| `admin/shop/order/{id}/change/` | The order placed in section 9, as whoever packs it sees it |
+
 ## How the tour runs
 
 It drives Django's test client in-process rather than a running server, because
@@ -280,18 +344,18 @@ different configuration:
 DJANGO_AUTH_TOKEN_MODE=sliding python examples/walkthrough.py
 ```
 
-An app that is not enabled is not skipped silently: the CMS and notification
+An app that is not enabled is not skipped silently: the CMS, notification and shop
 sections still print their heading and say which variable would have turned them
 on.
 
-## The two feature apps that ship
+## The three feature apps that ship
 
-`cms/` and `notifications/` are not in this directory. They come out of the
+`cms/`, `notifications/` and `shop/` are not in this directory. They come out of the
 generator inside every project it writes, and the `.env` above is the whole of
 what turns them on — which is the property worth seeing, so the tour reads their
 settings back before it calls them. Their full reference is
-[`docs/cms.md`](../docs/cms.md) and
-[`docs/notifications.md`](../docs/notifications.md).
+[`docs/cms.md`](../docs/cms.md), [`docs/notifications.md`](../docs/notifications.md)
+and [`docs/shop.md`](../docs/shop.md).
 
 ## The notes app
 
