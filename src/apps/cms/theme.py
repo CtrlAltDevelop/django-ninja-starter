@@ -24,7 +24,13 @@ try:  # pragma: no cover - exercised by whichever branch the project installs
     )
     from unfold.decorators import display
     from unfold.widgets import (
+        UnfoldAdminColorInputWidget,
+        UnfoldAdminDecimalFieldWidget,
         UnfoldAdminEmailInputWidget,
+        UnfoldAdminFileFieldWidget,
+        UnfoldAdminImageFieldWidget,
+        UnfoldAdminSelectMultipleWidget,
+        UnfoldAdminSelectWidget,
         UnfoldAdminSingleDateWidget,
         UnfoldAdminSplitDateTimeVerticalWidget,
         UnfoldAdminTextareaWidget,
@@ -43,6 +49,21 @@ try:  # pragma: no cover - exercised by whichever branch the project installs
     DateInput = UnfoldAdminSingleDateWidget
     SplitDateTimeInput = UnfoldAdminSplitDateTimeVerticalWidget
     BooleanInput = UnfoldBooleanSwitchWidget
+    NumberInput = UnfoldAdminDecimalFieldWidget
+    ColorInput = UnfoldAdminColorInputWidget
+    Select = UnfoldAdminSelectWidget
+    SelectMultiple = UnfoldAdminSelectMultipleWidget
+    FileInput = UnfoldAdminFileFieldWidget
+    ImageInput = UnfoldAdminImageFieldWidget
+
+    class TelInput(UnfoldAdminTextInputWidget):
+        """A phone box. Unfold has no ``tel`` widget, so it is a text one told to be one.
+
+        ``type="tel"`` is what makes a phone keypad open on a handset, which is
+        the only device where typing a number into a text box is unpleasant.
+        """
+
+        input_type = "tel"
 except ImportError:  # pragma: no cover - only in a project without Unfold
     from django.contrib.admin import ModelAdmin, StackedInline, TabularInline, display
 
@@ -75,10 +96,53 @@ except ImportError:  # pragma: no cover - only in a project without Unfold
     class BooleanInput(forms.CheckboxInput):  # type: ignore[no-redef]
         pass
 
+    class NumberInput(forms.NumberInput):  # type: ignore[no-redef]
+        pass
+
+    class ColorInput(forms.TextInput):  # type: ignore[no-redef]
+        def __init__(self, attrs: dict[str, Any] | None = None, **kwargs: Any) -> None:
+            super().__init__(attrs={**(attrs or {}), "type": "color"}, **kwargs)
+
+    class TelInput(forms.TextInput):  # type: ignore[no-redef]
+        input_type = "tel"
+
+    class Select(forms.Select):  # type: ignore[no-redef]
+        pass
+
+    class SelectMultiple(forms.SelectMultiple):  # type: ignore[no-redef]
+        pass
+
+    class FileInput(forms.ClearableFileInput):  # type: ignore[no-redef]
+        pass
+
+    class ImageInput(forms.ClearableFileInput):  # type: ignore[no-redef]
+        pass
+
 
 def dropdown_filter(field: str, kind: Any) -> Any:
     """``(field, filter)`` where the theme provides one, plain ``field`` where not."""
     return (field, kind) if kind is not None else field
+
+
+class MultiFileInput(forms.ClearableFileInput):
+    """One input that takes several files at once.
+
+    Django's own file widget is deliberately single: ``value_from_datadict``
+    returns one file even when the browser sent five, because a ``FileField``
+    can only hold one. A *list* field here holds many, so the widget has to hand
+    all of them over and the form field below has to be ready for a list.
+    """
+
+    allow_multiple_selected = True
+
+    def __init__(self, attrs: dict[str, Any] | None = None) -> None:
+        super().__init__(attrs={**(attrs or {}), "multiple": True})
+
+    def value_from_datadict(self, data: Any, files: Any, name: str) -> Any:
+        if hasattr(files, "getlist"):
+            return files.getlist(name)
+        single = files.get(name)
+        return [single] if single else []
 
 
 __all__ = [
@@ -87,13 +151,21 @@ __all__ = [
     "BooleanInput",
     "BooleanRadioFilter",
     "ChoicesDropdownFilter",
+    "ColorInput",
     "DateInput",
     "EmailInput",
+    "FileInput",
+    "ImageInput",
     "ModelAdmin",
+    "MultiFileInput",
+    "NumberInput",
     "RelatedDropdownFilter",
+    "Select",
+    "SelectMultiple",
     "SplitDateTimeInput",
     "StackedInline",
     "TabularInline",
+    "TelInput",
     "Textarea",
     "TextInput",
     "URLInput",

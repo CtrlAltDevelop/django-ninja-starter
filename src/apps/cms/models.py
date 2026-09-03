@@ -61,11 +61,17 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.utils import timezone
 
-from apps.cms.fields import FieldType, is_empty, normalize_value
+from apps.cms.fields import (
+    CHOICE_TYPES,
+    FieldType,
+    is_empty,
+    normalize_options,
+    normalize_value,
+)
 from apps.cms.translations import default_language, known_languages, translation
 
 
-def _translated(values: Any, name: str, *, of_list: bool = False) -> dict[str, Any]:
+def _translated(values: Any, name: str) -> dict[str, Any]:
     """Validate a ``{language: value}`` mapping written by an editor."""
     if not isinstance(values, dict):
         raise ValidationError({name: "Expected an object keyed by language code."})
@@ -81,10 +87,7 @@ def _translated(values: Any, name: str, *, of_list: bool = False) -> dict[str, A
             }
         )
     for language, value in values.items():
-        if of_list:
-            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-                raise ValidationError({name: f"{language} must be a list of words."})
-        elif not isinstance(value, str):
+        if not isinstance(value, str):
             raise ValidationError({name: f"{language} must be text."})
     return values
 
@@ -140,12 +143,29 @@ class SiteSettings(models.Model):
     )
     tagline = models.JSONField(default=dict, blank=True, help_text="Short line under the name.")
     description = models.JSONField(default=dict, blank=True, help_text="Default meta description.")
-    keywords = models.JSONField(
-        default=dict, blank=True, help_text='Meta keywords per language: {"en-us": ["..."]}.'
-    )
     logo = models.URLField(blank=True)
     favicon = models.URLField(blank=True)
+    # The four Open Graph values, which is what "SEO metadata" now means: they
+    # decide what a link to this site looks like in a chat window, a timeline or
+    # a search result card. `og_title` and `og_description` are separate from
+    # `name` and `description` because the good version of each is different --
+    # a page title is read next to the site's chrome, a shared card is read on
+    # its own -- and blank simply falls back to the plainer one.
+    og_title = models.JSONField(
+        "Social title", default=dict, blank=True, help_text="Falls back to the site name."
+    )
+    og_description = models.JSONField(
+        "Social description",
+        default=dict,
+        blank=True,
+        help_text="Falls back to the meta description.",
+    )
     og_image = models.URLField("Social preview image", blank=True)
+    og_url = models.URLField(
+        "Canonical URL",
+        blank=True,
+        help_text="The site's own address, for any page that does not set one.",
+    )
     contact = models.JSONField(
         default=dict, blank=True, help_text='Free-form contact details: {"email": "..."}.'
     )
@@ -192,7 +212,8 @@ class SiteSettings(models.Model):
         self.name = _translated(self.name, "name")
         self.tagline = _translated(self.tagline, "tagline")
         self.description = _translated(self.description, "description")
-        self.keywords = _translated(self.keywords, "keywords", of_list=True)
+        self.og_title = _translated(self.og_title, "og_title")
+        self.og_description = _translated(self.og_description, "og_description")
         if not isinstance(self.contact, dict) or not all(
             isinstance(value, str) for value in self.contact.values()
         ):
@@ -250,8 +271,24 @@ class Page(CmsModel):
     description = models.JSONField(
         default=dict, blank=True, help_text="Meta description per language."
     )
-    keywords = models.JSONField(default=dict, blank=True, help_text="Meta keywords per language.")
+    # Open Graph, per page, falling back to the site's. All four, rather than
+    # only the image: a card with the right picture and the site's generic
+    # heading under it is the commonest way a shared link undersells the page it
+    # points at, and `og_url` is what stops three addresses for one page being
+    # counted as three pages.
+    og_title = models.JSONField(
+        "Social title", default=dict, blank=True, help_text="Falls back to the meta title."
+    )
+    og_description = models.JSONField(
+        "Social description",
+        default=dict,
+        blank=True,
+        help_text="Falls back to the meta description.",
+    )
     og_image = models.URLField("Social preview image", blank=True)
+    og_url = models.URLField(
+        "Canonical URL", blank=True, help_text="Where this page really lives, if not here."
+    )
 
     objects = PageQuerySet.as_manager()
 
@@ -268,7 +305,8 @@ class Page(CmsModel):
         super().clean()
         self.title = _translated(self.title, "title")
         self.description = _translated(self.description, "description")
-        self.keywords = _translated(self.keywords, "keywords", of_list=True)
+        self.og_title = _translated(self.og_title, "og_title")
+        self.og_description = _translated(self.og_description, "og_description")
 
     @property
     def is_live(self) -> bool:
@@ -431,6 +469,15 @@ class Field(SwitchableModel):
     multiple = models.BooleanField(
         default=False, help_text="Store a list of these instead of a single one."
     )
+    options = models.JSONField(
+        "Choices",
+        default=list,
+        blank=True,
+        help_text=(
+            'Only for a Choice field: ["small", "large"], or '
+            '[{"value": "sm", "label": "Small"}] to store one word and show another.'
+        ),
+    )
     required = models.BooleanField(
         default=False,
         help_text="The editing screen insists on this in the default language.",
@@ -460,6 +507,18 @@ class Field(SwitchableModel):
 
     def clean(self) -> None:
         super().clean()
+        try:
+            self.options = normalize_options(self.options)
+        except ValidationError as error:
+            raise ValidationError({"options": error.messages}) from error
+        if self.options and self.field_type not in CHOICE_TYPES:
+            # Not silently dropped: an editor who typed choices onto a text
+            # field meant to make it a dropdown, and clearing the box for them
+            # would look like the save worked.
+            raise ValidationError(
+                {"options": "Only a Choice field has choices. Change the type, or clear these."}
+            )
+
         if not isinstance(self.values, dict):
             raise ValidationError({"values": "Expected an object keyed by language code."})
         languages = known_languages()
@@ -479,7 +538,9 @@ class Field(SwitchableModel):
             if is_empty(value):
                 continue
             try:
-                cleaned[language] = normalize_value(self.field_type, value, multiple=self.multiple)
+                cleaned[language] = normalize_value(
+                    self.field_type, value, multiple=self.multiple, options=self.options
+                )
             except ValidationError as error:
                 raise ValidationError(
                     {"values": f"{language}: {'; '.join(error.messages)}"}
@@ -501,6 +562,20 @@ class Field(SwitchableModel):
     def value_for(self, language: str) -> Any:
         """The content a reader of this language should see, or ``None``."""
         return translation(self.values, language)
+
+    @property
+    def choices(self) -> list[tuple[str, str]]:
+        """This field's options as Django's ``(value, label)`` pairs, for a dropdown."""
+        return [(option["value"], option["label"]) for option in normalize_options(self.options)]
+
+    @property
+    def written_languages(self) -> list[str]:
+        """The configured languages somebody has actually filled this in for.
+
+        In configured order rather than in whatever order the JSON object
+        happens to have, so two fields' answers to this line up on screen.
+        """
+        return [language for language in known_languages() if language in self.values]
 
 
 class Menu(SwitchableModel):

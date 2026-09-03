@@ -38,6 +38,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from apps.cms.duplication import duplicate_page
+from apps.cms.fields import MEDIA_TYPES, FieldType, value_url
 from apps.cms.forms import (
     ContentForm,
     SiteSettingsForm,
@@ -230,11 +231,30 @@ class ContentScreenMixin:
         return True
 
 
+def _previews(field: Field, language: str) -> list[dict[str, Any]]:
+    """What this media field currently points at, ready to be shown back.
+
+    An address in a box is not a picture. An editor replacing the hero image
+    needs to see the one that is there -- otherwise checking which of nine
+    uploads is live means opening nine URLs in new tabs.
+    """
+    if field.field_type not in MEDIA_TYPES:
+        return []
+    value = field.values.get(language)
+    items = value if isinstance(value, list) else [value]
+    return [
+        {"url": url, "is_image": field.field_type == FieldType.IMAGE}
+        for url in (value_url(item) for item in items)
+        if url
+    ]
+
+
 def _rows(section: Section, form: ContentForm) -> list[dict[str, Any]]:
     return [
         {
             "field": field,
             "inputs": [name for name in form.fields if name.startswith(field_key(field))],
+            "previews": _previews(field, form.language),
         }
         for field in section.fields.all()
     ]
@@ -245,7 +265,11 @@ def _groups(sections: list[Section], form: ContentForm) -> list[dict[str, Any]]:
 
     def bound(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
-            {"field": row["field"], "inputs": [form[name] for name in row["inputs"]]}
+            {
+                "field": row["field"],
+                "inputs": [form[name] for name in row["inputs"]],
+                "previews": row["previews"],
+            }
             for row in rows
         ]
 
@@ -306,10 +330,23 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
             },
         ),
         (
-            "Search and sharing",
+            "Search",
             {
-                "fields": ("title", "description", "keywords", "og_image"),
+                "fields": ("title", "description"),
                 "description": 'Per language, as {"en-us": "..."}. Blank falls back to the site.',
+            },
+        ),
+        (
+            "Sharing (Open Graph)",
+            {
+                "fields": ("og_title", "og_description", "og_image", "og_url"),
+                "description": (
+                    "What a link to this page looks like in a chat window or a "
+                    "timeline. Anything left blank falls back to the meta values "
+                    "above, then to the site's. Meta keywords are deliberately "
+                    "absent: nothing has read them for over a decade."
+                ),
+                "classes": ("collapse",),
             },
         ),
         ("Dates", {"fields": ("created_at", "updated_at")}),
@@ -475,7 +512,11 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
         url = reverse("admin:cms_page_content", args=(page.pk,))
 
         if request.method == "POST":
-            form = ContentForm(request.POST, sections=sections, language=language)
+            # `request.FILES` as well as `request.POST`: a media field is
+            # answered by an upload as readily as by a pasted address, and a
+            # form built without the files would save the page and quietly drop
+            # every picture on it.
+            form = ContentForm(request.POST, request.FILES, sections=sections, language=language)
             if self.save_content(request, form, language):
                 return HttpResponseRedirect(f"{url}?language={language}")
         else:
@@ -589,7 +630,7 @@ class SectionAdmin(ContentScreenMixin, StructureAdmin):
         used_on = SectionPlacement.objects.filter(section=section).count()
 
         if request.method == "POST":
-            form = ContentForm(request.POST, sections=[section], language=language)
+            form = ContentForm(request.POST, request.FILES, sections=[section], language=language)
             if self.save_content(request, form, language):
                 return HttpResponseRedirect(f"{url}?language={language}")
         else:
@@ -653,6 +694,33 @@ class FieldAdmin(StructureAdmin):
     autocomplete_fields = ("section",)
     readonly_fields = ("id", "created_at", "updated_at")
     list_select_related = ("section", "section__page")
+    fieldsets = (
+        (None, {"fields": ("id", "section", "name", "slug", "order", "help_text")}),
+        (
+            "Type",
+            {
+                "fields": ("field_type", "multiple", "options", "required"),
+                "description": (
+                    "The type decides the widget the content screen offers and the "
+                    "shape the value is stored in. Choices are only read for a "
+                    "Choice field. Changing the type keeps the content and refuses "
+                    "the change if it no longer fits."
+                ),
+            },
+        ),
+        (
+            "Content",
+            {
+                "fields": ("values", "is_active"),
+                "description": (
+                    "Raw JSON, keyed by language. The content screen is the place "
+                    "to type this; here is for pasting an import or clearing a "
+                    "value that no longer fits its type."
+                ),
+            },
+        ),
+        ("Dates", {"fields": ("created_at", "updated_at")}),
+    )
 
     @display(description="Field", header=True)
     def field_header(self, obj: Field) -> list[str]:
@@ -660,20 +728,32 @@ class FieldAdmin(StructureAdmin):
 
     @display(
         description="Type",
+        # Coloured by family rather than by type, so a list of forty fields
+        # reads as "copy, then numbers, then media" at a glance. Every member of
+        # FieldType is here: one missing renders unlabelled, which looks like a
+        # broken row rather than like a type nobody assigned a colour.
         label={
             "text": "info",
             "textarea": "info",
             "html": "info",
+            "markdown": "info",
+            "select": "info",
             "number": "success",
             "boolean": "success",
             "date": "warning",
             "datetime": "warning",
             "email": "warning",
+            "phone": "warning",
+            "url": "warning",
+            "color": "warning",
             "link": "primary",
             "image": "primary",
             "video": "primary",
+            "audio": "primary",
             "file": "primary",
+            "page": "primary",
             "contact": "primary",
+            "json": "danger",
         },
     )
     def kind(self, obj: Field) -> str:
@@ -779,8 +859,19 @@ class SiteSettingsAdmin(ModelAdmin):
             (
                 "Search and sharing",
                 {
-                    "fields": named("description") + named("keywords") + ("og_image",),
+                    "fields": named("description"),
                     "description": "Used for any page that does not set its own.",
+                },
+            ),
+            (
+                "Sharing (Open Graph)",
+                {
+                    "fields": named("og_title") + named("og_description") + ("og_image", "og_url"),
+                    "description": (
+                        "The card a link to this site becomes when somebody "
+                        "shares it. Blank falls back to the name and the meta "
+                        "description above."
+                    ),
                 },
             ),
             ("Branding", {"fields": ("logo", "favicon")}),
