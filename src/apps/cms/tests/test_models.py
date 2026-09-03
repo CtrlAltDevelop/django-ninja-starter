@@ -123,6 +123,65 @@ class TestFieldValues:
             Field.objects.create(section=hero, name="Other", slug="headline")
 
 
+class TestChoiceFields:
+    """The one type whose valid values live on the field rather than on the type."""
+
+    def test_bare_words_are_expanded_when_the_field_is_saved(self, home: Page) -> None:
+        field = _field(home, field_type=FieldType.SELECT, options=["small", "large"])
+
+        field.refresh_from_db()
+        assert field.options == [
+            {"value": "small", "label": "small"},
+            {"value": "large", "label": "large"},
+        ]
+
+    def test_the_field_hands_the_admin_django_s_own_choice_pairs(self, home: Page) -> None:
+        field = _field(
+            home, field_type=FieldType.SELECT, options=[{"value": "sm", "label": "Small"}]
+        )
+
+        assert field.choices == [("sm", "Small")]
+
+    def test_only_a_listed_word_may_be_stored(self, home: Page) -> None:
+        with pytest.raises(ValidationError, match="Expected one of: small"):
+            _field(
+                home,
+                field_type=FieldType.SELECT,
+                options=["small"],
+                values={"en-us": "huge"},
+            )
+
+    def test_choices_on_a_type_that_has_none_are_refused_rather_than_dropped(
+        self, home: Page
+    ) -> None:
+        """An editor who typed choices onto a text field meant to make it a dropdown."""
+        with pytest.raises(ValidationError, match="Only a Choice field has choices"):
+            _field(home, field_type=FieldType.TEXT, options=["small"])
+
+    def test_removing_an_option_that_is_in_use_is_refused(self, home: Page) -> None:
+        field = _field(
+            home,
+            field_type=FieldType.SELECT,
+            options=["small", "large"],
+            values={"en-us": "large"},
+        )
+
+        field.options = ["small"]
+        with pytest.raises(ValidationError, match="Expected one of: small"):
+            field.save()
+
+
+class TestWrittenLanguages:
+    def test_it_lists_them_in_the_configured_order(self, home: Page) -> None:
+        """So two fields' answers line up on screen rather than in dict order."""
+        field = _field(home, values={"fa": "خوش آمدید", "en-us": "Welcome"})
+
+        assert field.written_languages == ["en-us", "fa"]
+
+    def test_an_unwritten_field_has_none(self, home: Page) -> None:
+        assert _field(home).written_languages == []
+
+
 class TestSections:
     def test_nesting_stops_at_one_level(self, home: Page) -> None:
         child = Section.objects.get(slug="basic")
@@ -149,9 +208,9 @@ class TestSiteSettings:
         assert SiteSettings.objects.exists() is False
         assert SiteSettings.load().name == {}
 
-    def test_keywords_must_be_lists(self) -> None:
-        with pytest.raises(ValidationError, match="list of words"):
-            SiteSettings(name={"en-us": "Acme"}, keywords={"en-us": "acme"}).save()
+    def test_open_graph_copy_is_translated_like_everything_else(self) -> None:
+        with pytest.raises(ValidationError, match="fa must be text"):
+            SiteSettings(name={"en-us": "Acme"}, og_title={"fa": ["a"]}).save()
 
     @override_settings(CMS_LANGUAGES=["en-us"])
     def test_a_language_that_was_removed_is_reported(self) -> None:

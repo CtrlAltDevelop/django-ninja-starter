@@ -1,10 +1,12 @@
 """The content screen: who may open it, what it shows, and what saving does."""
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import Client
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, override_settings
 from django.urls import reverse
 
 from apps.cms import theme
@@ -197,6 +199,110 @@ class TestContentScreen:
         assert "Hero" in body
 
 
+class TestUploadingOnTheContentScreen:
+    """The end an editor sees: pick a file, save, and the picture is on the page."""
+
+    @pytest.fixture(autouse=True)
+    def media(self, tmp_path: Path) -> Any:
+        with override_settings(MEDIA_ROOT=tmp_path, MEDIA_URL="/media/"):
+            yield tmp_path
+
+    def test_the_form_is_multipart_when_a_field_can_carry_a_file(
+        self, client: Client, home: Page, editor: Any
+    ) -> None:
+        """Without the enctype the page saves, says so, and drops every file."""
+        client.force_login(editor)
+
+        body = client.get(content_url(home)).content.decode()
+
+        assert 'enctype="multipart/form-data"' in body
+
+    def test_an_image_field_offers_both_ways_of_answering(
+        self, client: Client, home: Page, editor: Any
+    ) -> None:
+        client.force_login(editor)
+        background = Field.objects.get(slug="background")
+
+        body = client.get(content_url(home)).content.decode()
+
+        assert f'name="{field_key(background)}__upload"' in body
+        assert f'name="{field_key(background)}"' in body
+
+    def test_the_current_picture_is_shown_back(
+        self, client: Client, home: Page, editor: Any
+    ) -> None:
+        """An address in a box is not a picture, and this screen replaces pictures."""
+        client.force_login(editor)
+
+        body = client.get(content_url(home)).content.decode()
+
+        assert "https://cdn.example.com/hero.jpg" in body
+
+    def test_a_picked_file_is_stored_and_becomes_the_value(
+        self, client: Client, home: Page, editor: Any
+    ) -> None:
+        client.force_login(editor)
+        background = Field.objects.get(slug="background")
+        headline = Field.objects.get(slug="headline")
+
+        response = client.post(
+            content_url(home),
+            {
+                field_key(headline): "Welcome",
+                field_key(background): "",
+                f"{field_key(background)}__upload": SimpleUploadedFile("hero.png", b"x"),
+                field_key(Field.objects.get(slug="price")): "9",
+            },
+        )
+
+        assert response.status_code == 302, response.content
+        background.refresh_from_db()
+        assert background.values["en-us"]["url"].startswith("/media/cms/uploads/image/hero-")
+
+
+class TestEveryTypeRenders:
+    """A type nobody put on a page is a type nobody found out was broken."""
+
+    def test_the_content_screen_renders_one_field_of_every_type(
+        self, client: Client, home: Page, editor: Any
+    ) -> None:
+        client.force_login(editor)
+        section = Section.objects.create(page=home, name="All", slug="all", order=99)
+        for index, field_type in enumerate(FieldType.values):
+            Field.objects.create(
+                section=section,
+                name=field_type,
+                slug=f"f-{field_type}",
+                field_type=field_type,
+                order=index,
+                options=["small", "large"] if field_type == FieldType.SELECT else [],
+            )
+
+        response = client.get(content_url(home))
+
+        assert response.status_code == 200, response.content
+
+    def test_and_renders_a_list_of_every_type_too(
+        self, client: Client, home: Page, editor: Any
+    ) -> None:
+        client.force_login(editor)
+        section = Section.objects.create(page=home, name="Lists", slug="lists", order=98)
+        for index, field_type in enumerate(FieldType.values):
+            Field.objects.create(
+                section=section,
+                name=field_type,
+                slug=f"l-{field_type}",
+                field_type=field_type,
+                multiple=True,
+                order=index,
+                options=["small", "large"] if field_type == FieldType.SELECT else [],
+            )
+
+        response = client.get(content_url(home))
+
+        assert response.status_code == 200, response.content
+
+
 class TestStructureAdmin:
     def test_the_page_list_links_to_the_content_screen(
         self, client: Client, home: Page, superuser: Any
@@ -248,11 +354,14 @@ class TestSiteSettingsForm:
                 "tagline__fa": "",
                 "description__en-us": "The Acme site",
                 "description__fa": "",
-                "keywords__en-us": "acme, things",
-                "keywords__fa": "",
+                "og_title__en-us": "Acme — we make things",
+                "og_title__fa": "",
+                "og_description__en-us": "Everything Acme makes.",
+                "og_description__fa": "",
                 "logo": "https://cdn.example.com/logo.svg",
                 "favicon": "",
-                "og_image": "",
+                "og_image": "https://cdn.example.com/card.png",
+                "og_url": "",
                 "contact": '{"email": "hello@example.com"}',
                 "social_links": "[]",
                 "extra": "{}",
@@ -263,7 +372,8 @@ class TestSiteSettingsForm:
         site.refresh_from_db()
         assert response.status_code == 302, response.content
         assert site.name == {"en-us": "Acme", "fa": "آکمی"}
-        assert site.keywords == {"en-us": ["acme", "things"]}
+        assert site.og_title == {"en-us": "Acme — we make things"}
+        assert site.og_image == "https://cdn.example.com/card.png"
 
     def test_a_language_left_empty_is_removed_rather_than_stored_blank(
         self, client: Client, superuser: Any, site: Any
@@ -279,11 +389,14 @@ class TestSiteSettingsForm:
                 "tagline__fa": "",
                 "description__en-us": "",
                 "description__fa": "",
-                "keywords__en-us": "",
-                "keywords__fa": "",
+                "og_title__en-us": "",
+                "og_title__fa": "",
+                "og_description__en-us": "",
+                "og_description__fa": "",
                 "logo": "",
                 "favicon": "",
                 "og_image": "",
+                "og_url": "",
                 "contact": "{}",
                 "social_links": "[]",
                 "extra": "{}",
