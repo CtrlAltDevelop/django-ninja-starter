@@ -32,6 +32,7 @@ REPORTED_KEYS = (
     "versions",
     "cms",
     "notifications",
+    "shop",
     "socket",
 )
 
@@ -71,6 +72,7 @@ def test_the_example_project_has_every_app_on(example_project: Path) -> None:
     assert reported["versions"] == "v1,v2"
     assert reported["cms"] == "on"
     assert reported["notifications"] == "on"
+    assert reported["shop"] == "on"
     assert reported["socket"] == "/ws/notifications"
 
 
@@ -86,6 +88,7 @@ print("token_mode=" + settings.AUTH_TOKEN_MODE)
 print("versions=" + ",".join(load_api_registry()))
 print("cms=" + ("on" if settings.CMS_ENABLED else "off"))
 print("notifications=" + ("on" if settings.NOTIFICATIONS_ENABLED else "off"))
+print("shop=" + ("on" if settings.SHOP_ENABLED else "off"))
 print("socket=" + ",".join(path for path, _ in websocket_routes()))
 """
 
@@ -135,6 +138,14 @@ def test_the_notifications_app_ships_with_the_generated_project(example_project:
     assert "no tests ran" not in result.stdout
 
 
+def test_the_shop_ships_with_the_generated_project(example_project: Path) -> None:
+    """The largest app the template carries, and the one with money in it."""
+    result = _run(example_project, "-m", "pytest", "-q", "--no-cov", "src/apps/shop")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no tests ran" not in result.stdout
+
+
 def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     """The tour asserts its own status codes, so a zero exit is the assertion."""
     result = subprocess.run(
@@ -151,6 +162,37 @@ def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     assert "/api/v1/cms/pages/home" in result.stdout, "the content app was not toured"
     assert "/api/v1/notifications" in result.stdout, "the notifications API was not toured"
     assert "/ws/notifications" in result.stdout, "the notification socket was not toured"
+    assert "/api/v1/shop/checkout" in result.stdout, "the shop was not toured"
+    assert "admin pages opened" in result.stdout, "the admin was not toured"
+
+
+def test_the_walkthrough_opens_every_registered_admin(example_project: Path) -> None:
+    """The API is half the project; a broken changelist has to fail the tour too.
+
+    Asserted on the count rather than on a list of screens: the tour walks
+    Django's own registry, so naming the screens here would be a second list to
+    keep in step with the first.
+    """
+    import re
+
+    result = subprocess.run(
+        [sys.executable, str(build.EXAMPLES / "walkthrough.py"), "--project", str(example_project)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=build.pristine_environment(),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    opened = re.search(r"(\d+) admin pages opened", result.stdout)
+    assert opened is not None, "the admin section printed no count"
+    # One index, plus a changelist per registered model, plus the handful of
+    # screens the tour opens on their own. Well over thirty with every app on;
+    # a number this side of it means an app stopped registering its admin.
+    assert int(opened.group(1)) > 30, result.stdout
+    assert "/admin/cms/page/" in result.stdout, "the CMS content screen was not opened"
+    assert "/admin/shop/order/" in result.stdout, "the shop admin was not opened"
+    assert "/admin/notifications/notification/add/" in result.stdout
 
 
 def test_building_twice_into_the_same_place_is_refused(tmp_path: Path) -> None:
