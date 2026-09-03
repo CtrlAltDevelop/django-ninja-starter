@@ -8,6 +8,71 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A field type now earns its own widget on the content screen.** Six types
+  join the eight that were there -- `markdown`, `select`, `phone`, `url`,
+  `color`, `audio` and `page` -- and each was added only because it changes what
+  an editor types into: a choice is a dropdown over that field's own `options`, a
+  colour opens a colour picker, a phone box opens a handset's keypad, a page
+  reference is a dropdown of this site's pages, and Markdown and HTML get tall
+  monospaced boxes rather than a one-line input. A type that would render like
+  `text` and validate like `text` is `text` with a different label, and was not
+  added.
+- **A media field takes an upload as readily as an address.** `image`, `video`,
+  `audio` and `file` now show an upload button beside the URL box, and a list of
+  them shows a multi-file picker plus one address per line -- so building a
+  gallery is one file dialogue rather than nine paste operations. Uploads go
+  through Django's configured `STORAGES["default"]`, so a project on S3 gets S3
+  without the CMS knowing; a file whose extension the type does not take, or
+  which is over `DJANGO_CMS_MAX_UPLOAD_MB`, is refused before it reaches storage.
+  The screen also shows what a media field points at now -- a thumbnail for a
+  picture -- because an address in a box is not a picture and replacing pictures
+  is what the screen is for.
+- **`Field.options`**, the choices a `select` field is limited to. Written as
+  `["small", "large"]` or as `[{"value": "sm", "label": "Small"}]` for when the
+  word shown and the word stored should differ. Choices on a type that has none
+  are refused rather than silently dropped: an editor who typed them onto a text
+  field meant to make it a dropdown.
+- **Open Graph, per page and per site.** `og_title`, `og_description`, `og_image`
+  and `og_url` decide what a link becomes in a chat window, a timeline or a
+  search card. They are resolved on the server -- the page's own social copy,
+  then its plain meta copy, then the site's -- so four frontends do not each get
+  the fallback chain slightly wrong, and `og_url` is what stops three addresses
+  for one page being counted as three pages.
+- **Uploaded-file settings.** `DJANGO_CMS_UPLOAD_PATH`, `DJANGO_CMS_MAX_UPLOAD_MB`,
+  and the `DJANGO_MEDIA_URL` / `DJANGO_MEDIA_ROOT` pair Django serves them under
+  while `DEBUG` is on.
+- **The example tours the shop and every admin screen.** `examples/env.example`
+  turns the third feature app on, so the built project now carries all three, and
+  the walkthrough shops in it end to end: a category tree with attributes, two
+  sellers competing for the buy box, a basket, an atomic checkout, an invoice and
+  a settled payment. A final section signs in as a superuser and opens every
+  model any installed app registered -- 56 of them across 16 app labels with this
+  `.env`, walked from Django's own registry rather than from a list in the tour,
+  so an app added tomorrow is covered without editing it and one that ships a
+  broken changelist fails the run. The CMS page the tour builds now carries one
+  field of each family, and the admin section asserts the content screen really
+  renders the six widgets those types should have produced.
+
+### Changed
+
+- **A URL field accepts an address on this site.** `/media/cms/uploads/…` and
+  `/about-us` are URLs as far as a CMS is concerned -- it has to be, since the
+  first is what this app's own upload button produces. Protocol-relative `//host`
+  is still refused: it looks internal and points somewhere else.
+- **A phone number written the way a country writes it is accepted.**
+  `(020) 7946 0958` was refused before, which would have pushed the editor into a
+  text field where the type says nothing at all.
+
+### Removed
+
+- **Meta keywords.** Nothing has ranked on that tag for well over a decade, and a
+  box editors dutifully fill in that nothing reads costs them time on every page
+  they write. `Page.keywords` and `SiteSettings.keywords` are gone from the
+  models, from all four transports and from the export format; Open Graph is what
+  replaces them.
+
+### Added
+
 - **A notification is dismissable, and a read can be undone.** `NotificationReceipt`
   now holds two nullable timestamps -- `read_at` and `dismissed_at` -- rather
   than existing to mean "read". Dismissing is a per-account receipt and never a
