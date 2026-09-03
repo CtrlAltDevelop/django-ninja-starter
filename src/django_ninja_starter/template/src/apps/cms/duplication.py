@@ -36,6 +36,7 @@ def _copy_fields(source: Section, target: Section) -> None:
                 help_text=field.help_text,
                 field_type=field.field_type,
                 multiple=field.multiple,
+                options=field.options,
                 required=field.required,
                 order=field.order,
                 is_active=field.is_active,
@@ -62,8 +63,10 @@ def duplicate_page(page: Page) -> Page:
         published_at=None,
         title=page.title,
         description=page.description,
-        keywords=page.keywords,
+        og_title=page.og_title,
+        og_description=page.og_description,
         og_image=page.og_image,
+        og_url=page.og_url,
     )
     copy.save()
 

@@ -29,7 +29,10 @@ stylesheet the classes below are simply inert.
 {% endblock %}
 
 {% block content %}
-    <form method="post" novalidate id="cms-content-form">
+    {# `multipart/form-data` only when something on this screen can carry a  #}
+    {# file: a form posted without it drops its uploads silently -- the page #}
+    {# saves, says so, and the picture is not there.                         #}
+    <form method="post" novalidate id="cms-content-form"{% if form.has_uploads %} enctype="multipart/form-data"{% endif %}>
         {% csrf_token %}
 
         <div class="flex flex-col gap-4 mb-8 lg:flex-row lg:items-center">

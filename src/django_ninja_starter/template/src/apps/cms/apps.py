@@ -27,4 +27,16 @@ class CmsConfig(AppConfig):
             "Optional",
             "How long a preview link opens a draft for. Defaults to a day",
         ),
+        (
+            "DJANGO_CMS_UPLOAD_PATH",
+            "Optional",
+            "Where a file uploaded on the content screen is written inside "
+            '`STORAGES["default"]`. Defaults to `cms/uploads`',
+        ),
+        (
+            "DJANGO_CMS_MAX_UPLOAD_MB",
+            "Optional",
+            "The largest file the content screen accepts. Defaults to 20; `0` "
+            "means no limit, for a deployment whose proxy imposes one already",
+        ),
     )

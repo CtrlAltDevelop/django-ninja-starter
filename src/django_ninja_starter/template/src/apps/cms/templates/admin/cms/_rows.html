@@ -27,6 +27,26 @@
             {% endfor %}
         </div>
 
+        {% if row.previews %}
+            {# What the field points at now. A thumbnail for a picture, a link #}
+            {# for anything else -- an editor about to replace it should be    #}
+            {# looking at it rather than at its address.                       #}
+            <div class="flex flex-row flex-wrap gap-2 items-center">
+                {% for preview in row.previews %}
+                    <a href="{{ preview.url }}" target="_blank" rel="noopener"
+                       class="border border-base-200 flex items-center overflow-hidden rounded-default dark:border-base-800">
+                        {% if preview.is_image %}
+                            <img src="{{ preview.url }}" alt="" class="h-16 object-cover w-16" loading="lazy">
+                        {% else %}
+                            <span class="px-2 py-1 text-font-subtle-light text-xs underline dark:text-font-subtle-dark">
+                                {{ preview.url|truncatechars:60 }}
+                            </span>
+                        {% endif %}
+                    </a>
+                {% endfor %}
+            </div>
+        {% endif %}
+
         <span class="text-font-subtle-light text-xs dark:text-font-subtle-dark">
             <code>{{ row.field.slug }}</code>
             &middot; {{ row.field.get_field_type_display }}{% if row.field.multiple %} ({% trans "list" %}){% endif %}

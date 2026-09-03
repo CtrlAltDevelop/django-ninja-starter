@@ -379,6 +379,17 @@ CMS_LANGUAGES = [
     if code.strip()
 ]
 CMS_PREVIEW_TTL_SECONDS = int(os.getenv("DJANGO_CMS_PREVIEW_TTL_SECONDS", str(60 * 60 * 24)))
+# Where a file an editor uploads on the content screen is written, inside
+# whatever `STORAGES["default"]` is. A prefix rather than a path, because the
+# storage decides what a path means: a folder under MEDIA_ROOT locally, a key
+# prefix in a bucket in production, and the CMS is not entitled to an opinion
+# about which.
+CMS_UPLOAD_PATH = os.getenv("DJANGO_CMS_UPLOAD_PATH", "cms/uploads")
+# The largest file the content screen accepts, in megabytes. Zero means no limit
+# -- for a deployment whose storage or reverse proxy already imposes one and
+# would rather have a single answer to "how big may this be" than two.
+CMS_MAX_UPLOAD_MB = int(os.getenv("DJANGO_CMS_MAX_UPLOAD_MB", "20"))
+CMS_MAX_UPLOAD_BYTES = CMS_MAX_UPLOAD_MB * 1024 * 1024
 
 # The notification app. Optional the same way the CMS is: naming it installs its
 # tables, its routes and its socket, and a project that does not name it never
@@ -665,4 +676,10 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Uploaded files, as opposed to files that ship with the code. Settings rather
+# than constants because the two differ per deployment more than almost anything
+# else here: a container mounts a volume, a platform points MEDIA_URL at a CDN,
+# and a project on S3 overrides STORAGES and leaves both of these unused.
+MEDIA_URL = os.getenv("DJANGO_MEDIA_URL", "media/")
+MEDIA_ROOT = os.getenv("DJANGO_MEDIA_ROOT", "") or BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

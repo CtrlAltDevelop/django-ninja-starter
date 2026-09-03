@@ -232,24 +232,29 @@ class PageMeta(_message.Message):
 
     TITLE_FIELD_NUMBER: _builtins.int
     DESCRIPTION_FIELD_NUMBER: _builtins.int
-    KEYWORDS_FIELD_NUMBER: _builtins.int
     OG_IMAGE_FIELD_NUMBER: _builtins.int
+    OG_TITLE_FIELD_NUMBER: _builtins.int
+    OG_DESCRIPTION_FIELD_NUMBER: _builtins.int
+    OG_URL_FIELD_NUMBER: _builtins.int
     title: _builtins.str
     description: _builtins.str
     og_image: _builtins.str
-    @_builtins.property
-    def keywords(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]: ...
+    og_title: _builtins.str
+    og_description: _builtins.str
+    og_url: _builtins.str
     def __init__(
         self,
         *,
         title: _builtins.str = ...,
         description: _builtins.str = ...,
-        keywords: _abc.Iterable[_builtins.str] | None = ...,
         og_image: _builtins.str = ...,
+        og_title: _builtins.str = ...,
+        og_description: _builtins.str = ...,
+        og_url: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["description", b"description", "keywords", b"keywords", "og_image", b"og_image", "title", b"title"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["description", b"description", "og_description", b"og_description", "og_image", b"og_image", "og_title", b"og_title", "og_url", b"og_url", "title", b"title"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -369,13 +374,15 @@ class SiteInfo(_message.Message):
     NAME_FIELD_NUMBER: _builtins.int
     TAGLINE_FIELD_NUMBER: _builtins.int
     DESCRIPTION_FIELD_NUMBER: _builtins.int
-    KEYWORDS_FIELD_NUMBER: _builtins.int
     LOGO_FIELD_NUMBER: _builtins.int
     FAVICON_FIELD_NUMBER: _builtins.int
     OG_IMAGE_FIELD_NUMBER: _builtins.int
     CONTACT_JSON_FIELD_NUMBER: _builtins.int
     SOCIAL_LINKS_JSON_FIELD_NUMBER: _builtins.int
     EXTRA_JSON_FIELD_NUMBER: _builtins.int
+    OG_TITLE_FIELD_NUMBER: _builtins.int
+    OG_DESCRIPTION_FIELD_NUMBER: _builtins.int
+    OG_URL_FIELD_NUMBER: _builtins.int
     language: _builtins.str
     default_language: _builtins.str
     name: _builtins.str
@@ -387,10 +394,11 @@ class SiteInfo(_message.Message):
     contact_json: _builtins.str
     social_links_json: _builtins.str
     extra_json: _builtins.str
+    og_title: _builtins.str
+    og_description: _builtins.str
+    og_url: _builtins.str
     @_builtins.property
     def languages(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]: ...
-    @_builtins.property
-    def keywords(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]: ...
     def __init__(
         self,
         *,
@@ -400,17 +408,19 @@ class SiteInfo(_message.Message):
         name: _builtins.str = ...,
         tagline: _builtins.str = ...,
         description: _builtins.str = ...,
-        keywords: _abc.Iterable[_builtins.str] | None = ...,
         logo: _builtins.str = ...,
         favicon: _builtins.str = ...,
         og_image: _builtins.str = ...,
         contact_json: _builtins.str = ...,
         social_links_json: _builtins.str = ...,
         extra_json: _builtins.str = ...,
+        og_title: _builtins.str = ...,
+        og_description: _builtins.str = ...,
+        og_url: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["contact_json", b"contact_json", "default_language", b"default_language", "description", b"description", "extra_json", b"extra_json", "favicon", b"favicon", "keywords", b"keywords", "language", b"language", "languages", b"languages", "logo", b"logo", "name", b"name", "og_image", b"og_image", "social_links_json", b"social_links_json", "tagline", b"tagline"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["contact_json", b"contact_json", "default_language", b"default_language", "description", b"description", "extra_json", b"extra_json", "favicon", b"favicon", "language", b"language", "languages", b"languages", "logo", b"logo", "name", b"name", "og_description", b"og_description", "og_image", b"og_image", "og_title", b"og_title", "og_url", b"og_url", "social_links_json", b"social_links_json", "tagline", b"tagline"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
