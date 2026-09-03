@@ -58,7 +58,8 @@ Naming the app is the whole installation; leaving it unset costs nothing.
 | `graph/` | The same reads as GraphQL types and queries |
 | `grpc/` | The same reads as gRPC actions, and the `.proto` they generate |
 | `admin.py` | Structure admin, plus the content screen |
-| `forms.py` | The widgets an editor types into |
+| `forms.py` | The widgets an editor types into, one per field type |
+| `uploads.py` | A picked file to the address a media field stores |
 | `theme.py` | Where the admin theme comes from, and what to do without one |
 | `preview.py` | Signed links that show a draft |
 | `duplication.py` | Copying a page with everything on it |
@@ -80,6 +81,8 @@ databases, reads as a diff in a pull request, and seeds a new environment.
 * **No write API.** Content is written in the admin. An API that also writes has
   to answer "who may edit this?" on every request; this one answers "nobody,
   here".
-* **No file storage.** Media fields hold URLs. Whatever a project already uses
-  to store and serve files stays in charge of that.
+* **No file storage of its own.** A media field holds a URL, and an upload is
+  handed straight to Django's configured `STORAGES["default"]` — so whatever a
+  project already uses to store and serve files stays in charge of it, and the
+  same field takes an address pasted from a CDN.
 * **No page routing.** A client is given a page's `id` and builds its own URLs.
