@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import Http404, HttpRequest, HttpResponse
 from django.urls import path
@@ -38,6 +39,12 @@ urlpatterns = [
     path("api/<str:version>/redoc", api_redoc, name="api-version-redoc"),
     *(path(f"api/{version}/", api.urls) for version, api in apis.items()),
 ]
+
+# Uploaded files, served by Django only while DEBUG is on. In production a web
+# server or an object store serves MEDIA_URL, and Django is never asked -- which
+# is why `static()` returns nothing at all when DEBUG is off rather than needing
+# a condition here.
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 # One endpoint, not one per version: a GraphQL schema is versioned by deprecating
 # fields rather than by forking the document, so there is nothing here for a
