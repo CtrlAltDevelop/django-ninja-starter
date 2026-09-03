@@ -3,13 +3,18 @@
 install:
 	python3 -m pip install -e '.[dev]'
 
+# Every optional app turned on, so the checks below see the whole project
+# rather than whatever this developer happens to have in their `.env`. An app
+# left off is an app whose models, admin, migrations and protos nobody checked.
+ALL_APPS = DJANGO_CMS_ENABLED=true DJANGO_NOTIFICATIONS_ENABLED=true
+
 check:
 	ruff check --no-cache .
 	ruff format --check --no-cache .
 	mypy src manage.py examples/build.py
-	python3 manage.py check
-	python3 manage.py makemigrations --check --dry-run
-	python3 manage.py protos --check
+	$(ALL_APPS) python3 manage.py check
+	$(ALL_APPS) python3 manage.py makemigrations --check --dry-run
+	$(ALL_APPS) python3 manage.py protos --check
 
 test:
 	pytest --cov

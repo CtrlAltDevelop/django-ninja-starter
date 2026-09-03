@@ -437,6 +437,7 @@ variables as needed:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
+| `DJANGO_ENV_FILE` | Env file to load, relative to the project root; empty loads none | `.env` |
 | `DJANGO_SETTINGS_MODULE` | Active settings module | `config.settings.development` |
 | `DJANGO_SECRET_KEY` | Django signing key | Unsafe development value |
 | `DJANGO_ALLOWED_HOSTS` | Comma-separated hostnames | `localhost,127.0.0.1` in `.env.example` |

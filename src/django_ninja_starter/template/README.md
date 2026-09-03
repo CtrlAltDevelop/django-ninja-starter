@@ -237,7 +237,8 @@ notifications are enabled; it needs the `asgi` extra that `dev` already pulls in
 Development uses SQLite by default. Copy `.env.example` to `.env` and set the `DJANGO_*`
 variables for another database or production deployment. Production uses
 `config.settings.production` and requires a secure `DJANGO_SECRET_KEY` and non-empty
-`DJANGO_ALLOWED_HOSTS`.
+`DJANGO_ALLOWED_HOSTS`. `DJANGO_ENV_FILE` names the file that is read, so several can sit
+side by side; set it to an empty string and none is read at all.
 
 ## One shape for every response
 

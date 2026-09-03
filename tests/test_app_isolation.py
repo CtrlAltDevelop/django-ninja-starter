@@ -23,6 +23,10 @@ DRIVER = ROOT / "tests" / "isolation_driver.py"
 LOCMEM_STORE = "infrastructure.auth.core.challenges.LocMemChallengeStore"
 
 BASE_ENV = {
+    # Empty on purpose: the settings module would otherwise read this
+    # repository's own `.env`, and every scenario below would be configured by
+    # whatever the developer running the suite happens to have enabled.
+    "DJANGO_ENV_FILE": "",
     "DJANGO_SETTINGS_MODULE": "config.settings.development",
     "DJANGO_SECRET_KEY": "isolation-secret-key-long-enough-for-hs256",
     "DJANGO_AUTH_CHALLENGE_STORE": LOCMEM_STORE,

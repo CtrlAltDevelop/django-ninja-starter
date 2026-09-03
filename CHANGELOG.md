@@ -8,6 +8,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`DJANGO_ENV_FILE` names the env file.** A deployment can keep several side
+  by side, and a process can ask for none at all with an empty value. The
+  app-isolation suite needed the second option: it builds each scenario's
+  environment from nothing to exercise the *shipped* defaults, and a developer's
+  own `.env` was being read back in underneath it, so those tests were quietly
+  reporting on whatever that machine had enabled.
+
 - **Every app now has one service, published through three doors.** What an app
   can be asked used to live in its router, so a second transport meant either a
   second copy of the rules or a router calling a router. Each app now keeps its

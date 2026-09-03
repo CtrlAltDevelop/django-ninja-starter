@@ -7,7 +7,14 @@ from dotenv import load_dotenv
 from infrastructure.common.registry import registered_app_configs
 
 BASE_DIR = Path(__file__).resolve().parents[3]
-load_dotenv(BASE_DIR / ".env")
+# `DJANGO_ENV_FILE` names the file, so a deployment can keep several side by
+# side, and -- set to an empty string -- so a process can ask for none at all.
+# A test that builds its environment from nothing needs that second option:
+# without it a developer's own `.env` would be read back in and the process
+# would be configured by whatever happens to be on this machine.
+_ENV_FILE = os.environ.get("DJANGO_ENV_FILE", ".env")
+if _ENV_FILE:
+    load_dotenv(BASE_DIR / _ENV_FILE)
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-development-key")
 DEBUG = False
