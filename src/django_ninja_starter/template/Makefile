@@ -6,7 +6,7 @@ install:
 # Every optional app turned on, so the checks below see the whole project
 # rather than whatever this developer happens to have in their `.env`. An app
 # left off is an app whose models, admin, migrations and protos nobody checked.
-ALL_APPS = DJANGO_CMS_ENABLED=true DJANGO_NOTIFICATIONS_ENABLED=true
+ALL_APPS = DJANGO_CMS_ENABLED=true DJANGO_NOTIFICATIONS_ENABLED=true DJANGO_SHOP_ENABLED=true
 
 check:
 	ruff check --no-cache .

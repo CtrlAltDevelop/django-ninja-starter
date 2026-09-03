@@ -1,0 +1,254 @@
+syntax = "proto3";
+
+package config.shop;
+
+import "google/protobuf/empty.proto";
+
+service ShopController {
+    rpc AddToCart(AddToCartRequest) returns (AddToCartResult) {}
+    rpc Categories(google.protobuf.Empty) returns (CategoryList) {}
+    rpc GetCart(google.protobuf.Empty) returns (CartResult) {}
+    rpc Invoice(InvoiceRequest) returns (InvoiceResult) {}
+    rpc Listing(ListingRequest) returns (ListingResult) {}
+    rpc Listings(google.protobuf.Empty) returns (ListingList) {}
+    rpc Order(OrderRequest) returns (OrderResult) {}
+    rpc Orders(OrdersRequest) returns (OrderList) {}
+    rpc Product(ProductRequest) returns (ProductResult) {}
+    rpc Products(ProductsRequest) returns (ProductsResult) {}
+    rpc Seller(SellerRequest) returns (SellerResult) {}
+    rpc Sellers(google.protobuf.Empty) returns (SellerList) {}
+}
+
+message AddToCartRequest {
+    string product = 1;
+    string variant = 2;
+    int32 quantity = 3;
+    string offer = 4;
+}
+
+message AddToCartResult {
+    Cart cart = 1;
+}
+
+message Cart {
+    string id = 1;
+    string currency = 2;
+    repeated CartItem items = 3;
+    int32 item_count = 4;
+    string subtotal = 5;
+    string discount_total = 6;
+    string total = 7;
+    string updated_at = 8;
+}
+
+message CartItem {
+    string id = 1;
+    string product = 2;
+    string name = 3;
+    string image = 4;
+    string variant = 5;
+    string variant_label = 6;
+    int32 quantity = 7;
+    Price unit_price = 8;
+    string line_total = 9;
+    bool in_stock = 10;
+    string offer = 11;
+    string seller = 12;
+}
+
+message CartResult {
+    Cart cart = 1;
+}
+
+message CategoryList {
+    repeated CategorySummary categories = 1;
+}
+
+message CategorySummary {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+    string description = 4;
+    string image = 5;
+    string icon = 6;
+    string parent = 7;
+    int32 product_count = 8;
+}
+
+message Invoice {
+    string number = 1;
+    string issued_at = 2;
+    string due_at = 3;
+    string notes = 4;
+    Order order = 5;
+}
+
+message InvoiceRequest {
+    string number = 1;
+}
+
+message InvoiceResult {
+    Invoice invoice = 1;
+}
+
+message ListingList {
+    repeated ListingSummary listings = 1;
+}
+
+message ListingRequest {
+    string key = 1;
+    int32 limit = 2;
+    int32 offset = 3;
+}
+
+message ListingResult {
+    string key = 1;
+    string name = 2;
+    string description = 3;
+    ProductPage page = 4;
+}
+
+message ListingSummary {
+    string key = 1;
+    string name = 2;
+    string description = 3;
+}
+
+message Order {
+    string number = 1;
+    string status = 2;
+    string status_label = 3;
+    string currency = 4;
+    string placed_at = 5;
+    repeated OrderLine items = 6;
+    string subtotal = 7;
+    string coupon = 8;
+    string coupon_discount = 9;
+    string shipping_method = 10;
+    string shipping_total = 11;
+    string tax_total = 12;
+    string total = 13;
+    string note = 14;
+    string payment_status = 15;
+    string invoice = 16;
+}
+
+message OrderLine {
+    string product = 1;
+    string name = 2;
+    string seller = 3;
+    string sku = 4;
+    int32 quantity = 5;
+    string unit_price = 6;
+    string tax_rate = 7;
+    string line_total = 8;
+}
+
+message OrderList {
+    repeated Order orders = 1;
+    int32 total = 2;
+}
+
+message OrderRequest {
+    string number = 1;
+}
+
+message OrderResult {
+    Order order = 1;
+}
+
+message OrdersRequest {
+    int32 limit = 1;
+    int32 offset = 2;
+}
+
+message Price {
+    string amount = 1;
+    string base_amount = 2;
+    string currency = 3;
+    bool is_discounted = 4;
+    string discount_id = 5;
+    string discount_name = 6;
+    string discount_kind = 7;
+    string discount_value = 8;
+    string discount_amount_off = 9;
+    int32 discount_percent_off = 10;
+    string discount_ends_at = 11;
+}
+
+message ProductPage {
+    repeated ProductSummary items = 1;
+    int32 total = 2;
+    int32 limit = 3;
+    int32 offset = 4;
+}
+
+message ProductRequest {
+    string slug = 1;
+}
+
+message ProductResult {
+    ProductSummary product = 1;
+}
+
+message ProductSummary {
+    string id = 1;
+    string slug = 2;
+    string name = 3;
+    string subtitle = 4;
+    string summary = 5;
+    string image = 6;
+    string brand = 7;
+    string brand_slug = 8;
+    string category = 9;
+    string category_name = 10;
+    Price price = 11;
+    string compare_at_price = 12;
+    bool in_stock = 13;
+    bool has_variants = 14;
+    bool is_featured = 15;
+    string rating_average = 16;
+    int32 rating_count = 17;
+    int32 like_count = 18;
+    int32 sales_count = 19;
+    repeated string tags = 20;
+    string created_at = 21;
+    string seller = 22;
+    string seller_slug = 23;
+}
+
+message ProductsRequest {
+    string search = 1;
+    string category = 2;
+    string sort = 3;
+    int32 limit = 4;
+    int32 offset = 5;
+    string seller = 6;
+}
+
+message ProductsResult {
+    ProductPage page = 1;
+}
+
+message Seller {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+    string description = 4;
+    string logo = 5;
+    string city = 6;
+    int32 product_count = 7;
+}
+
+message SellerList {
+    repeated Seller sellers = 1;
+}
+
+message SellerRequest {
+    string slug = 1;
+}
+
+message SellerResult {
+    Seller seller = 1;
+}
+

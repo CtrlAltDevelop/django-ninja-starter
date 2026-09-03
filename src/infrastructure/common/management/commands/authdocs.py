@@ -41,8 +41,8 @@ from infrastructure.common.registry import load_api_registry
 SECTIONS = ("routes", "models", "admin", "settings")
 # Apps that are this project's own rather than one of the auth/oauth families,
 # and still get a page: the foundation every project carries, the accounts it
-# resolves to, and the optional content app.
-PROJECT_LABELS = frozenset({"accounts", "common", "cms", "notifications"})
+# resolves to, and the optional feature apps.
+PROJECT_LABELS = frozenset({"accounts", "common", "cms", "notifications", "shop"})
 NONE = "_None._"
 
 

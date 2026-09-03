@@ -376,8 +376,9 @@ another Django project or deleted from this one without leaving a hole.
 | --- | --- | --- |
 | [`cms`](docs/cms.md) | `DJANGO_CMS_ENABLED=true` | Pages made of sections made of typed, translatable fields; a library of shared sections; menus; drafts, schedules and signed preview links; export/import for moving content between environments; and a content-editing admin screen separate from the structural one |
 | [`notifications`](docs/notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | A notification table addressed to one account or to everybody, per-account read receipts, a scoped read API, and a WebSocket that pushes new ones on save |
+| [`shop`](docs/shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare the attributes their products answer; products, variants and stock; timed discount campaigns; search, filters and named listings; reviews and likes; a basket per account; and an order, coupon and payment cycle that reserves stock when the order is placed |
 
-Both are toured end to end by `python examples/walkthrough.py`.
+The CMS and notifications are toured end to end by `python examples/walkthrough.py`.
 
 ### The notification socket needs an ASGI server
 
@@ -425,6 +426,8 @@ wrapping happens once, at the renderer, and `/api/docs` documents it.
 - `GET /api/v1/health/ready` — confirms that the database is available
 - `GET /api/docs` — Swagger documentation with an API-version selector
 - `GET /api/<version>/docs` — Swagger documentation opened on a specific version
+- `GET /api/redoc` — the same schema as a ReDoc reference, on the default version
+- `GET /api/<version>/redoc` — the ReDoc reference for a specific version
 - `GET /api/<version>/openapi.json` — OpenAPI schema for a specific version
 - `WS /ws/notifications` — the notification feed, when notifications are enabled.
   An ASGI server is required; `manage.py runserver` is WSGI and will never serve
@@ -474,6 +477,12 @@ variables as needed:
 | `DJANGO_NOTIFICATIONS_WS_PATH` | Path the notification socket is mounted at | `/ws/notifications` |
 | `DJANGO_NOTIFICATIONS_CHANNEL_PREFIX` | Namespace for the broker's channels | `notifications` |
 | `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG` | Unread a client is caught up with on connect, 0 through 500 | `20` |
+| `DJANGO_SHOP_ENABLED` | Install the shop: its tables, routes and admin | `false` |
+| `DJANGO_SHOP_CURRENCY` | ISO 4217 code every price is quoted in | `USD` |
+| `DJANGO_SHOP_REVIEW_MODERATION` | Hold a review for a moderator before it is readable | `true` |
+| `DJANGO_SHOP_MAX_ITEM_QUANTITY` | Most of one product a single basket line may hold | `99` |
+| `DJANGO_SHOP_PAGE_SIZE` | Rows a listing returns when the caller does not say | `24` |
+| `DJANGO_SHOP_MAX_PAGE_SIZE` | Ceiling on `limit`, so one request cannot ask for the catalogue | `100` |
 | `DJANGO_DB_ENGINE` | Django database backend | SQLite |
 | `DJANGO_DB_NAME` | Database name or path | `db.sqlite3` |
 | `DJANGO_DB_USER` | Database user | Empty |

@@ -14,21 +14,42 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   environment from nothing to exercise the *shipped* defaults, and a developer's
   own `.env` was being read back in underneath it, so those tests were quietly
   reporting on whatever that machine had enabled.
-
-- **Every app now has one service, published through three doors.** What an app
-  can be asked used to live in its router, so a second transport meant either a
-  second copy of the rules or a router calling a router. Each app now keeps its
-  decisions in `services.py` and publishes them from `rest/`, `graph/` and
-  `grpc/` -- three translations of one answer, so what a listing means or whether
-  an unmoderated review is visible is decided once and cannot drift between
-  doors. GraphQL is one schema at `/graphql` assembled from whatever apps are
-  installed; gRPC is served by `make grpc`, and `manage.py protos` writes each
-  app's `.proto` and stubs from its `@grpc_action` decorators, with
-  `--check` failing the build when they have drifted. **Breaking for anything
-  importing an app's router**: `apps.x.api.v1` is now `apps.x.rest.v1`, and the
-  password, email-code, SMS-code, magic-link and two-factor apps split their
-  sign-in routes into `rest/login.py` beside the rest of their API.
-
+- **A `shop` feature app.** Enabled with `DJANGO_SHOP_ENABLED`, and off by
+  default like every other optional app. A catalogue whose categories *declare*
+  what their products are -- typed, inheritable `CategoryAttribute` rows rather
+  than forty nullable columns -- with brands, tags, variants, stock, images and
+  SEO. Discount campaigns are rows with a window rather than a `sale_price`
+  column, so a sale ends because a clock passed a timestamp; only ever the
+  single best one applies, because stacking is how a shop sells at a negative
+  price. On top of that: search, filters and seven named listings computed over
+  the live catalogue, hand-curated collections, one review per account with a
+  moderation queue, likes, and a basket priced when it is read rather than when
+  it was filled. Every shopper-facing queryset starts from the caller, so
+  somebody else's basket is a `404` rather than a `403`.
+- **Several sellers per product.** A product row is the primary seller's offer --
+  its `seller`, `price` and `stock` -- and every other seller who can fill the
+  order is a `ProductOffer` with a price and stock of its own, so a
+  single-vendor shop never touches the table. What a shopper is quoted is the
+  cheapest live seller *after* campaigns, with a tie going to whoever dispatches
+  sooner; adding to a basket without naming one takes exactly that, so the price
+  in the basket is the price that was on the page. Two sellers of one thing are
+  two basket lines, and each line's stock check, order line and reservation
+  follow the seller it names.
+- **Orders, invoices and payment.** Checkout turns a basket into an immutable
+  order in one transaction: prices, tax, the seller and the delivery address are
+  copied onto it and never recomputed, stock is reserved *then* rather than at
+  payment so two shoppers cannot both buy the last one, an invoice is issued with
+  a number of its own, and a payment is opened to be settled. Coupons, shipping
+  methods with a free-from threshold, and cancellation that releases a
+  reservation exactly once. No gateway is wired up: orders are created against
+  the `manual` provider and settled from the admin -- "Mark as paid" turns
+  reservations into sales, "Mark as rejected" records one failed attempt and
+  opens another, leaving the stock reserved for the retry. The
+  `payment/confirm` endpoint is the seam a real callback is pointed at, and it
+  settles through the same idempotent service method the admin action calls.
+- **The shop answers over all three transports.** REST, GraphQL and gRPC are
+  three translations of one service, so what "bestsellers" means, whether an
+  unmoderated review is visible and which seller wins are decided once.
 - **ReDoc sits beside Swagger.** `/api/redoc` renders the same schema as a
   reference to read, using the ReDoc page Django Ninja already ships. It has no
   version selector of its own -- it renders the single document it is handed --
@@ -289,6 +310,24 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that loads the preset and asks for that layout. A test asserts all three
   settings together, since the old one asserted only the list and passed
   throughout.
+- **A checkout could not complete when a product carried tax.** `tax_total` and
+  `total` reached their columns with more decimal places than the field holds --
+  a `Decimal` division produces as many as the arithmetic implies -- and the
+  write was refused rather than rounded. Money is now quantised to the cent per
+  line and then summed, which is also how an invoice adds up.
+- **Stock never moved.** The decrement assigned an `F()` expression and saved,
+  but every write in the shop runs `full_clean`, which cannot validate an
+  expression; it is one `update` statement now, which is also what makes it safe
+  against a second checkout running at the same time.
+- **A discount arrived blank over gRPC.** The price serialiser read flattened
+  `discount_*` keys from a payload that nests them, so `is_discounted` was true
+  while the campaign's name, value and end date were all empty.
+- **Filtering by an attribute was a 500 on SQLite**, which is what this starter
+  ships with: the JSON `contains` lookup it used is unsupported there. Values
+  are now normalised the way the write side normalises them and matched exactly,
+  with multi-choice membership done as a substring match on the encoded value.
+- **A category's product count read as `null` rather than `0`** when it had none
+  of its own, which is indistinguishable from "counts were not requested".
 
 ## [1.0.0] - 2026-08-26
 

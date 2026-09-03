@@ -453,6 +453,43 @@ NOTIFICATIONS_CHANNEL_PREFIX = os.getenv("DJANGO_NOTIFICATIONS_CHANNEL_PREFIX", 
 # that reconnects does not have to make an HTTP call to find out what it missed.
 NOTIFICATIONS_SOCKET_BACKLOG = int(os.getenv("DJANGO_NOTIFICATIONS_SOCKET_BACKLOG", "20"))
 
+# The shop app. Optional the same way the CMS and the notifications are: naming
+# it installs its tables, its routes and its admin, and a project that does not
+# name it never imports the package.
+SHOP_ENABLED = os.getenv("DJANGO_SHOP_ENABLED", "false").lower() == "true"
+SHOP_APP = "apps.shop.apps.ShopConfig"
+SHOP_INSTALLED_APPS = [SHOP_APP] if SHOP_ENABLED else []
+SHOP_ROUTERS = (
+    [
+        {
+            "prefix": "/shop",
+            "router": "apps.shop.rest.router",
+            "tag": "Shop",
+            "description": (
+                "The catalogue a shop keeps: categories and the attributes they "
+                "declare, products with their variants and specs, curated "
+                "collections, and the discounts running on them. Reading is "
+                "public; the basket, the reviews and the likes belong to the "
+                "account that called. Nothing here writes to the catalogue -- "
+                "that is the admin's job."
+            ),
+        }
+    ]
+    if SHOP_ENABLED
+    else []
+)
+# The one currency every price is quoted in. A catalogue priced in several needs
+# a conversion policy, a rounding policy and a display policy, and inventing
+# those silently is worse than saying a shop has one currency.
+SHOP_CURRENCY = os.getenv("DJANGO_SHOP_CURRENCY", "USD").upper()
+# Whether a review waits for a moderator before anybody else can read it. On by
+# default: a storefront that publishes whatever is typed into it is a spam
+# target from the first week.
+SHOP_REVIEW_MODERATION = os.getenv("DJANGO_SHOP_REVIEW_MODERATION", "true").lower() == "true"
+SHOP_MAX_ITEM_QUANTITY = int(os.getenv("DJANGO_SHOP_MAX_ITEM_QUANTITY", "99"))
+SHOP_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_PAGE_SIZE", "24"))
+SHOP_MAX_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_MAX_PAGE_SIZE", "100"))
+
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")
 OAUTH_STATE_TTL_SECONDS = int(os.getenv("DJANGO_OAUTH_STATE_TTL_SECONDS", "600"))
 OAUTH_HTTP_TIMEOUT_SECONDS = float(os.getenv("DJANGO_OAUTH_HTTP_TIMEOUT_SECONDS", "10"))
@@ -499,6 +536,7 @@ INSTALLED_APPS = [
     *AUTH_INSTALLED_APPS,
     *CMS_INSTALLED_APPS,
     *NOTIFICATIONS_INSTALLED_APPS,
+    *SHOP_INSTALLED_APPS,
     # The transports beside REST. Both are installed whether or not they are
     # published: `generateproto` and the schema check have to be able to run in a
     # deployment that serves neither.

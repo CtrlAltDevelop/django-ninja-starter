@@ -23,7 +23,8 @@ def build_apis() -> dict[str, NinjaAPI]:
         # Every router this version publishes, in the order the documentation
         # teaches them: the project's own feature APIs first, then the account
         # they belong to, then the ways in, then the content and notification
-        # apps. Swagger reads the order off the tag list built from it.
+        # apps, then the shop. Swagger reads the order off the tag list
+        # built from it.
         routes = [
             *configuration["routes"],
             *settings.ACCOUNT_ROUTERS,
@@ -32,6 +33,7 @@ def build_apis() -> dict[str, NinjaAPI]:
             *settings.OAUTH_PROVIDER_ROUTERS,
             *settings.CMS_ROUTERS,
             *settings.NOTIFICATIONS_ROUTERS,
+            *settings.SHOP_ROUTERS,
         ]
         api = EnvelopeAPI(
             title="Django Ninja Starter API",
