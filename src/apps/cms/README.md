@@ -14,7 +14,9 @@ depends on it.
 | Requirement | Why | If it is missing |
 | --- | --- | --- |
 | Django 5.2+ | Model and admin APIs it uses | — |
-| `django-ninja` | The read API in `api/v1.py` | Delete `api/`; the admin still works |
+| `django-ninja` | The read API in `rest/v1.py` | Delete `rest/`; the admin still works |
+| `strawberry-graphql-django` | The GraphQL half in `graph/` | Delete `graph/`; the other doors still work |
+| `django-socio-grpc` | The gRPC half in `grpc/` | Delete `grpc/`; the other doors still work |
 | `CMS_LANGUAGES` | The languages content may be written in | Falls back to `[LANGUAGE_CODE]` |
 | `django-unfold` | The admin theme | Falls back to Django's own admin — see `theme.py` |
 
@@ -31,7 +33,7 @@ CMS_LANGUAGES = ["en-us", "fa"]  # optional; defaults to LANGUAGE_CODE
 CMS_PREVIEW_TTL_SECONDS = 60 * 60 * 24  # optional; how long a preview link lasts
 
 # urls.py / your NinjaAPI
-from apps.cms.api.v1 import router as cms_router
+from apps.cms.rest.v1 import router as cms_router
 
 api.add_router("/cms", cms_router, tags=["CMS"])
 ```
@@ -51,7 +53,10 @@ Naming the app is the whole installation; leaving it unset costs nothing.
 | `fields.py` | The field types and the one canonical shape each value has |
 | `translations.py` | Which languages exist, and how one is chosen per request |
 | `content.py` | Rows to JSON: drafts and hidden rows gone, one language chosen |
-| `api/v1.py` | Five read endpoints |
+| `services.py` | Every question this app answers, decided once for all three transports |
+| `rest/v1.py` | The HTTP endpoints |
+| `graph/` | The same reads as GraphQL types and queries |
+| `grpc/` | The same reads as gRPC actions, and the `.proto` they generate |
 | `admin.py` | Structure admin, plus the content screen |
 | `forms.py` | The widgets an editor types into |
 | `theme.py` | Where the admin theme comes from, and what to do without one |

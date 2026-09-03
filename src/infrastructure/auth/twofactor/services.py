@@ -1,22 +1,39 @@
-"""Enrolling, challenging, and checking each kind of second factor."""
+"""Enrolling, challenging, and checking each kind of second factor.
+
+The primitives below are the vocabulary: mint a secret, send a code, spend a
+recovery code. :class:`TwoFactorService` at the foot of the file is the grammar
+-- the login-time challenge and each enrolment, in the order they have to
+happen. The three transport packages beside this file call the service; none of
+them reaches past it to a primitive.
+"""
 
 import hmac
 import secrets
 import time
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
 import pyotp
 from django.conf import settings
 from django.db import transaction
+from django.http import HttpRequest
 from django.utils import timezone
 
-from infrastructure.auth.core.challenges import Challenge, get_challenge_store
+from infrastructure.auth.core.challenges import Challenge, InvalidCode, get_challenge_store
 from infrastructure.auth.core.codes import generate_numeric_code
 from infrastructure.auth.core.delivery import send_email, send_sms
 from infrastructure.auth.core.errors import AuthError
+from infrastructure.auth.core.flows import (
+    PENDING_PURPOSE,
+    pending_methods,
+    record_event,
+    resolve_pending_login,
+)
 from infrastructure.auth.core.identities import account_email, account_phone, normalize_phone
-from infrastructure.auth.core.models import PhoneNumber
+from infrastructure.auth.core.models import AuthEventType, PhoneNumber
+from infrastructure.auth.core.services import masking_service
+from infrastructure.auth.core.sessions import IssuedCredentials, issue_credentials
 from infrastructure.auth.core.throttling import guard_delivery
 from infrastructure.auth.twofactor.models import RecoveryCode, SecondFactor, SecondFactorMethod
 from infrastructure.common.responses import ResponseTitle
@@ -249,3 +266,268 @@ def redeem_factor_code(ticket: str, code: str, user: Any) -> Challenge:
             title=ResponseTitle.INVALID_CODE,
         )
     return challenge
+
+
+INFERABLE = (SecondFactorMethod.TOTP, SecondFactorMethod.SMS, SecondFactorMethod.EMAIL)
+
+
+@dataclass(frozen=True, slots=True)
+class SentCode:
+    """Where a second-factor code went, and the handle for redeeming it."""
+
+    ticket: str
+    channel: str
+    destination: str
+    expires_in: int
+
+
+@dataclass(frozen=True, slots=True)
+class EnrolledFactorView:
+    """One factor on an account, as every transport reports it."""
+
+    method: str
+    destination: str
+    confirmed: bool
+    last_used_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class FactorList:
+    """What is enrolled, what this deployment allows, and what is left in reserve."""
+
+    methods: list[EnrolledFactorView]
+    available: list[str]
+    unused_recovery_codes: int
+
+
+@dataclass(frozen=True, slots=True)
+class TotpEnrolment:
+    """The shared secret, in the two forms an authenticator app accepts."""
+
+    secret: str
+    otpauth_uri: str
+
+
+class TwoFactorService:
+    """The login-time challenge, and everything an account does to its factors."""
+
+    def chosen_method(self, metadata: dict[str, Any], methods: list[str], requested: str) -> str:
+        """Work out which factor the caller means, without ever guessing recovery.
+
+        Spending a recovery code on what was meant to be a mistyped authenticator
+        code would burn a credential the user may have printed out months ago, so
+        recovery is only ever used when asked for by name.
+        """
+        if requested:
+            return requested
+        if metadata.get("code_ticket") and metadata.get("code_method"):
+            return str(metadata["code_method"])
+        candidates = [method for method in methods if method in INFERABLE]
+        if SecondFactorMethod.TOTP in candidates:
+            return SecondFactorMethod.TOTP
+        if len(candidates) == 1:
+            return candidates[0]
+        raise AuthError(
+            "Specify which second factor you are using.",
+            status=400,
+            title=ResponseTitle.SECOND_FACTOR_UNSPECIFIED,
+        )
+
+    def challenge(self, request: HttpRequest, *, login_ticket: str, method: str) -> SentCode:
+        """Deliver an SMS or email code for a login that is waiting on a second factor."""
+        user, metadata = resolve_pending_login(login_ticket)
+        if method not in pending_methods(metadata):
+            raise AuthError(
+                "That second factor is not set up for this account.",
+                status=400,
+                title=ResponseTitle.SECOND_FACTOR_NOT_SET_UP,
+            )
+        factor = factor_for(user, method)
+        ticket, channel, destination = send_factor_code(user, factor)
+        get_challenge_store().update_metadata(
+            login_ticket,
+            purpose=PENDING_PURPOSE,
+            metadata={**metadata, "code_ticket": ticket, "code_method": method},
+        )
+        record_event(
+            request,
+            AuthEventType.CODE_SENT,
+            user=user,
+            method=method,
+            identifier=destination,
+            stage="second_factor",
+        )
+        return SentCode(
+            ticket=login_ticket,
+            channel=channel,
+            destination=masking_service.destination(channel, destination),
+            expires_in=settings.AUTH_CHALLENGE_TTL_SECONDS,
+        )
+
+    def verify(
+        self, request: HttpRequest, *, login_ticket: str, code: str, method: str = ""
+    ) -> IssuedCredentials:
+        """Check the second factor and, if it holds, issue the credential."""
+        store = get_challenge_store()
+        user, metadata = resolve_pending_login(login_ticket)
+        methods = pending_methods(metadata)
+        chosen = self.chosen_method(metadata, methods, method)
+        if chosen not in methods:
+            raise AuthError(
+                "That second factor is not set up for this account.",
+                status=400,
+                title=ResponseTitle.SECOND_FACTOR_NOT_SET_UP,
+            )
+
+        code_ticket = ""
+        if chosen == SecondFactorMethod.TOTP:
+            accepted = verify_totp(factor_for(user, chosen), code)
+        elif chosen == SecondFactorMethod.RECOVERY:
+            accepted = consume_recovery_code(user, code)
+        else:
+            code_ticket = str(metadata.get("code_ticket", ""))
+            if not code_ticket or metadata.get("code_method") != chosen:
+                raise AuthError(
+                    "Request a code before verifying it.",
+                    status=400,
+                    title=ResponseTitle.CODE_NOT_REQUESTED,
+                )
+            try:
+                redeem_factor_code(code_ticket, code, user)
+            except InvalidCode:
+                accepted = False
+            else:
+                accepted = True
+                factor_for(user, chosen).mark_used()
+
+        if not accepted:
+            store.fail(login_ticket)
+            record_event(request, AuthEventType.SECOND_FACTOR_FAILED, user=user, method=chosen)
+            raise AuthError("That code is not valid.", status=400, title=ResponseTitle.INVALID_CODE)
+
+        store.discard(login_ticket)
+        if code_ticket:
+            store.discard(code_ticket)
+        first_factor = str(metadata.get("first_factor", ""))
+        record_event(request, AuthEventType.SECOND_FACTOR_SUCCEEDED, user=user, method=chosen)
+        credentials = issue_credentials(request, user, method=f"{first_factor}+{chosen}")
+        record_event(
+            request,
+            AuthEventType.LOGIN_SUCCEEDED,
+            user=user,
+            method=first_factor,
+            second_factor=chosen,
+        )
+        return credentials
+
+    def factors(self, user: Any) -> FactorList:
+        return FactorList(
+            methods=[
+                EnrolledFactorView(
+                    method=factor.method,
+                    destination=masking_service.destination(
+                        "sms" if factor.method == SecondFactorMethod.SMS else "email",
+                        factor.destination,
+                    )
+                    if factor.destination
+                    else "",
+                    confirmed=factor.is_confirmed,
+                    last_used_at=factor.last_used_at.isoformat() if factor.last_used_at else "",
+                )
+                for factor in SecondFactor.objects.filter(user=user)
+            ],
+            available=list(settings.AUTH_SECOND_FACTORS),
+            unused_recovery_codes=unused_recovery_codes(user),
+        )
+
+    def start_totp(self, user: Any) -> TotpEnrolment:
+        """Hand back a fresh secret. It counts for nothing until a code confirms it."""
+        _, secret, uri = begin_totp(user)
+        return TotpEnrolment(secret=secret, otpauth_uri=uri)
+
+    def confirm_totp(self, request: HttpRequest, user: Any, *, code: str) -> str:
+        require_enabled(SecondFactorMethod.TOTP)
+        factor = SecondFactor.objects.filter(user=user, method=SecondFactorMethod.TOTP).first()
+        if factor is None:
+            raise AuthError(
+                "Start authenticator enrolment first.",
+                status=400,
+                title=ResponseTitle.ENROLMENT_NOT_STARTED,
+            )
+        if not verify_totp(factor, code):
+            raise AuthError("That code is not valid.", status=400, title=ResponseTitle.INVALID_CODE)
+        factor.confirm()
+        self._record_enrolment(request, user, SecondFactorMethod.TOTP)
+        return "Authenticator app enabled."
+
+    def start_sms(self, user: Any, *, phone: str) -> SentCode:
+        return self._sent(user, enroll_sms(user, phone))
+
+    def confirm_sms(self, request: HttpRequest, user: Any, *, ticket: str, code: str) -> str:
+        require_enabled(SecondFactorMethod.SMS)
+        challenge = redeem_factor_code(ticket, code, user)
+        factor = SecondFactor.objects.filter(user=user, method=SecondFactorMethod.SMS).first()
+        if factor is None:
+            raise AuthError(
+                "Start SMS enrolment first.",
+                status=400,
+                title=ResponseTitle.ENROLMENT_NOT_STARTED,
+            )
+        factor.confirm()
+        number = PhoneNumber.objects.filter(user=user, number=challenge.destination).first()
+        if number is not None and not number.is_verified:
+            number.mark_verified()
+        self._record_enrolment(request, user, SecondFactorMethod.SMS)
+        return "SMS codes enabled."
+
+    def start_email(self, user: Any) -> SentCode:
+        return self._sent(user, enroll_email(user))
+
+    def confirm_email(self, request: HttpRequest, user: Any, *, ticket: str, code: str) -> str:
+        require_enabled(SecondFactorMethod.EMAIL)
+        redeem_factor_code(ticket, code, user)
+        factor = SecondFactor.objects.filter(user=user, method=SecondFactorMethod.EMAIL).first()
+        if factor is None:
+            raise AuthError(
+                "Start email enrolment first.",
+                status=400,
+                title=ResponseTitle.ENROLMENT_NOT_STARTED,
+            )
+        factor.confirm()
+        self._record_enrolment(request, user, SecondFactorMethod.EMAIL)
+        return "Email codes enabled."
+
+    def generate_recovery_codes(self, request: HttpRequest, user: Any) -> list[str]:
+        """Issue a new set. Any codes handed out earlier stop working immediately."""
+        codes = issue_recovery_codes(user)
+        self._record_enrolment(request, user, SecondFactorMethod.RECOVERY)
+        return codes
+
+    def remove(self, request: HttpRequest, user: Any, *, method: str) -> str:
+        factor = SecondFactor.objects.filter(user=user, method=method).first()
+        if factor is None:
+            raise AuthError(
+                "That second factor is not set up for this account.",
+                status=404,
+                title=ResponseTitle.SECOND_FACTOR_NOT_SET_UP,
+            )
+        factor.delete()
+        if method == SecondFactorMethod.RECOVERY:
+            user.auth_recovery_codes.all().delete()
+        record_event(request, AuthEventType.SECOND_FACTOR_REMOVED, user=user, method=method)
+        return f"{method} second factor removed."
+
+    def _sent(self, user: Any, factor: SecondFactor) -> SentCode:
+        ticket, channel, destination = send_factor_code(user, factor)
+        return SentCode(
+            ticket=ticket,
+            channel=channel,
+            destination=masking_service.destination(channel, destination),
+            expires_in=settings.AUTH_CHALLENGE_TTL_SECONDS,
+        )
+
+    def _record_enrolment(self, request: HttpRequest, user: Any, method: str) -> None:
+        record_event(request, AuthEventType.SECOND_FACTOR_ENROLLED, user=user, method=method)
+
+
+twofactor_service = TwoFactorService()

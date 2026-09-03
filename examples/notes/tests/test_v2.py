@@ -1,6 +1,6 @@
 from django.test import Client
 
-from apps.notes.schemas import EXCERPT_LENGTH
+from apps.notes.services import EXCERPT_LENGTH
 from apps.notes.tests.test_v1 import _account, _write
 
 V1 = "/api/v1/notes/"

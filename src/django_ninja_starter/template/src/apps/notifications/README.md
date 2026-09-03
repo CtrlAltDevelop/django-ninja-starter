@@ -26,7 +26,7 @@ default behind them, so the app can be copied into another project as it stands.
 3. Mount the router wherever your Django Ninja API is built:
 
    ```python
-   api.add_router("/notifications", "apps.notifications.api.v1.router")
+   api.add_router("/notifications", "apps.notifications.rest.v1.router")
    ```
 
 4. Route the socket. `apps.notifications.sockets.notifications_socket` is a
@@ -51,5 +51,8 @@ default behind them, so the app can be copied into another project as it stands.
 | `broadcast.py` | Fan-out: the in-process broker and the Redis one |
 | `sockets.py` | The WebSocket consumer |
 | `identity.py` | Turning a token, subprotocol, header or cookie into an account |
-| `api/v1.py` | The HTTP endpoints |
+| `services.py` | Every question this app answers, decided once for all three transports |
+| `rest/v1.py` | The HTTP endpoints |
+| `graph/` | The same reads and marks-as-read as GraphQL queries and mutations |
+| `grpc/` | The same, as gRPC actions, and the `.proto` they generate |
 | `admin.py` | Writing one, and seeing who read it |

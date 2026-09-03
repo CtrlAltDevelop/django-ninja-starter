@@ -63,7 +63,7 @@ def session_status(request: HttpRequest) -> dict[str, Any]:
     """What the page can say about its reader before it asks the server anything.
 
     The page trades an admin session for a bearer token on load (see the template
-    for how, and ``oauth.core.exchange`` for what it calls). Every refusal that
+    for how, and ``oauth.core.rest.exchange`` for what it calls). Every refusal that
     bridge can return used to be a silent no-op, which left one page appearance
     covering three different situations: authorised, declined, and failed.
 

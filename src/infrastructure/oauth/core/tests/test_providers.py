@@ -365,7 +365,7 @@ def test_provider_routers_are_reusable_across_api_versions(
     health_route = {
         "app_config": "infrastructure.common.apps.CommonConfig",
         "prefix": "/health",
-        "router": "infrastructure.common.api.router",
+        "router": "infrastructure.common.rest.api.router",
         "tag": "Health",
     }
     monkeypatch.setattr(

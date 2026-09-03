@@ -1,4 +1,4 @@
-.PHONY: install check test docs example package run serve migrate migrations superuser
+.PHONY: install check test docs example package protos run serve grpc migrate migrations superuser
 
 install:
 	python3 -m pip install -e '.[dev]'
@@ -9,6 +9,7 @@ check:
 	mypy src manage.py examples/build.py
 	python3 manage.py check
 	python3 manage.py makemigrations --check --dry-run
+	python3 manage.py protos --check
 
 test:
 	pytest --cov
@@ -18,6 +19,11 @@ example:
 
 docs:
 	DJANGO_SETTINGS_MODULE=config.settings.test python3 manage.py authdocs
+
+# Rewrite every app's .proto and its Python stubs from the gRPC services.
+# Run it after changing a `@grpc_action`, and commit what it writes.
+protos:
+	python3 manage.py protos
 
 package:
 	python3 -m build
@@ -31,6 +37,11 @@ run:
 serve:
 	DJANGO_SETTINGS_MODULE=config.settings.development \
 		python3 -m uvicorn config.asgi:application --reload --app-dir src
+
+# The gRPC server. `runserver` serves REST and GraphQL; this serves the third
+# door, on DJANGO_GRPC_PORT.
+grpc:
+	python3 manage.py grpcrunaioserver
 
 migrate:
 	python3 manage.py migrate

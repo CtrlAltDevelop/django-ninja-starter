@@ -1,9 +1,12 @@
+from django.conf import settings
 from django.contrib import admin
 from django.http import Http404, HttpRequest, HttpResponse
 from django.urls import path
 from ninja.openapi.docs import Redoc
+from strawberry.django.views import AsyncGraphQLView
 
 from config.api import apis
+from config.graph import schema as graph_schema
 
 
 def api_docs(request: HttpRequest) -> HttpResponse:
@@ -35,3 +38,24 @@ urlpatterns = [
     path("api/<str:version>/redoc", api_redoc, name="api-version-redoc"),
     *(path(f"api/{version}/", api.urls) for version, api in apis.items()),
 ]
+
+# One endpoint, not one per version: a GraphQL schema is versioned by deprecating
+# fields rather than by forking the document, so there is nothing here for a
+# version prefix to select between.
+#
+# Asynchronous, because the content app reads asynchronously and one schema
+# cannot be half of each. Every synchronous service reaches it through
+# `infrastructure.common.graph.errors.resolver`, which crosses over for them.
+if settings.GRAPHQL_ENABLED:
+    urlpatterns.append(
+        path(
+            "graphql",
+            AsyncGraphQLView.as_view(
+                schema=graph_schema,
+                # The in-browser editor, or nothing: a production deployment
+                # that leaves it on is publishing a schema browser.
+                graphql_ide="graphiql" if settings.GRAPHQL_GRAPHIQL else None,
+            ),
+            name="graphql",
+        )
+    )

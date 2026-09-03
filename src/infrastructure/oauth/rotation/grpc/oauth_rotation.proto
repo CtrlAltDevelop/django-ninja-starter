@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package config.oauth_rotation;
+
+import "google/protobuf/empty.proto";
+
+service RotationTokenRpcController {
+    rpc EndSession(EndSessionRequest) returns (Message) {}
+    rpc Refresh(RefreshRequest) returns (Credentials) {}
+    rpc Revoke(RevokeRequest) returns (Message) {}
+    rpc Sessions(google.protobuf.Empty) returns (SessionList) {}
+}
+
+message Credentials {
+    string token_type = 1;
+    string access_token = 2;
+    string refresh_token = 3;
+    int32 expires_in = 4;
+    string session_id = 5;
+}
+
+message EndSessionRequest {
+    string session_id = 1;
+}
+
+message Message {
+    string detail = 1;
+}
+
+message RefreshRequest {
+    string refresh_token = 1;
+}
+
+message RevokeRequest {
+    string token = 1;
+}
+
+message Session {
+    string session_id = 1;
+    string created_at = 2;
+    string last_used_at = 3;
+    string expires_at = 4;
+    string ip_address = 5;
+    string user_agent = 6;
+    string auth_method = 7;
+    bool current = 8;
+}
+
+message SessionList {
+    string mode = 1;
+    repeated Session sessions = 2;
+}
+

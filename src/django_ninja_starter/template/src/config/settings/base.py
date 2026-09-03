@@ -29,7 +29,7 @@ ACCOUNTS_DEFAULT_TIMEZONE = os.getenv("DJANGO_ACCOUNTS_DEFAULT_TIMEZONE", "UTC")
 ACCOUNT_ROUTERS = [
     {
         "prefix": "/users",
-        "router": "infrastructure.accounts.api.router",
+        "router": "infrastructure.accounts.rest.api.router",
         "tag": "Users",
         "description": (
             "The account every login resolves to, and the profile the login "
@@ -112,7 +112,7 @@ OAUTH_PROVIDER_TAGS = {
 OAUTH_PROVIDER_ROUTERS = [
     {
         "prefix": f"/oauth/{provider}",
-        "router": f"infrastructure.oauth.{provider}.api.router",
+        "router": f"infrastructure.oauth.{provider}.rest.router",
         **OAUTH_PROVIDER_TAGS[provider],
     }
     for provider in OAUTH_PROVIDERS
@@ -225,7 +225,7 @@ AUTH_METHOD_TAGS = {
 AUTH_METHOD_ROUTERS = [
     {
         "prefix": f"/auth/{method.replace('_', '-')}",
-        "router": f"infrastructure.auth.{method}.api.router",
+        "router": f"infrastructure.auth.{method}.rest.router",
         **AUTH_METHOD_TAGS[method],
     }
     for method in AUTH_METHODS
@@ -234,7 +234,7 @@ if AUTH_SECOND_FACTORS:
     AUTH_METHOD_ROUTERS.append(
         {
             "prefix": "/auth/2fa",
-            "router": "infrastructure.auth.twofactor.api.router",
+            "router": "infrastructure.auth.twofactor.rest.router",
             "tag": "Auth - Two Factor",
             "description": (
                 "Enrol, confirm and use the second factors this deployment "
@@ -280,7 +280,7 @@ AUTH_TOKEN_ROUTERS = (
     else [
         {
             "prefix": "/auth/token",
-            "router": f"infrastructure.oauth.{AUTH_TOKEN_MODE}.api.router",
+            "router": f"infrastructure.oauth.{AUTH_TOKEN_MODE}.rest.router",
             # Named for the prefix rather than for the mode behind it, because a
             # client reads the same group whichever mode is active -- which is
             # the whole point of publishing them at one prefix.
@@ -350,7 +350,7 @@ CMS_ROUTERS = (
     [
         {
             "prefix": "/cms",
-            "router": "apps.cms.api.v1.router",
+            "router": "apps.cms.rest.router",
             "tag": "CMS",
             "description": (
                 "Read the site an editor built: published pages, their sections "
@@ -419,7 +419,7 @@ NOTIFICATIONS_ROUTERS = (
     [
         {
             "prefix": "/notifications",
-            "router": "apps.notifications.api.v1.router",
+            "router": "apps.notifications.rest.router",
             "tag": "Notifications",
             "description": (
                 "The history a client reads when it opens, and the read state it "
@@ -457,6 +457,18 @@ OAUTH_STORE_PROVIDER_TOKENS = (
 )
 OAUTH_USER_RESOLVER = os.getenv("DJANGO_OAUTH_USER_RESOLVER", "")
 
+# The two transports that sit beside REST. Every app that publishes an API
+# publishes all three off one service class, so these switches decide which
+# *doors* are open, never what is behind them: turning either off unpublishes an
+# endpoint and changes no behaviour.
+GRAPHQL_ENABLED = os.getenv("DJANGO_GRAPHQL_ENABLED", "true").lower() == "true"
+# The in-browser query editor. Handy in development, and an unauthenticated
+# schema browser in production, so it follows DEBUG unless a deployment says
+# otherwise.
+GRAPHQL_GRAPHIQL = os.getenv("DJANGO_GRAPHQL_GRAPHIQL", str(DEBUG)).lower() == "true"
+GRPC_ENABLED = os.getenv("DJANGO_GRPC_ENABLED", "true").lower() == "true"
+GRPC_PORT = int(os.getenv("DJANGO_GRPC_PORT", "50051"))
+
 INSTALLED_APPS = [
     # Unfold themes the admin by overriding its templates, so it has to be found
     # before the app whose templates it replaces. Its contrib apps are the same
@@ -480,7 +492,24 @@ INSTALLED_APPS = [
     *AUTH_INSTALLED_APPS,
     *CMS_INSTALLED_APPS,
     *NOTIFICATIONS_INSTALLED_APPS,
+    # The transports beside REST. Both are installed whether or not they are
+    # published: `generateproto` and the schema check have to be able to run in a
+    # deployment that serves neither.
+    "strawberry_django",
+    "django_socio_grpc",
 ]
+
+# django-socio-grpc calls the hook once with the server it is starting, and
+# `config.grpc` registers whichever apps this deployment installed.
+GRPC_FRAMEWORK = {
+    "ROOT_HANDLERS_HOOK": "config.grpc.grpc_handlers",
+    "GRPC_CHANNEL_PORT": GRPC_PORT,
+    # Asynchronous, and not only for throughput: on a synchronous server grpcio
+    # hands the servicer a context whose trailing metadata is `None` until
+    # something sets it, and django-socio-grpc reads it on every response. The
+    # asyncio server starts it empty, which is what the library expects.
+    "GRPC_ASYNC": True,
+}
 
 # The admin's appearance, all of it. The three callbacks are dotted paths rather
 # than imports because settings are read before the app registry is ready, and

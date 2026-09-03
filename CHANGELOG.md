@@ -8,6 +8,20 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Every app now has one service, published through three doors.** What an app
+  can be asked used to live in its router, so a second transport meant either a
+  second copy of the rules or a router calling a router. Each app now keeps its
+  decisions in `services.py` and publishes them from `rest/`, `graph/` and
+  `grpc/` -- three translations of one answer, so what a listing means or whether
+  an unmoderated review is visible is decided once and cannot drift between
+  doors. GraphQL is one schema at `/graphql` assembled from whatever apps are
+  installed; gRPC is served by `make grpc`, and `manage.py protos` writes each
+  app's `.proto` and stubs from its `@grpc_action` decorators, with
+  `--check` failing the build when they have drifted. **Breaking for anything
+  importing an app's router**: `apps.x.api.v1` is now `apps.x.rest.v1`, and the
+  password, email-code, SMS-code, magic-link and two-factor apps split their
+  sign-in routes into `rest/login.py` beside the rest of their API.
+
 - **ReDoc sits beside Swagger.** `/api/redoc` renders the same schema as a
   reference to read, using the ReDoc page Django Ninja already ships. It has no
   version selector of its own -- it renders the single document it is handed --

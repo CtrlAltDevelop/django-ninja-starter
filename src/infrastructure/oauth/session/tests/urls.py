@@ -10,10 +10,10 @@ clients actually use.
 from django.urls import path
 
 from infrastructure.auth.core.errors import register_auth_exception_handlers
-from infrastructure.auth.password.api import router as password_router
+from infrastructure.auth.password.rest import router as password_router
 from infrastructure.common.errors import register_error_handlers
 from infrastructure.common.responses import EnvelopeAPI, EnvelopeRenderer
-from infrastructure.oauth.session.api import router as token_router
+from infrastructure.oauth.session.rest import router as token_router
 
 api = EnvelopeAPI(
     version="1.0.0",

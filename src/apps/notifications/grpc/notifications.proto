@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package config.notifications;
+
+import "google/protobuf/empty.proto";
+
+service NotificationController {
+    rpc List(ListRequest) returns (NotificationList) {}
+    rpc Read(ReadRequest) returns (ReadResult) {}
+    rpc ReadAll(google.protobuf.Empty) returns (ReadAllResult) {}
+    rpc UnreadCount(google.protobuf.Empty) returns (UnreadCountResult) {}
+}
+
+message ListRequest {
+    optional bool unread = 1;
+    int32 limit = 2;
+    int32 offset = 3;
+}
+
+message Notification {
+    string id = 1;
+    string audience = 2;
+    string subject = 3;
+    string body = 4;
+    string level = 5;
+    string link = 6;
+    string data_json = 7;
+    string created_at = 8;
+    bool read = 9;
+}
+
+message NotificationList {
+    repeated Notification notifications = 1;
+}
+
+message ReadAllResult {
+    int32 count = 1;
+    int32 unread = 2;
+}
+
+message ReadRequest {
+    string notification_id = 1;
+}
+
+message ReadResult {
+    string id = 1;
+    int32 unread = 2;
+}
+
+message UnreadCountResult {
+    int32 count = 1;
+}
+

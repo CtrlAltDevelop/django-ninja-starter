@@ -25,6 +25,7 @@ from infrastructure.oauth.core.credentials import (
     sign_single,
     token_model,
 )
+from infrastructure.oauth.core.services import SessionList, SessionView, TokenModeService
 from infrastructure.oauth.core.tokens import hash_token
 
 MODE = "sliding"
@@ -93,3 +94,40 @@ def revoke_token(user: Any, token_id: str, reason: str = "logout") -> bool:
     record.revoke(reason)
     event_model.objects.create(token=record, event_type="revoked", old_expires_at=record.expires_at)
     return True
+
+
+class SlidingTokenService(TokenModeService):
+    """The sliding mode, in the shape all three modes answer in."""
+
+    mode = MODE
+
+    def refresh(self, request: HttpRequest, *, refresh_token: str = "") -> IssuedCredentials:
+        """Extend the idle window and report what is left.
+
+        There is no separate refresh token in this mode, so an empty argument
+        means "use whatever the Authorization header is carrying".
+        """
+        return slide(request, refresh_token)
+
+    def sessions(self, user: Any) -> SessionList:
+        return SessionList(
+            mode=MODE,
+            sessions=[
+                SessionView(
+                    session_id=str(record.id),
+                    created_at=record.issued_at.isoformat(),
+                    last_used_at=record.last_used_at.isoformat() if record.last_used_at else "",
+                    expires_at=record.expires_at.isoformat(),
+                    ip_address=record.issued_ip or "",
+                    user_agent=record.user_agent,
+                    auth_method=str(record.metadata.get("auth_method", "")),
+                )
+                for record in live_tokens(user)
+            ],
+        )
+
+    def revoke_session(self, user: Any, session_id: str) -> bool:
+        return revoke_token(user, session_id)
+
+
+token_service = SlidingTokenService()

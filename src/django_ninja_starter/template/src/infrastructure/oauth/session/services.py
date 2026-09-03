@@ -26,6 +26,7 @@ from infrastructure.oauth.core.credentials import (
     token_model,
     user_agent,
 )
+from infrastructure.oauth.core.services import SessionList, SessionView, TokenModeService
 from infrastructure.oauth.core.tokens import hash_token
 
 MODE = "session"
@@ -112,3 +113,44 @@ def revoke_session(user: Any, session_id: str, reason: str = "logout") -> bool:
         access_tokens_revoked=live_tokens,
     )
     return True
+
+
+class OAuthSessionService(TokenModeService):
+    """The session mode, in the shape all three modes answer in."""
+
+    mode = MODE
+
+    def refresh(self, request: HttpRequest, *, refresh_token: str = "") -> IssuedCredentials:
+        """Trade the session key for a fresh access token.
+
+        Unlike the sliding mode there is a second token here, so an empty one is
+        a refused request rather than an invitation to read the header.
+        """
+        if not refresh_token:
+            raise ApiError(
+                "A refresh token is required.", status=400, title=ResponseTitle.TOKEN_REQUIRED
+            )
+        return refresh_access(request, refresh_token)
+
+    def sessions(self, user: Any) -> SessionList:
+        return SessionList(
+            mode=MODE,
+            sessions=[
+                SessionView(
+                    session_id=str(session.id),
+                    created_at=session.created_at.isoformat(),
+                    last_used_at=session.last_seen_at.isoformat(),
+                    expires_at=session.expires_at.isoformat(),
+                    ip_address=session.ip_address or "",
+                    user_agent=session.user_agent,
+                    auth_method=str(session.metadata.get("auth_method", "")),
+                )
+                for session in live_sessions(user)
+            ],
+        )
+
+    def revoke_session(self, user: Any, session_id: str) -> bool:
+        return revoke_session(user, session_id)
+
+
+token_service = OAuthSessionService()

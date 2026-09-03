@@ -20,8 +20,11 @@ reader to configure and extend it:
     again at v2, so the registry entries below are written by the project's own
     command rather than by hand.
 3.  ``examples/notes/`` is copied over that scaffolding, replacing the placeholder
-    router with a real one: a model, an admin, two API versions and their tests.
-4.  ``manage.py migrate`` leaves a database behind, so ``make run`` in the built
+    with a real feature app: a model, an admin, one service, two REST versions,
+    a GraphQL contribution, a set of gRPC actions, and their tests.
+4.  ``manage.py protos`` compiles the notes app's ``.proto`` and its stubs, the
+    same command a developer runs after touching a ``@grpc_action``.
+5.  ``manage.py migrate`` leaves a database behind, so ``make run`` in the built
     project serves the API immediately.
 
 The result is a project a reader could have produced themselves, and the thing
@@ -119,6 +122,10 @@ def build(destination: Path = DEFAULT_DESTINATION, *, rebuild: bool = False) -> 
         ignore=_IGNORED,
     )
 
+    # The notes app arrives with gRPC services and no `.proto`. Compiling them is
+    # a step a developer takes too, which is why it is run here rather than the
+    # generated stubs being committed alongside the source they came from.
+    run_manage(project, "protos")
     run_manage(project, "migrate")
     return project
 

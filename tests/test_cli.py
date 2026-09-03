@@ -15,7 +15,7 @@ def test_create_project_renders_complete_starter(tmp_path: Path) -> None:
     assert (target / ".env.example").is_file()
     assert (target / ".github/workflows/ci.yml").is_file()
     assert (target / "src/apps/__init__.py").is_file()
-    assert (target / "src/infrastructure/common/api.py").is_file()
+    assert (target / "src/infrastructure/common/rest/api.py").is_file()
     assert 'name = "billing-api"' in (target / "pyproject.toml").read_text()
     assert 'title="Billing Api API"' in (target / "src/config/api.py").read_text()
 

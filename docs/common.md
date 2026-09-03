@@ -82,7 +82,7 @@ for the apps the starter ships:
 ```json
 {
   "prefix": "/orders",
-  "router": "apps.orders.api.v1.router",
+  "router": "apps.orders.rest.v1.router",
   "tag": "Orders",
   "description": "Place an order, read one back, and cancel one."
 }

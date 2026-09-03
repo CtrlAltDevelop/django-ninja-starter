@@ -17,7 +17,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 
 from infrastructure.auth.core.models import AuthEvent
-from infrastructure.oauth.core.exchange import ADMIN_SESSION_METHOD
+from infrastructure.oauth.core.services import ADMIN_SESSION_METHOD
 
 pytestmark = pytest.mark.django_db
 

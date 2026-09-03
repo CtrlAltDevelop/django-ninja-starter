@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package config.oauth_apple;
+
+import "google/protobuf/empty.proto";
+
+service AppleOAuthController {
+    rpc Complete(CompleteRequest) returns (Credentials) {}
+    rpc Start(google.protobuf.Empty) returns (Authorization) {}
+}
+
+message Authorization {
+    string authorization_url = 1;
+    string binding = 2;
+    int32 expires_in = 3;
+}
+
+message CallbackParameter {
+    string name = 1;
+    string value = 2;
+}
+
+message CompleteRequest {
+    string binding = 1;
+    repeated CallbackParameter callback = 2;
+}
+
+message Credentials {
+    string token_type = 1;
+    string access_token = 2;
+    string refresh_token = 3;
+    int32 expires_in = 4;
+    string session_id = 5;
+}
+

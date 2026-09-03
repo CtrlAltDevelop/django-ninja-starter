@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package config.common;
+
+import "google/protobuf/empty.proto";
+
+service HealthController {
+    rpc Liveness(google.protobuf.Empty) returns (Health) {}
+    rpc Readiness(google.protobuf.Empty) returns (Health) {}
+}
+
+message Health {
+    string status = 1;
+    bool is_ready = 2;
+    map<string,string> checks = 3;
+}
+

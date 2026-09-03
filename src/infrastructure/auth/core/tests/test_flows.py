@@ -22,7 +22,7 @@ from infrastructure.auth.core.flows import (
     user_from_challenge,
 )
 from infrastructure.auth.core.models import AuthEvent, AuthEventType
-from infrastructure.auth.core.schemas import login_out, mask, mask_email, mask_phone
+from infrastructure.auth.core.rest.schemas import login_out, mask, mask_email, mask_phone
 from infrastructure.auth.core.sessions import IssuedCredentials
 from infrastructure.auth.twofactor.models import SecondFactor, SecondFactorMethod
 

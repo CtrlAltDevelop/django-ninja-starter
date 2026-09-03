@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package config.auth_sms_code;
+
+service SmsCodeController {
+    rpc LoginStart(LoginStartRequest) returns (Challenge) {}
+    rpc LoginVerify(LoginVerifyRequest) returns (LoginResult) {}
+    rpc Logout(LogoutRequest) returns (Message) {}
+    rpc SignupStart(SignupStartRequest) returns (Challenge) {}
+    rpc SignupVerify(SignupVerifyRequest) returns (LoginResult) {}
+}
+
+message Challenge {
+    string ticket = 1;
+    string channel = 2;
+    string destination = 3;
+    int32 expires_in = 4;
+}
+
+message Credentials {
+    string token_type = 1;
+    string access_token = 2;
+    string refresh_token = 3;
+    int32 expires_in = 4;
+    string session_id = 5;
+}
+
+message LoginResult {
+    bool requires_second_factor = 1;
+    Credentials credentials = 2;
+    string login_ticket = 3;
+    repeated string methods = 4;
+}
+
+message LoginStartRequest {
+    string phone = 1;
+}
+
+message LoginVerifyRequest {
+    string ticket = 1;
+    string code = 2;
+}
+
+message LogoutRequest {
+    string token = 1;
+}
+
+message Message {
+    string detail = 1;
+}
+
+message SignupStartRequest {
+    string phone = 1;
+}
+
+message SignupVerifyRequest {
+    string ticket = 1;
+    string code = 2;
+}
+

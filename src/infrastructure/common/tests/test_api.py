@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 from django.db.utils import OperationalError
 from django.test import Client
 
-from infrastructure.common.services import database_is_ready
+from infrastructure.common.services import HealthService, database_is_ready
 
 
 def test_liveness() -> None:
@@ -219,7 +219,7 @@ def test_versioned_openapi_schema_contains_health_routes() -> None:
     assert "/api/v1/health/ready" in response.json()["paths"]
 
 
-@patch("infrastructure.common.api.database_is_ready", return_value=False)
+@patch.object(HealthService, "database_is_ready", return_value=False)
 def test_readiness_returns_503_when_database_is_unavailable(
     database_ready: object,
 ) -> None:

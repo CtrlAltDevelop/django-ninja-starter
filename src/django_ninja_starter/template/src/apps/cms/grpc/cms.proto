@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package config.cms;
+
+import "google/protobuf/empty.proto";
+
+service ContentController {
+    rpc Menu(MenuRequest) returns (MenuDetail) {}
+    rpc Menus(google.protobuf.Empty) returns (MenuList) {}
+    rpc Page(PageRequest) returns (PageDetail) {}
+    rpc Pages(PagesRequest) returns (PageList) {}
+    rpc Site(SiteRequest) returns (SiteInfo) {}
+}
+
+message ContentField {
+    string id = 1;
+    string name = 2;
+    string type = 3;
+    bool multiple = 4;
+    bool required = 5;
+    string value_json = 6;
+}
+
+message MenuDetail {
+    string id = 1;
+    string name = 2;
+    repeated MenuItem items = 3;
+}
+
+message MenuItem {
+    string label = 1;
+    string page = 2;
+    string url = 3;
+    bool new_tab = 4;
+}
+
+message MenuList {
+    repeated MenuSummary menus = 1;
+}
+
+message MenuRequest {
+    string name = 1;
+    string language = 2;
+}
+
+message MenuSummary {
+    string id = 1;
+    string name = 2;
+}
+
+message PageDetail {
+    string id = 1;
+    string name = 2;
+    string language = 3;
+    string status = 4;
+    PageMeta meta = 5;
+    repeated Section sections = 6;
+}
+
+message PageList {
+    repeated PageSummary pages = 1;
+}
+
+message PageMeta {
+    string title = 1;
+    string description = 2;
+    repeated string keywords = 3;
+    string og_image = 4;
+}
+
+message PageRequest {
+    string name = 1;
+    string language = 2;
+    string preview = 3;
+}
+
+message PageSummary {
+    string id = 1;
+    string name = 2;
+    string title = 3;
+    int32 order = 4;
+    string updated_at = 5;
+}
+
+message PagesRequest {
+    string language = 1;
+}
+
+message Section {
+    string id = 1;
+    string name = 2;
+    bool shared = 3;
+    repeated ContentField fields = 4;
+}
+
+message SiteInfo {
+    string language = 1;
+    repeated string languages = 2;
+    string default_language = 3;
+    string name = 4;
+    string tagline = 5;
+    string description = 6;
+    repeated string keywords = 7;
+    string logo = 8;
+    string favicon = 9;
+    string og_image = 10;
+    string contact_json = 11;
+    string social_links_json = 12;
+    string extra_json = 13;
+}
+
+message SiteRequest {
+    string language = 1;
+}
+
