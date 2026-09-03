@@ -32,20 +32,60 @@ class NotificationControllerStub:
     def __new__(cls, channel: _grpc.Channel) -> _Self: ...
     @_typing.overload
     def __new__(cls, channel: _aio.Channel) -> NotificationControllerAsyncStub: ...
+    Count: _grpc.UnaryUnaryMultiCallable[_notifications_pb2.CountRequest, _notifications_pb2.CountResult]
+    Dismiss: _grpc.UnaryUnaryMultiCallable[_notifications_pb2.DismissRequest, _notifications_pb2.DismissResult]
+    DismissAll: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _notifications_pb2.DismissAllResult]
+    Get: _grpc.UnaryUnaryMultiCallable[_notifications_pb2.GetRequest, _notifications_pb2.Notification]
     List: _grpc.UnaryUnaryMultiCallable[_notifications_pb2.ListRequest, _notifications_pb2.NotificationList]
     Read: _grpc.UnaryUnaryMultiCallable[_notifications_pb2.ReadRequest, _notifications_pb2.ReadResult]
     ReadAll: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _notifications_pb2.ReadAllResult]
+    Restore: _grpc.UnaryUnaryMultiCallable[_notifications_pb2.RestoreRequest, _notifications_pb2.RestoreResult]
+    Unread: _grpc.UnaryUnaryMultiCallable[_notifications_pb2.UnreadRequest, _notifications_pb2.UnreadResult]
     UnreadCount: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _notifications_pb2.UnreadCountResult]
 
 @_typing.type_check_only
 class NotificationControllerAsyncStub(NotificationControllerStub):
     def __init__(self, channel: _aio.Channel) -> None: ...
+    Count: _aio.UnaryUnaryMultiCallable[_notifications_pb2.CountRequest, _notifications_pb2.CountResult]  # type: ignore[assignment]
+    Dismiss: _aio.UnaryUnaryMultiCallable[_notifications_pb2.DismissRequest, _notifications_pb2.DismissResult]  # type: ignore[assignment]
+    DismissAll: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _notifications_pb2.DismissAllResult]  # type: ignore[assignment]
+    Get: _aio.UnaryUnaryMultiCallable[_notifications_pb2.GetRequest, _notifications_pb2.Notification]  # type: ignore[assignment]
     List: _aio.UnaryUnaryMultiCallable[_notifications_pb2.ListRequest, _notifications_pb2.NotificationList]  # type: ignore[assignment]
     Read: _aio.UnaryUnaryMultiCallable[_notifications_pb2.ReadRequest, _notifications_pb2.ReadResult]  # type: ignore[assignment]
     ReadAll: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _notifications_pb2.ReadAllResult]  # type: ignore[assignment]
+    Restore: _aio.UnaryUnaryMultiCallable[_notifications_pb2.RestoreRequest, _notifications_pb2.RestoreResult]  # type: ignore[assignment]
+    Unread: _aio.UnaryUnaryMultiCallable[_notifications_pb2.UnreadRequest, _notifications_pb2.UnreadResult]  # type: ignore[assignment]
     UnreadCount: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _notifications_pb2.UnreadCountResult]  # type: ignore[assignment]
 
 class NotificationControllerServicer(metaclass=_abc_1.ABCMeta):
+    @_abc_1.abstractmethod
+    def Count(
+        self,
+        request: _notifications_pb2.CountRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_notifications_pb2.CountResult, _abc.Awaitable[_notifications_pb2.CountResult]]: ...
+
+    @_abc_1.abstractmethod
+    def Dismiss(
+        self,
+        request: _notifications_pb2.DismissRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_notifications_pb2.DismissResult, _abc.Awaitable[_notifications_pb2.DismissResult]]: ...
+
+    @_abc_1.abstractmethod
+    def DismissAll(
+        self,
+        request: _empty_pb2.Empty,
+        context: _ServicerContext,
+    ) -> _typing.Union[_notifications_pb2.DismissAllResult, _abc.Awaitable[_notifications_pb2.DismissAllResult]]: ...
+
+    @_abc_1.abstractmethod
+    def Get(
+        self,
+        request: _notifications_pb2.GetRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_notifications_pb2.Notification, _abc.Awaitable[_notifications_pb2.Notification]]: ...
+
     @_abc_1.abstractmethod
     def List(
         self,
@@ -66,6 +106,20 @@ class NotificationControllerServicer(metaclass=_abc_1.ABCMeta):
         request: _empty_pb2.Empty,
         context: _ServicerContext,
     ) -> _typing.Union[_notifications_pb2.ReadAllResult, _abc.Awaitable[_notifications_pb2.ReadAllResult]]: ...
+
+    @_abc_1.abstractmethod
+    def Restore(
+        self,
+        request: _notifications_pb2.RestoreRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_notifications_pb2.RestoreResult, _abc.Awaitable[_notifications_pb2.RestoreResult]]: ...
+
+    @_abc_1.abstractmethod
+    def Unread(
+        self,
+        request: _notifications_pb2.UnreadRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_notifications_pb2.UnreadResult, _abc.Awaitable[_notifications_pb2.UnreadResult]]: ...
 
     @_abc_1.abstractmethod
     def UnreadCount(

@@ -807,6 +807,28 @@ async def _notification_sockets(api: Api, user: Any) -> None:
         await private.command({"command": "read", "id": str(mine.pk)}, "read")
 
         note(
+            "A change is also announced to this account's *other* connections, "
+            "so a badge cleared on a phone clears on the laptop. This connection "
+            "hears its own announcement too -- redundant rather than wrong, since "
+            "applying it twice is a no-op."
+        )
+        await private.frame("state")
+
+        note(
+            "The socket does everything the endpoints do, so a client holding "
+            "one open needs no HTTP client beside it to render its tray."
+        )
+        listed = await private.command({"command": "list", "limit": 3}, "list", show=False)
+        print(f"  {DIM}│ {len(listed['notifications'])} of {listed['total']}{OFF}")
+
+        note(
+            "Dismissing takes it out of this account's tray -- and never deletes "
+            "it, because a broadcast belongs to everybody."
+        )
+        await private.command({"command": "dismiss", "id": str(mine.pk)}, "dismiss", show=False)
+        await private.frame("state", show=False)
+
+        note(
             "A refusal is a frame, not a close. A mistyped id should cost one "
             "message, not the connection and everything else flowing over it --"
         )
@@ -814,6 +836,14 @@ async def _notification_sockets(api: Api, user: Any) -> None:
 
         note("-- and the proof is that the connection is still answering.")
         await private.command({"command": "ping"}, "pong")
+
+        note(
+            "Signing out keeps the connection and the public feed, and puts the "
+            "private commands back behind a credential. A shared browser should "
+            "stop seeing one person's mail without losing the announcements."
+        )
+        await private.command({"command": "deauthenticate"}, "deauthenticated", show=False)
+        await private.command({"command": "unread"}, "error", show=False)
 
     note(
         "Finally, a credential presented in the handshake. A client that already "

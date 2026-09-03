@@ -20,3 +20,4 @@ class Notification(serializers.Serializer[dict[str, object]]):
     data_json = serializers.CharField()
     created_at = serializers.CharField()
     read = serializers.BooleanField()
+    dismissed = serializers.BooleanField()

@@ -21,6 +21,7 @@ default behind them, so the app can be copied into another project as it stands.
    NOTIFICATIONS_REDIS_URL = "redis://127.0.0.1:6379/0"
    NOTIFICATIONS_CHANNEL_PREFIX = "notifications"
    NOTIFICATIONS_SOCKET_BACKLOG = 20
+   NOTIFICATIONS_RETENTION_DAYS = 0  # 0 keeps everything
    ```
 
 3. Mount the router wherever your Django Ninja API is built:
@@ -42,6 +43,23 @@ default behind them, so the app can be copied into another project as it stands.
 5. `manage.py migrate`, and serve it with an ASGI server — `runserver` is WSGI
    and will never open the socket.
 
+6. Optionally schedule `manage.py notifications_prune`. Nothing deletes a
+   notification until you do, and with no `NOTIFICATIONS_RETENTION_DAYS` set the
+   command refuses rather than guessing how much history to remove.
+
+## What it does
+
+Two audiences — one account, or everybody — and three things an account can do
+to what it can see: read it, dismiss it out of its tray, and undo either.
+Dismissing is a per-account receipt and never a delete, because a broadcast
+belongs to everybody.
+
+The same surface is published four ways, under the same names with the same
+replies: the HTTP router, the WebSocket, GraphQL and gRPC. **The socket does
+everything the endpoints do**, so a client holding one open needs no HTTP client
+beside it, and a state change on one device is pushed to that account's other
+connections so a badge cleared on a phone clears on the laptop.
+
 ## Where things are
 
 | File | What it holds |
@@ -56,3 +74,4 @@ default behind them, so the app can be copied into another project as it stands.
 | `graph/` | The same reads and marks-as-read as GraphQL queries and mutations |
 | `grpc/` | The same, as gRPC actions, and the `.proto` they generate |
 | `admin.py` | Writing one, and seeing who read it |
+| `management/` | `notifications_prune`, the only thing here that deletes anything |

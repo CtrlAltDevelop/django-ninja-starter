@@ -19,25 +19,168 @@ else:
 DESCRIPTOR: _descriptor.FileDescriptor
 
 @_typing.final
+class CountRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    UNREAD_FIELD_NUMBER: _builtins.int
+    LEVEL_FIELD_NUMBER: _builtins.int
+    AUDIENCE_FIELD_NUMBER: _builtins.int
+    INCLUDE_DISMISSED_FIELD_NUMBER: _builtins.int
+    unread: _builtins.bool
+    level: _builtins.str
+    audience: _builtins.str
+    include_dismissed: _builtins.bool
+    def __init__(
+        self,
+        *,
+        unread: _builtins.bool | None = ...,
+        level: _builtins.str = ...,
+        audience: _builtins.str = ...,
+        include_dismissed: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["_unread", b"_unread", "unread", b"unread"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_unread", b"_unread", "audience", b"audience", "include_dismissed", b"include_dismissed", "level", b"level", "unread", b"unread"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__unread: _TypeAlias = _typing.Literal["unread"]  # noqa: Y015
+    _WhichOneofArgType__unread: _TypeAlias = _typing.Literal["_unread", b"_unread"]  # noqa: Y015
+    def WhichOneof(self, oneof_group: _WhichOneofArgType__unread) -> _WhichOneofReturnType__unread | None: ...
+
+Global___CountRequest: _TypeAlias = CountRequest  # noqa: Y015
+
+@_typing.final
+class CountResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    COUNT_FIELD_NUMBER: _builtins.int
+    count: _builtins.int
+    def __init__(
+        self,
+        *,
+        count: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["count", b"count"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___CountResult: _TypeAlias = CountResult  # noqa: Y015
+
+@_typing.final
+class DismissAllResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    COUNT_FIELD_NUMBER: _builtins.int
+    UNREAD_FIELD_NUMBER: _builtins.int
+    count: _builtins.int
+    unread: _builtins.int
+    def __init__(
+        self,
+        *,
+        count: _builtins.int = ...,
+        unread: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["count", b"count", "unread", b"unread"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DismissAllResult: _TypeAlias = DismissAllResult  # noqa: Y015
+
+@_typing.final
+class DismissRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NOTIFICATION_ID_FIELD_NUMBER: _builtins.int
+    notification_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        notification_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["notification_id", b"notification_id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DismissRequest: _TypeAlias = DismissRequest  # noqa: Y015
+
+@_typing.final
+class DismissResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ID_FIELD_NUMBER: _builtins.int
+    UNREAD_FIELD_NUMBER: _builtins.int
+    CHANGED_FIELD_NUMBER: _builtins.int
+    id: _builtins.str
+    unread: _builtins.int
+    changed: _builtins.bool
+    def __init__(
+        self,
+        *,
+        id: _builtins.str = ...,
+        unread: _builtins.int = ...,
+        changed: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["changed", b"changed", "id", b"id", "unread", b"unread"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DismissResult: _TypeAlias = DismissResult  # noqa: Y015
+
+@_typing.final
+class GetRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NOTIFICATION_ID_FIELD_NUMBER: _builtins.int
+    notification_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        notification_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["notification_id", b"notification_id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___GetRequest: _TypeAlias = GetRequest  # noqa: Y015
+
+@_typing.final
 class ListRequest(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     UNREAD_FIELD_NUMBER: _builtins.int
     LIMIT_FIELD_NUMBER: _builtins.int
     OFFSET_FIELD_NUMBER: _builtins.int
+    LEVEL_FIELD_NUMBER: _builtins.int
+    AUDIENCE_FIELD_NUMBER: _builtins.int
+    INCLUDE_DISMISSED_FIELD_NUMBER: _builtins.int
     unread: _builtins.bool
     limit: _builtins.int
     offset: _builtins.int
+    level: _builtins.str
+    audience: _builtins.str
+    include_dismissed: _builtins.bool
     def __init__(
         self,
         *,
         unread: _builtins.bool | None = ...,
         limit: _builtins.int = ...,
         offset: _builtins.int = ...,
+        level: _builtins.str = ...,
+        audience: _builtins.str = ...,
+        include_dismissed: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["_unread", b"_unread", "unread", b"unread"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["_unread", b"_unread", "limit", b"limit", "offset", b"offset", "unread", b"unread"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["_unread", b"_unread", "audience", b"audience", "include_dismissed", b"include_dismissed", "level", b"level", "limit", b"limit", "offset", b"offset", "unread", b"unread"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     _WhichOneofReturnType__unread: _TypeAlias = _typing.Literal["unread"]  # noqa: Y015
     _WhichOneofArgType__unread: _TypeAlias = _typing.Literal["_unread", b"_unread"]  # noqa: Y015
@@ -58,6 +201,7 @@ class Notification(_message.Message):
     DATA_JSON_FIELD_NUMBER: _builtins.int
     CREATED_AT_FIELD_NUMBER: _builtins.int
     READ_FIELD_NUMBER: _builtins.int
+    DISMISSED_FIELD_NUMBER: _builtins.int
     id: _builtins.str
     audience: _builtins.str
     subject: _builtins.str
@@ -67,6 +211,7 @@ class Notification(_message.Message):
     data_json: _builtins.str
     created_at: _builtins.str
     read: _builtins.bool
+    dismissed: _builtins.bool
     def __init__(
         self,
         *,
@@ -79,10 +224,11 @@ class Notification(_message.Message):
         data_json: _builtins.str = ...,
         created_at: _builtins.str = ...,
         read: _builtins.bool = ...,
+        dismissed: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["audience", b"audience", "body", b"body", "created_at", b"created_at", "data_json", b"data_json", "id", b"id", "level", b"level", "link", b"link", "read", b"read", "subject", b"subject"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["audience", b"audience", "body", b"body", "created_at", b"created_at", "data_json", b"data_json", "dismissed", b"dismissed", "id", b"id", "level", b"level", "link", b"link", "read", b"read", "subject", b"subject"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -93,16 +239,25 @@ class NotificationList(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     NOTIFICATIONS_FIELD_NUMBER: _builtins.int
+    TOTAL_FIELD_NUMBER: _builtins.int
+    LIMIT_FIELD_NUMBER: _builtins.int
+    OFFSET_FIELD_NUMBER: _builtins.int
+    total: _builtins.int
+    limit: _builtins.int
+    offset: _builtins.int
     @_builtins.property
     def notifications(self) -> _containers.RepeatedCompositeFieldContainer[Global___Notification]: ...
     def __init__(
         self,
         *,
         notifications: _abc.Iterable[Global___Notification] | None = ...,
+        total: _builtins.int = ...,
+        limit: _builtins.int = ...,
+        offset: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["notifications", b"notifications"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["limit", b"limit", "notifications", b"notifications", "offset", b"offset", "total", b"total"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -155,21 +310,68 @@ class ReadResult(_message.Message):
 
     ID_FIELD_NUMBER: _builtins.int
     UNREAD_FIELD_NUMBER: _builtins.int
+    CHANGED_FIELD_NUMBER: _builtins.int
     id: _builtins.str
     unread: _builtins.int
+    changed: _builtins.bool
     def __init__(
         self,
         *,
         id: _builtins.str = ...,
         unread: _builtins.int = ...,
+        changed: _builtins.bool = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["id", b"id", "unread", b"unread"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["changed", b"changed", "id", b"id", "unread", b"unread"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___ReadResult: _TypeAlias = ReadResult  # noqa: Y015
+
+@_typing.final
+class RestoreRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NOTIFICATION_ID_FIELD_NUMBER: _builtins.int
+    notification_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        notification_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["notification_id", b"notification_id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RestoreRequest: _TypeAlias = RestoreRequest  # noqa: Y015
+
+@_typing.final
+class RestoreResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ID_FIELD_NUMBER: _builtins.int
+    UNREAD_FIELD_NUMBER: _builtins.int
+    CHANGED_FIELD_NUMBER: _builtins.int
+    id: _builtins.str
+    unread: _builtins.int
+    changed: _builtins.bool
+    def __init__(
+        self,
+        *,
+        id: _builtins.str = ...,
+        unread: _builtins.int = ...,
+        changed: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["changed", b"changed", "id", b"id", "unread", b"unread"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RestoreResult: _TypeAlias = RestoreResult  # noqa: Y015
 
 @_typing.final
 class UnreadCountResult(_message.Message):
@@ -189,3 +391,47 @@ class UnreadCountResult(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___UnreadCountResult: _TypeAlias = UnreadCountResult  # noqa: Y015
+
+@_typing.final
+class UnreadRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NOTIFICATION_ID_FIELD_NUMBER: _builtins.int
+    notification_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        notification_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["notification_id", b"notification_id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___UnreadRequest: _TypeAlias = UnreadRequest  # noqa: Y015
+
+@_typing.final
+class UnreadResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ID_FIELD_NUMBER: _builtins.int
+    UNREAD_FIELD_NUMBER: _builtins.int
+    CHANGED_FIELD_NUMBER: _builtins.int
+    id: _builtins.str
+    unread: _builtins.int
+    changed: _builtins.bool
+    def __init__(
+        self,
+        *,
+        id: _builtins.str = ...,
+        unread: _builtins.int = ...,
+        changed: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["changed", b"changed", "id", b"id", "unread", b"unread"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___UnreadResult: _TypeAlias = UnreadResult  # noqa: Y015

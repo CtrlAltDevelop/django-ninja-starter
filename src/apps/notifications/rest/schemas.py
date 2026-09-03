@@ -1,10 +1,10 @@
 """The contract the notification endpoints publish.
 
-``read`` is the field worth pointing at: it is per-account, and it is computed
-rather than stored on the row, because a global notification is read by each
-person separately. Two clients signed in as different people can therefore be
-looking at the same notification id with different ``read`` values, and both are
-correct.
+``read`` and ``dismissed`` are the fields worth pointing at: both are
+per-account, and both are computed rather than stored on the row, because a
+global notification is read and cleared away by each person separately. Two
+clients signed in as different people can therefore be looking at the same
+notification id with different values for either, and both are correct.
 """
 
 from datetime import datetime
@@ -28,6 +28,18 @@ class NotificationOut(Schema):
     data: dict[str, Any] = {}
     created_at: datetime
     read: bool
+    dismissed: bool
+
+
+class NotificationPage(Schema):
+    """A page of notifications, and how many there were to page through."""
+
+    notifications: list[NotificationOut]
+    total: int
+    """Matching the same filters, ignoring ``limit`` and ``offset``."""
+
+    limit: int
+    offset: int
 
 
 class UnreadCountOut(Schema):
@@ -39,10 +51,14 @@ class ReadOut(Schema):
 
     id: UUID
     unread: int
+    changed: bool
+    """False when it was already in that state. Success either way -- marking a
+    read notification read is not an error, and a client that fired twice should
+    not have to care which of the two arrived first."""
 
 
 class ReadAllOut(Schema):
     count: int
-    """How many were still unread. Zero means there was nothing to do."""
+    """How many changed. Zero means there was nothing to do."""
 
     unread: int

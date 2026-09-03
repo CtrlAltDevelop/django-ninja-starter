@@ -26,6 +26,20 @@ class NotificationsConfig(AppConfig):
                 ),
             ),
             Requirement(
+                "NOTIFICATIONS_RETENTION_DAYS",
+                env="DJANGO_NOTIFICATIONS_RETENTION_DAYS",
+                purpose=(
+                    "how long notifications are kept before `manage.py notifications_prune` "
+                    "deletes them"
+                ),
+                minimum=0,
+                hint=(
+                    "Zero keeps everything, which is safe but grows without bound. Set a "
+                    "window and schedule `manage.py notifications_prune`; nothing deletes "
+                    "anything until you run it."
+                ),
+            ),
+            Requirement(
                 "NOTIFICATIONS_SOCKET_BACKLOG",
                 env="DJANGO_NOTIFICATIONS_SOCKET_BACKLOG",
                 purpose="how many unread notifications a client is caught up with on connect",

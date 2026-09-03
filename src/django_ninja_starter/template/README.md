@@ -16,7 +16,10 @@ Notifications come the same way: name them in `DJANGO_NOTIFICATIONS_ENABLED` and
 you get a notification table, a read API and a WebSocket that pushes new ones the
 moment they are created. The connection is useful before it is authenticated —
 anyone who connects hears what was addressed to everybody, and sending a token
-over the same socket adds that account's own feed to it.
+over the same socket adds that account's own feed to it. The socket then does
+everything the endpoints do — the history, the badge, reading, unreading,
+dismissing and restoring — so a client holding one open needs no HTTP client
+beside it, and a badge cleared on a phone clears on the laptop.
 
 The admin is themed with [Unfold](https://unfoldadmin.com) throughout: a dashboard of
 real numbers instead of a list of models, a sidebar built from the apps you actually

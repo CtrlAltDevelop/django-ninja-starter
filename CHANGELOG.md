@@ -8,6 +8,51 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A notification is dismissable, and a read can be undone.** `NotificationReceipt`
+  now holds two nullable timestamps -- `read_at` and `dismissed_at` -- rather
+  than existing to mean "read". Dismissing is a per-account receipt and never a
+  delete, because a broadcast belongs to everybody and one person clearing an
+  announcement must not remove it from anyone else's tray; it marks the row read
+  on the way out, so the badge cannot claim something the tray no longer shows.
+  Undo exists on both sides: `unread` puts a row back in the badge, `restore`
+  puts it back in the tray and leaves read state where it was. Every change
+  answers `changed`, which is false when the row was already in that state --
+  still a success, since a client that fired twice should not have to care which
+  arrived first.
+- **The socket does everything the endpoints do.** `list`, `get` and `count`
+  read the history the socket itself never pushes, and `unread_one`, `dismiss`,
+  `restore` and `dismiss_all` join the commands that were already there, so a
+  client holding a connection open needs no HTTP client beside it to render its
+  tray. `whoami` answers "you are nobody" rather than refusing, which is the
+  useful reply to a client that has just woken up, and `deauthenticate` drops
+  the account while keeping the connection and the public feed -- a shared
+  browser signing out should stop seeing one person's mail without losing the
+  announcements. Arguments are checked rather than coerced: `{"limit": "all"}`
+  is a refusal, not a quiet fall back to the default page.
+- **A badge cleared on a phone clears on the laptop.** Every state change is
+  published to the account's own channel as a `state` frame carrying the action,
+  the ids and the new unread count, so a second device needs no polling. A
+  change that changed nothing publishes nothing.
+- **Filters and a total on the history.** `level`, `audience` and
+  `include_dismissed` narrow the list on all four transports, and the reply
+  carries the count matching the same filters, so a client can render "showing
+  20 of 47" without fetching all 47.
+- **`notify_users`** sends one notification each to several accounts -- one row
+  per recipient, because read state is per account and a shared row would have
+  to invent a roster of who it was for. Deliberately a loop rather than
+  `bulk_create`, which skips `post_save` and would therefore save every
+  notification and deliver none: exactly the failure the broadcast signal exists
+  to prevent.
+- **Retention.** `manage.py notifications_prune` deletes notifications older
+  than `DJANGO_NOTIFICATIONS_RETENTION_DAYS`, receipts included by cascade, with
+  `--days` and `--dry-run`. Nothing deletes anything on its own, and with no
+  window configured the command refuses rather than guessing how much history to
+  remove -- deleting on a timer nobody asked for is not a default worth
+  shipping.
+- **A `GET` for one notification**, dismissed or not, on REST, GraphQL and gRPC:
+  a link to something cleared away should open it rather than read as somebody
+  else's mail.
+
 - **`DJANGO_ENV_FILE` names the env file.** A deployment can keep several side
   by side, and a process can ask for none at all with an empty value. The
   app-isolation suite needed the second option: it builds each scenario's
@@ -328,6 +373,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with multi-choice membership done as a substring match on the encoded value.
 - **A category's product count read as `null` rather than `0`** when it had none
   of its own, which is indistinguishable from "counts were not requested".
+
+### Changed
+
+- **A one-sided settings bound reads as one.** The generated settings tables
+  wrote `Range 0–None` for a requirement with a minimum and no maximum; they now
+  say "0 or more".
 
 ## [1.0.0] - 2026-08-26
 

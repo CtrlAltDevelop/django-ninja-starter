@@ -89,7 +89,7 @@ def test_a_notification_is_named_by_its_subject(for_alice: Notification, alice: 
     mark_read(alice, for_alice)
 
     assert str(for_alice) == "Your export is ready"
-    assert str(NotificationReceipt.objects.get()).startswith("alice read ")
+    assert str(NotificationReceipt.objects.get()) == f"alice / {for_alice.pk}"
 
 
 def test_a_user_notification_with_no_recipient_is_a_field_error(db: None) -> None:
@@ -99,3 +99,48 @@ def test_a_user_notification_with_no_recipient_is_a_field_error(db: None) -> Non
         Notification(audience="user", subject="Nobody").full_clean()
 
     assert "recipient" in refusal.value.message_dict
+
+
+def test_the_read_by_column_counts_reads_and_not_bare_dismissals(
+    announcement: Notification, alice: Any, bob: Any
+) -> None:
+    """A receipt now exists as soon as an account touches a row, read or not."""
+    from django.contrib.admin.sites import AdminSite
+    from django.test import RequestFactory
+
+    from apps.notifications.admin import NotificationAdmin
+    from apps.notifications.models import NotificationReceipt, mark_read
+
+    mark_read(alice, announcement)
+    NotificationReceipt.objects.create(notification=announcement, user=bob)
+
+    admin = NotificationAdmin(Notification, AdminSite())
+    row = admin.get_queryset(RequestFactory().get("/")).get()
+
+    assert admin.read_by(row) == "1 account"
+
+
+def test_the_read_by_column_reads_as_a_yes_or_no_for_directed_mail(
+    for_alice: Notification, alice: Any
+) -> None:
+    from django.contrib.admin.sites import AdminSite
+    from django.test import RequestFactory
+
+    from apps.notifications.admin import NotificationAdmin
+    from apps.notifications.models import mark_read
+
+    admin = NotificationAdmin(Notification, AdminSite())
+    request = RequestFactory().get("/")
+
+    assert admin.read_by(admin.get_queryset(request).get()) == "Unread"
+
+    mark_read(alice, for_alice)
+
+    assert admin.read_by(admin.get_queryset(request).get()) == "Read"
+
+
+def test_the_receipt_list_shows_both_timestamps() -> None:
+    """Dismissing is a fact about a receipt, so the log has to show it."""
+    from apps.notifications.admin import NotificationReceiptAdmin
+
+    assert "dismissed_at" in NotificationReceiptAdmin.list_display

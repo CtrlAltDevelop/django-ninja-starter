@@ -1,9 +1,10 @@
 """GraphQL types for the notifications addressed to an account.
 
-``read`` is the field worth pointing at: it is per-account, and it is computed
-rather than stored on the row, because a global notification is read by each
-person separately. Two clients signed in as different people can be looking at
-the same notification id with different ``read`` values, and both are correct.
+``read`` and ``dismissed`` are the fields worth pointing at: both are
+per-account, and both are computed rather than stored on the row, because a
+global notification is read and cleared away by each person separately. Two
+clients signed in as different people can be looking at the same notification id
+with different values for either, and both are correct.
 """
 
 from typing import Any
@@ -25,6 +26,17 @@ class NotificationType:
     data: JSON
     created_at: str
     read: bool
+    dismissed: bool
+
+
+@strawberry.type
+class NotificationPageType:
+    """A page of notifications, and how many there were to page through."""
+
+    notifications: list[NotificationType]
+    total: int
+    limit: int
+    offset: int
 
 
 @strawberry.type
@@ -33,6 +45,7 @@ class ReadType:
 
     id: str
     unread: int
+    changed: bool
 
 
 @strawberry.type
@@ -54,4 +67,5 @@ def notification_type(notification: dict[str, Any]) -> NotificationType:
         # for every transport that reads the same history.
         created_at=notification["created_at"],
         read=notification["read"],
+        dismissed=notification["dismissed"],
     )

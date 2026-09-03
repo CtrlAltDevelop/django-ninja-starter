@@ -5,16 +5,55 @@ package config.notifications;
 import "google/protobuf/empty.proto";
 
 service NotificationController {
+    rpc Count(CountRequest) returns (CountResult) {}
+    rpc Dismiss(DismissRequest) returns (DismissResult) {}
+    rpc DismissAll(google.protobuf.Empty) returns (DismissAllResult) {}
+    rpc Get(GetRequest) returns (Notification) {}
     rpc List(ListRequest) returns (NotificationList) {}
     rpc Read(ReadRequest) returns (ReadResult) {}
     rpc ReadAll(google.protobuf.Empty) returns (ReadAllResult) {}
+    rpc Restore(RestoreRequest) returns (RestoreResult) {}
+    rpc Unread(UnreadRequest) returns (UnreadResult) {}
     rpc UnreadCount(google.protobuf.Empty) returns (UnreadCountResult) {}
+}
+
+message CountRequest {
+    optional bool unread = 1;
+    string level = 2;
+    string audience = 3;
+    bool include_dismissed = 4;
+}
+
+message CountResult {
+    int32 count = 1;
+}
+
+message DismissAllResult {
+    int32 count = 1;
+    int32 unread = 2;
+}
+
+message DismissRequest {
+    string notification_id = 1;
+}
+
+message DismissResult {
+    string id = 1;
+    int32 unread = 2;
+    bool changed = 3;
+}
+
+message GetRequest {
+    string notification_id = 1;
 }
 
 message ListRequest {
     optional bool unread = 1;
     int32 limit = 2;
     int32 offset = 3;
+    string level = 4;
+    string audience = 5;
+    bool include_dismissed = 6;
 }
 
 message Notification {
@@ -27,10 +66,14 @@ message Notification {
     string data_json = 7;
     string created_at = 8;
     bool read = 9;
+    bool dismissed = 10;
 }
 
 message NotificationList {
     repeated Notification notifications = 1;
+    int32 total = 2;
+    int32 limit = 3;
+    int32 offset = 4;
 }
 
 message ReadAllResult {
@@ -45,9 +88,30 @@ message ReadRequest {
 message ReadResult {
     string id = 1;
     int32 unread = 2;
+    bool changed = 3;
+}
+
+message RestoreRequest {
+    string notification_id = 1;
+}
+
+message RestoreResult {
+    string id = 1;
+    int32 unread = 2;
+    bool changed = 3;
 }
 
 message UnreadCountResult {
     int32 count = 1;
+}
+
+message UnreadRequest {
+    string notification_id = 1;
+}
+
+message UnreadResult {
+    string id = 1;
+    int32 unread = 2;
+    bool changed = 3;
 }
 

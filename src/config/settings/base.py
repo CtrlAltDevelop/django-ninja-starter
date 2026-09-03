@@ -413,12 +413,17 @@ credential offered in the handshake -- `?token=`, a `bearer` subprotocol, an
 `Authorization` header, a session cookie -- is honoured at connect instead, and
 any command may carry the same `token` to sign in before it runs.
 
-Every frame is JSON, with a `command` going up and a `type` coming down.
-Commands: `authenticate`, `read`, `read_all`, `unread`, `ping`. Frame types:
-`ready`, `authenticated`, `notification`, `read`, `read_all`, `unread`, `pong`,
-`error`. **Errors are frames, not closes** -- a mistyped id costs one message,
-not the connection -- and their `title` is the same vocabulary the endpoints
-below answer with.
+Every frame is JSON, with a `command` going up and a `type` coming down. **The
+socket does everything the endpoints below do**, so a client holding one open
+needs no HTTP client beside it.
+
+Open to anyone: `ping`, `authenticate`, `whoami`, `deauthenticate`. Needing an
+account: `list`, `get`, `count`, `unread`, `read`, `unread_one`, `read_all`,
+`dismiss`, `restore`, `dismiss_all` -- each answered with a frame of the same
+name, plus `ready`, `authenticated`, `deauthenticated`, `notification`, `state`,
+`pong` and `error`. **Errors are frames, not closes** -- a mistyped id costs one
+message, not the connection -- and their `title` is the same vocabulary the
+endpoints below answer with.
 
 The app's own `docs/notifications.md` carries the frame-by-frame reference.
 """
@@ -452,6 +457,12 @@ NOTIFICATIONS_CHANNEL_PREFIX = os.getenv("DJANGO_NOTIFICATIONS_CHANNEL_PREFIX", 
 # endpoint is where the rest of the history lives; this is only so that a client
 # that reconnects does not have to make an HTTP call to find out what it missed.
 NOTIFICATIONS_SOCKET_BACKLOG = int(os.getenv("DJANGO_NOTIFICATIONS_SOCKET_BACKLOG", "20"))
+# How long a notification is kept. `manage.py notifications_prune` deletes what
+# is older, and nothing does so on its own: deleting rows on a timer nobody
+# asked for is the kind of surprise a starter should not ship. Zero -- the
+# default -- means keep everything, so a project that never schedules the
+# command never silently loses history.
+NOTIFICATIONS_RETENTION_DAYS = int(os.getenv("DJANGO_NOTIFICATIONS_RETENTION_DAYS", "0"))
 
 # The shop app. Optional the same way the CMS and the notifications are: naming
 # it installs its tables, its routes and its admin, and a project that does not

@@ -21,7 +21,10 @@ Notifications come the same way: name them in `DJANGO_NOTIFICATIONS_ENABLED` and
 you get a notification table, a read API and a WebSocket that pushes new ones the
 moment they are created. The connection is useful before it is authenticated —
 anyone who connects hears what was addressed to everybody, and sending a token
-over the same socket adds that account's own feed to it.
+over the same socket adds that account's own feed to it. The socket then does
+everything the endpoints do — the history, the badge, reading, unreading,
+dismissing and restoring — so a client holding one open needs no HTTP client
+beside it, and a badge cleared on a phone clears on the laptop.
 
 The admin is themed with [Unfold](https://unfoldadmin.com) throughout: a dashboard of
 real numbers instead of a list of models, a sidebar built from the apps you actually
@@ -375,7 +378,7 @@ another Django project or deleted from this one without leaving a hole.
 | App | Enabled by | What you get |
 | --- | --- | --- |
 | [`cms`](docs/cms.md) | `DJANGO_CMS_ENABLED=true` | Pages made of sections made of typed, translatable fields; a library of shared sections; menus; drafts, schedules and signed preview links; export/import for moving content between environments; and a content-editing admin screen separate from the structural one |
-| [`notifications`](docs/notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | A notification table addressed to one account or to everybody, per-account read receipts, a scoped read API, and a WebSocket that pushes new ones on save |
+| [`notifications`](docs/notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | A notification table addressed to one account or to everybody; per-account read and dismiss receipts, so a broadcast is read and cleared by each person separately; a scoped read API with the same surface over REST, GraphQL, gRPC and a WebSocket that pushes new ones on save and keeps a second device in step; and a retention command |
 | [`shop`](docs/shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare the attributes their products answer; products, variants and stock; timed discount campaigns; search, filters and named listings; reviews and likes; a basket per account; and an order, coupon and payment cycle that reserves stock when the order is placed |
 
 The CMS and notifications are toured end to end by `python examples/walkthrough.py`.
@@ -477,6 +480,7 @@ variables as needed:
 | `DJANGO_NOTIFICATIONS_WS_PATH` | Path the notification socket is mounted at | `/ws/notifications` |
 | `DJANGO_NOTIFICATIONS_CHANNEL_PREFIX` | Namespace for the broker's channels | `notifications` |
 | `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG` | Unread a client is caught up with on connect, 0 through 500 | `20` |
+| `DJANGO_NOTIFICATIONS_RETENTION_DAYS` | How long `manage.py notifications_prune` keeps a notification. `0` keeps everything, and nothing is deleted until you run the command | `0` |
 | `DJANGO_SHOP_ENABLED` | Install the shop: its tables, routes and admin | `false` |
 | `DJANGO_SHOP_CURRENCY` | ISO 4217 code every price is quoted in | `USD` |
 | `DJANGO_SHOP_REVIEW_MODERATION` | Hold a review for a moderator before it is readable | `true` |

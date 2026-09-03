@@ -279,9 +279,15 @@ def _settings_table(app: "DocumentedApp") -> str:
             level = "Recommended"
         else:
             level = "Optional"
+        # A one-sided bound is written as one, not as a range with a `None` in
+        # it: "Range 0–None" is worse than saying nothing about the top.
         bounds = ""
-        if requirement.minimum is not None or requirement.maximum is not None:
+        if requirement.minimum is not None and requirement.maximum is not None:
             bounds = f" Range {requirement.minimum}–{requirement.maximum}."
+        elif requirement.minimum is not None:
+            bounds = f" {requirement.minimum} or more."
+        elif requirement.maximum is not None:
+            bounds = f" {requirement.maximum} or less."
         lines.append(f"| `{requirement.env}` | {level} | {requirement.purpose}.{bounds} |")
     return "\n".join(lines)
 

@@ -35,6 +35,26 @@ class NotificationControllerStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.Count = channel.unary_unary(
+                '/config.notifications.NotificationController/Count',
+                request_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.CountRequest.SerializeToString,
+                response_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.CountResult.FromString,
+                _registered_method=True)
+        self.Dismiss = channel.unary_unary(
+                '/config.notifications.NotificationController/Dismiss',
+                request_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissRequest.SerializeToString,
+                response_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissResult.FromString,
+                _registered_method=True)
+        self.DismissAll = channel.unary_unary(
+                '/config.notifications.NotificationController/DismissAll',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissAllResult.FromString,
+                _registered_method=True)
+        self.Get = channel.unary_unary(
+                '/config.notifications.NotificationController/Get',
+                request_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.GetRequest.SerializeToString,
+                response_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.Notification.FromString,
+                _registered_method=True)
         self.List = channel.unary_unary(
                 '/config.notifications.NotificationController/List',
                 request_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.ListRequest.SerializeToString,
@@ -50,6 +70,16 @@ class NotificationControllerStub:
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.ReadAllResult.FromString,
                 _registered_method=True)
+        self.Restore = channel.unary_unary(
+                '/config.notifications.NotificationController/Restore',
+                request_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.RestoreRequest.SerializeToString,
+                response_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.RestoreResult.FromString,
+                _registered_method=True)
+        self.Unread = channel.unary_unary(
+                '/config.notifications.NotificationController/Unread',
+                request_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.UnreadRequest.SerializeToString,
+                response_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.UnreadResult.FromString,
+                _registered_method=True)
         self.UnreadCount = channel.unary_unary(
                 '/config.notifications.NotificationController/UnreadCount',
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
@@ -59,6 +89,30 @@ class NotificationControllerStub:
 
 class NotificationControllerServicer:
     """Missing associated documentation comment in .proto file."""
+
+    def Count(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Dismiss(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DismissAll(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Get(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def List(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -78,6 +132,18 @@ class NotificationControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Restore(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Unread(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def UnreadCount(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -87,6 +153,26 @@ class NotificationControllerServicer:
 
 def add_NotificationControllerServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'Count': grpc.unary_unary_rpc_method_handler(
+                    servicer.Count,
+                    request_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.CountRequest.FromString,
+                    response_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.CountResult.SerializeToString,
+            ),
+            'Dismiss': grpc.unary_unary_rpc_method_handler(
+                    servicer.Dismiss,
+                    request_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissRequest.FromString,
+                    response_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissResult.SerializeToString,
+            ),
+            'DismissAll': grpc.unary_unary_rpc_method_handler(
+                    servicer.DismissAll,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissAllResult.SerializeToString,
+            ),
+            'Get': grpc.unary_unary_rpc_method_handler(
+                    servicer.Get,
+                    request_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.GetRequest.FromString,
+                    response_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.Notification.SerializeToString,
+            ),
             'List': grpc.unary_unary_rpc_method_handler(
                     servicer.List,
                     request_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.ListRequest.FromString,
@@ -101,6 +187,16 @@ def add_NotificationControllerServicer_to_server(servicer, server):
                     servicer.ReadAll,
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.ReadAllResult.SerializeToString,
+            ),
+            'Restore': grpc.unary_unary_rpc_method_handler(
+                    servicer.Restore,
+                    request_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.RestoreRequest.FromString,
+                    response_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.RestoreResult.SerializeToString,
+            ),
+            'Unread': grpc.unary_unary_rpc_method_handler(
+                    servicer.Unread,
+                    request_deserializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.UnreadRequest.FromString,
+                    response_serializer=apps_dot_notifications_dot_grpc_dot_notifications__pb2.UnreadResult.SerializeToString,
             ),
             'UnreadCount': grpc.unary_unary_rpc_method_handler(
                     servicer.UnreadCount,
@@ -117,6 +213,114 @@ def add_NotificationControllerServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class NotificationController:
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def Count(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.notifications.NotificationController/Count',
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.CountRequest.SerializeToString,
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.CountResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Dismiss(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.notifications.NotificationController/Dismiss',
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissRequest.SerializeToString,
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DismissAll(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.notifications.NotificationController/DismissAll',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.DismissAllResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Get(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.notifications.NotificationController/Get',
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.GetRequest.SerializeToString,
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.Notification.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def List(request,
@@ -189,6 +393,60 @@ class NotificationController:
             '/config.notifications.NotificationController/ReadAll',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             apps_dot_notifications_dot_grpc_dot_notifications__pb2.ReadAllResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Restore(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.notifications.NotificationController/Restore',
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.RestoreRequest.SerializeToString,
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.RestoreResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Unread(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.notifications.NotificationController/Unread',
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.UnreadRequest.SerializeToString,
+            apps_dot_notifications_dot_grpc_dot_notifications__pb2.UnreadResult.FromString,
             options,
             channel_credentials,
             insecure,

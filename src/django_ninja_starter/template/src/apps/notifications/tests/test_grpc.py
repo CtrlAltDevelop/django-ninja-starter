@@ -93,3 +93,186 @@ def test_an_unknown_notification_is_not_found(token: str, grpc_call: Callable[..
         )
 
     assert refusal.value.code() is grpc.StatusCode.NOT_FOUND
+
+
+# -- the rest of the surface, matching the endpoints one for one ------------
+
+CHANGES = ["Read", "Unread", "Dismiss", "Restore"]
+
+
+def _request(call: str, notification_id: str) -> Any:
+    """The per-notification request message for one call. All the same shape."""
+    return getattr(notifications_pb2, f"{call}Request")(notification_id=notification_id)
+
+
+@pytest.mark.parametrize("call", CHANGES)
+def test_every_change_needs_a_credential(
+    call: str, mail: tuple[Notification, Notification], grpc_call: Callable[..., Any]
+) -> None:
+    with pytest.raises(grpc.aio.AioRpcError) as refusal:
+        grpc_call(Stub, call, _request(call, str(mail[1].pk)))
+
+    assert refusal.value.code() is grpc.StatusCode.UNAUTHENTICATED
+
+
+@pytest.mark.parametrize("call", CHANGES)
+def test_every_change_answers_the_same_shape(
+    call: str,
+    mail: tuple[Notification, Notification],
+    token: str,
+    grpc_call: Callable[..., Any],
+) -> None:
+    reply = grpc_call(Stub, call, _request(call, str(mail[1].pk)), token=token)
+
+    assert reply.id == str(mail[1].pk)
+    assert reply.unread >= 0
+
+
+@pytest.mark.parametrize("call", CHANGES)
+def test_every_change_refuses_an_id_that_is_not_one(
+    call: str, token: str, grpc_call: Callable[..., Any]
+) -> None:
+    with pytest.raises(grpc.aio.AioRpcError) as refusal:
+        grpc_call(Stub, call, _request(call, "not-a-uuid"), token=token)
+
+    assert refusal.value.code() is grpc.StatusCode.NOT_FOUND
+
+
+def test_reading_reports_the_new_badge_number(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    reply = grpc_call(Stub, "Read", _request("Read", str(mail[1].pk)), token=token)
+
+    assert (reply.unread, reply.changed) == (1, True)
+
+
+def test_repeating_a_change_is_success_with_changed_false(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    grpc_call(Stub, "Read", _request("Read", str(mail[1].pk)), token=token)
+    reply = grpc_call(Stub, "Read", _request("Read", str(mail[1].pk)), token=token)
+
+    assert reply.changed is False
+
+
+def test_unreading_puts_it_back_in_the_badge(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    grpc_call(Stub, "Read", _request("Read", str(mail[1].pk)), token=token)
+    reply = grpc_call(Stub, "Unread", _request("Unread", str(mail[1].pk)), token=token)
+
+    assert reply.unread == 2
+
+
+def test_one_notification_can_be_fetched_by_id(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    reply = grpc_call(
+        Stub, "Get", notifications_pb2.GetRequest(notification_id=str(mail[1].pk)), token=token
+    )
+
+    assert reply.subject == mail[1].subject
+    assert reply.dismissed is False
+
+
+def test_fetching_somebody_elses_notification_is_not_found(
+    token: str, grpc_call: Callable[..., Any], alice: Any
+) -> None:
+    other = get_user_model().objects.create_user(username="bob", email="bob@example.test")
+    theirs = Notification.objects.create(
+        audience=Audience.USER, recipient=other, subject="For bob only"
+    )
+
+    with pytest.raises(grpc.aio.AioRpcError) as refusal:
+        grpc_call(
+            Stub,
+            "Get",
+            notifications_pb2.GetRequest(notification_id=str(theirs.pk)),
+            token=token,
+        )
+
+    assert refusal.value.code() is grpc.StatusCode.NOT_FOUND
+
+
+def test_the_list_says_how_much_there_was_to_page_through(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    reply = grpc_call(Stub, "List", notifications_pb2.ListRequest(limit=1), token=token)
+
+    assert (len(reply.notifications), reply.total, reply.limit) == (1, 2, 1)
+
+
+def test_the_list_can_be_narrowed_by_audience(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    reply = grpc_call(Stub, "List", notifications_pb2.ListRequest(audience="global"), token=token)
+
+    assert [row.subject for row in reply.notifications] == [mail[0].subject]
+
+
+def test_the_unread_flag_is_three_valued(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    """Unset is "everything", which is a different question from `unread = false`."""
+    grpc_call(Stub, "Read", _request("Read", str(mail[1].pk)), token=token)
+
+    everything = grpc_call(Stub, "List", notifications_pb2.ListRequest(), token=token)
+    read = grpc_call(Stub, "List", notifications_pb2.ListRequest(unread=False), token=token)
+
+    assert len(everything.notifications) == 2
+    assert [row.subject for row in read.notifications] == [mail[1].subject]
+
+
+def test_dismissed_rows_are_left_out_unless_asked_for(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    grpc_call(Stub, "Dismiss", _request("Dismiss", str(mail[1].pk)), token=token)
+
+    hidden = grpc_call(Stub, "List", notifications_pb2.ListRequest(), token=token)
+    shown = grpc_call(
+        Stub, "List", notifications_pb2.ListRequest(include_dismissed=True), token=token
+    )
+
+    assert [row.subject for row in hidden.notifications] == [mail[0].subject]
+    assert len(shown.notifications) == 2
+
+
+def test_the_count_call_answers_a_filtered_total(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    reply = grpc_call(Stub, "Count", notifications_pb2.CountRequest(audience="global"), token=token)
+
+    assert reply.count == 1
+
+
+def test_the_count_call_needs_a_credential(
+    transactional_db: None, grpc_call: Callable[..., Any]
+) -> None:
+    with pytest.raises(grpc.aio.AioRpcError) as refusal:
+        grpc_call(Stub, "Count", notifications_pb2.CountRequest())
+
+    assert refusal.value.code() is grpc.StatusCode.UNAUTHENTICATED
+
+
+def test_the_badge_is_readable_on_its_own(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    assert grpc_call(Stub, "UnreadCount", Empty(), token=token).count == 2
+
+
+def test_emptying_the_tray_clears_the_list_and_the_badge(
+    mail: tuple[Notification, Notification], token: str, grpc_call: Callable[..., Any]
+) -> None:
+    reply = grpc_call(Stub, "DismissAll", Empty(), token=token)
+
+    assert (reply.count, reply.unread) == (2, 0)
+    assert grpc_call(Stub, "List", notifications_pb2.ListRequest(), token=token).notifications == []
+
+
+def test_emptying_the_tray_needs_a_credential(
+    transactional_db: None, grpc_call: Callable[..., Any]
+) -> None:
+    with pytest.raises(grpc.aio.AioRpcError) as refusal:
+        grpc_call(Stub, "DismissAll", Empty())
+
+    assert refusal.value.code() is grpc.StatusCode.UNAUTHENTICATED

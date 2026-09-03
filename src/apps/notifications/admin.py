@@ -17,7 +17,7 @@ into a project that has never heard of either.
 from typing import Any
 
 from django.contrib import admin
-from django.db.models import Count, QuerySet
+from django.db.models import Count, Q, QuerySet
 from django.http import HttpRequest
 from django.utils.html import format_html
 
@@ -72,7 +72,9 @@ class NotificationAdmin(ModelAdmin):
             super()
             .get_queryset(request)
             .select_related("recipient")
-            .annotate(receipt_count=Count("receipts"))
+            .annotate(
+                read_count=Count("receipts", filter=Q(receipts__read_at__isnull=False)),
+            )
         )
 
     @admin.display(description="Audience", ordering="audience")
@@ -87,14 +89,18 @@ class NotificationAdmin(ModelAdmin):
             notification.get_level_display(),
         )
 
-    @admin.display(description="Read by", ordering="receipt_count")
+    @admin.display(description="Read by", ordering="read_count")
     def read_by(self, notification: Notification) -> str:
         """How many accounts have read it.
+
+        Counted from receipts that actually carry a ``read_at``, not from
+        receipts existing: a receipt is now created by dismissing too, and a
+        dismissal without a read would otherwise be reported as having been read.
 
         For a broadcast that is the whole answer available: there is no roster of
         who was meant to receive it, so a percentage would be invented.
         """
-        count = getattr(notification, "receipt_count", 0)
+        count = getattr(notification, "read_count", 0)
         if notification.audience == Audience.USER:
             return "Read" if count else "Unread"
         return f"{count} account{'' if count == 1 else 's'}"
@@ -102,15 +108,15 @@ class NotificationAdmin(ModelAdmin):
 
 @admin.register(NotificationReceipt)
 class NotificationReceiptAdmin(ModelAdmin):
-    """Who read what, and when. A log, so nothing here is editable."""
+    """What each account has done with each notification. A log, so nothing is editable."""
 
     # Enforced by the two methods below; declared here so the generated
     # documentation can say so without inheriting this project's ReadOnlyAdmin,
     # which imports Unfold directly and would not travel with this app.
     read_only_admin = True
 
-    list_display = ("notification", "user", "read_at")
-    list_filter = ("read_at",)
+    list_display = ("notification", "user", "read_at", "dismissed_at")
+    list_filter = ("read_at", "dismissed_at")
     search_fields = ("notification__subject", "user__username", "user__email")
     date_hierarchy = "read_at"
 

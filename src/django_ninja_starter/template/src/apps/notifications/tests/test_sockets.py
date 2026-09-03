@@ -32,6 +32,21 @@ def socket(**kwargs: Any) -> SocketClient:
     return SocketClient(notifications_socket, **kwargs)
 
 
+async def reply(client: SocketClient, frame: dict[str, Any]) -> dict[str, Any]:
+    """Send a command and read past the `state` frame it also broadcasts.
+
+    A change made on this connection is announced to the account's *other*
+    connections down the same channel, so this one hears its own announcement
+    too -- see `publish_state`. Harmless in a client, noise in a test that wants
+    the command's own answer.
+    """
+    await client.send(frame)
+    while True:
+        answer = await client.next_frame()
+        if answer["type"] != "state":
+            return answer
+
+
 # -- connecting -------------------------------------------------------------
 
 
@@ -439,7 +454,12 @@ def test_reading_a_notification_over_the_socket_marks_it_read(alice: Any) -> Non
         return acknowledged
 
     acknowledged = run(scenario())
-    assert acknowledged == {"type": "read", "id": str(notification.pk), "unread": 1}
+    assert acknowledged == {
+        "type": "read",
+        "id": str(notification.pk),
+        "unread": 1,
+        "changed": True,
+    }
     assert unread_count(alice) == 1
 
 
@@ -564,3 +584,606 @@ def test_a_binary_frame_is_refused_without_closing_the_connection() -> None:
         return refusal
 
     assert run(scenario())["title"] == "BAD_REQUEST"
+
+
+# -- every command, signed in and signed out --------------------------------
+
+OPEN_TO_ANYONE = [
+    {"command": "ping"},
+    {"command": "whoami"},
+    {"command": "deauthenticate"},
+]
+
+NEEDS_AN_ACCOUNT = [
+    {"command": "list"},
+    {"command": "get", "id": "00000000-0000-0000-0000-000000000000"},
+    {"command": "count"},
+    {"command": "unread"},
+    {"command": "read", "id": "00000000-0000-0000-0000-000000000000"},
+    {"command": "unread_one", "id": "00000000-0000-0000-0000-000000000000"},
+    {"command": "read_all"},
+    {"command": "dismiss", "id": "00000000-0000-0000-0000-000000000000"},
+    {"command": "restore", "id": "00000000-0000-0000-0000-000000000000"},
+    {"command": "dismiss_all"},
+]
+
+
+def _identify(frame: dict[str, Any]) -> str:
+    return str(frame["command"])
+
+
+@pytest.mark.parametrize("frame", OPEN_TO_ANYONE, ids=_identify)
+def test_a_command_open_to_anyone_answers_without_a_credential(frame: dict[str, Any]) -> None:
+    """These four are the connection's own housekeeping, not somebody's mail."""
+
+    async def scenario() -> dict[str, Any]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        answer = await client.command(frame)
+        await client.close()
+        return answer
+
+    assert run(scenario())["type"] != "error"
+
+
+@pytest.mark.parametrize("frame", NEEDS_AN_ACCOUNT, ids=_identify)
+def test_every_other_command_is_refused_without_a_credential(frame: dict[str, Any]) -> None:
+    """One refusal, in the same words, for every command that reads somebody's mail."""
+
+    async def scenario() -> dict[str, Any]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        refusal = await client.command(frame)
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "AUTHENTICATION_REQUIRED"
+
+
+@pytest.mark.parametrize("frame", OPEN_TO_ANYONE + NEEDS_AN_ACCOUNT, ids=_identify)
+def test_every_command_answers_once_signed_in(frame: dict[str, Any], alice: Any) -> None:
+    """Nothing is refused for want of an account once there is one.
+
+    A missing id is still a `NOT_FOUND`, which is the command running and
+    answering -- not the connection turning it away.
+    """
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        answer = await client.command(frame)
+        await client.close()
+        return answer
+
+    answer = run(scenario())
+    assert answer.get("title") != "AUTHENTICATION_REQUIRED", answer
+
+
+@pytest.mark.parametrize("frame", NEEDS_AN_ACCOUNT, ids=_identify)
+def test_every_command_can_carry_its_own_token(frame: dict[str, Any], alice: Any) -> None:
+    """The whole point of a token on any command: one frame, no round trip first."""
+    carried = {**frame, "token": access_token(alice)}
+
+    async def scenario() -> list[dict[str, Any]]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        await client.send(carried)
+        signed_in = await client.next_frame()
+        answer = await client.next_frame()
+        await client.close()
+        return [signed_in, answer]
+
+    signed_in, answer = run(scenario())
+    assert signed_in["type"] == "authenticated"
+    assert answer.get("title") != "AUTHENTICATION_REQUIRED", answer
+
+
+# -- reading the history over the socket ------------------------------------
+
+
+def test_the_list_command_returns_the_same_page_the_endpoint_would(alice: Any) -> None:
+    notify_user(alice, "Mine")
+    notify_everyone("Everybody's")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        for _ in range(2):
+            await client.next_frame()
+        listed = await client.command({"command": "list"})
+        await client.close()
+        return listed
+
+    listed = run(scenario())
+    assert listed["type"] == "list"
+    assert {row["subject"] for row in listed["notifications"]} == {"Mine", "Everybody's"}
+    assert listed["total"] == 2
+
+
+def test_the_list_command_takes_the_endpoints_filters(alice: Any) -> None:
+    notify_user(alice, "Mine")
+    notify_everyone("Everybody's")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        for _ in range(2):
+            await client.next_frame()
+        listed = await client.command({"command": "list", "audience": "global"})
+        await client.close()
+        return listed
+
+    listed = run(scenario())
+    assert [row["subject"] for row in listed["notifications"]] == ["Everybody's"]
+    assert listed["total"] == 1
+
+
+def test_the_list_command_pages(alice: Any) -> None:
+    for index in range(5):
+        notify_user(alice, f"#{index}")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        for _ in range(5):
+            await client.next_frame()
+        listed = await client.command({"command": "list", "limit": 2, "offset": 1})
+        await client.close()
+        return listed
+
+    listed = run(scenario())
+    assert len(listed["notifications"]) == 2
+    assert (listed["limit"], listed["offset"], listed["total"]) == (2, 1, 5)
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        {"command": "list", "limit": "lots"},
+        {"command": "list", "offset": 1.5},
+        {"command": "list", "unread": "yes"},
+        {"command": "count", "unread": 1},
+    ],
+    ids=["limit", "offset", "unread flag", "count flag"],
+)
+def test_an_argument_of_the_wrong_type_is_refused_rather_than_coerced(
+    frame: dict[str, Any], alice: Any
+) -> None:
+    """`{"limit": "all"}` quietly returning fifty rows is worse than an error."""
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        refusal = await client.command(frame)
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "BAD_REQUEST"
+
+
+def test_the_get_command_returns_one_notification(alice: Any) -> None:
+    notification = notify_user(alice, "Just this one")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.next_frame()
+        got = await client.command({"command": "get", "id": str(notification.pk)})
+        await client.close()
+        return got
+
+    got = run(scenario())
+    assert got["type"] == "notification"
+    assert got["notification"]["subject"] == "Just this one"
+
+
+def test_the_get_command_refuses_somebody_elses(alice: Any, bob: Any) -> None:
+    theirs = notify_user(bob, "For bob only")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        refusal = await client.command({"command": "get", "id": str(theirs.pk)})
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "NOT_FOUND"
+
+
+def test_the_count_command_answers_a_filtered_total(alice: Any) -> None:
+    notify_user(alice, "Fine", level="info")
+    notify_user(alice, "Broken", level="error")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        for _ in range(2):
+            await client.next_frame()
+        counted = await client.command({"command": "count", "level": "error"})
+        await client.close()
+        return counted
+
+    assert run(scenario()) == {"type": "count", "count": 1}
+
+
+# -- changing state over the socket -----------------------------------------
+
+
+def test_unreading_over_the_socket_puts_it_back_in_the_badge(alice: Any) -> None:
+    notification = notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.next_frame()
+        await reply(client, {"command": "read", "id": str(notification.pk)})
+        undone = await reply(client, {"command": "unread_one", "id": str(notification.pk)})
+        await client.close()
+        return undone
+
+    undone = run(scenario())
+    assert undone["type"] == "unread_one"
+    assert undone["unread"] == 1
+    assert unread_count(alice) == 1
+
+
+def test_dismissing_over_the_socket_clears_it_from_the_tray(alice: Any) -> None:
+    notification = notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+
+    async def scenario() -> list[dict[str, Any]]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.next_frame()
+        dismissed = await reply(client, {"command": "dismiss", "id": str(notification.pk)})
+        listed = await reply(client, {"command": "list"})
+        await client.close()
+        return [dismissed, listed]
+
+    dismissed, listed = run(scenario())
+    assert dismissed["type"] == "dismiss"
+    assert dismissed["unread"] == 0
+    assert listed["notifications"] == []
+
+
+def test_restoring_over_the_socket_puts_it_back(alice: Any) -> None:
+    notification = notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+
+    async def scenario() -> list[dict[str, Any]]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.next_frame()
+        await reply(client, {"command": "dismiss", "id": str(notification.pk)})
+        restored = await reply(client, {"command": "restore", "id": str(notification.pk)})
+        listed = await reply(client, {"command": "list"})
+        await client.close()
+        return [restored, listed]
+
+    restored, listed = run(scenario())
+    assert restored["type"] == "restore"
+    assert len(listed["notifications"]) == 1
+
+
+def test_dismissing_everything_over_the_socket_empties_the_tray(alice: Any) -> None:
+    notify_user(alice, "One")
+    notify_everyone("Two")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        for _ in range(2):
+            await client.next_frame()
+        cleared = await client.command({"command": "dismiss_all"})
+        await client.close()
+        return cleared
+
+    assert run(scenario()) == {"type": "dismiss_all", "count": 2, "unread": 0}
+
+
+def test_a_repeated_change_is_answered_with_changed_false(alice: Any) -> None:
+    """Success either way: a client that fired twice should not have to care."""
+    notification = notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.next_frame()
+        await reply(client, {"command": "read", "id": str(notification.pk)})
+        again = await reply(client, {"command": "read", "id": str(notification.pk)})
+        await client.close()
+        return again
+
+    assert run(scenario())["changed"] is False
+
+
+@pytest.mark.parametrize(
+    "command", ["read", "unread_one", "dismiss", "restore", "get"], ids=lambda name: str(name)
+)
+def test_every_per_notification_command_refuses_an_id_that_is_not_one(
+    command: str, alice: Any
+) -> None:
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        refusal = await client.command({"command": command, "id": "banana"})
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "BAD_REQUEST"
+
+
+# -- keeping a second device in step ----------------------------------------
+
+
+def test_reading_on_one_connection_tells_this_accounts_others(alice: Any) -> None:
+    """The reason `state` is a frame type: a badge cleared here clears there."""
+    notification = notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        phone = socket(query=f"token={token}")
+        laptop = socket(query=f"token={token}")
+        for client in (phone, laptop):
+            await client.open()
+            await client.next_frame()
+            await client.next_frame()
+        await phone.command({"command": "read", "id": str(notification.pk)})
+        told = await laptop.next_frame()
+        await phone.close()
+        await laptop.close()
+        return told
+
+    told = run(scenario())
+    assert told["type"] == "state"
+    assert told["action"] == "read"
+    assert told["unread"] == 0
+    assert told["ids"] == [str(notification.pk)]
+
+
+def test_reading_everything_tells_this_accounts_others_too(alice: Any) -> None:
+    notify_user(alice, "One")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        phone = socket(query=f"token={token}")
+        laptop = socket(query=f"token={token}")
+        for client in (phone, laptop):
+            await client.open()
+            await client.next_frame()
+            await client.next_frame()
+        await phone.command({"command": "read_all"})
+        told = await laptop.next_frame()
+        await phone.close()
+        await laptop.close()
+        return told
+
+    told = run(scenario())
+    assert (told["type"], told["action"], told["unread"]) == ("state", "read_all", 0)
+
+
+def test_a_change_that_changed_nothing_wakes_nobody(alice: Any) -> None:
+    """Otherwise a client polling `read` would flood every other device."""
+    notification = notify_user(alice, "Your export is ready")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        phone = socket(query=f"token={token}")
+        laptop = socket(query=f"token={token}")
+        for client in (phone, laptop):
+            await client.open()
+            await client.next_frame()
+            await client.next_frame()
+        await phone.command({"command": "read", "id": str(notification.pk)})
+        await laptop.next_frame()
+        await phone.command({"command": "read", "id": str(notification.pk)})
+        await phone.command({"command": "ping"})
+        # The pong proves the second read produced no state frame: had it done,
+        # it would be sitting in front of the pong on the laptop's queue.
+        await laptop.send({"command": "ping"})
+        next_up = await laptop.next_frame()
+        await phone.close()
+        await laptop.close()
+        return next_up
+
+    assert run(scenario())["type"] == "pong"
+
+
+def test_another_accounts_state_never_arrives(alice: Any, bob: Any) -> None:
+    theirs = notify_user(bob, "For bob only")
+    mine, hers = access_token(alice), access_token(bob)
+
+    async def scenario() -> dict[str, Any]:
+        watcher = socket(query=f"token={mine}")
+        other = socket(query=f"token={hers}")
+        for client, count in ((watcher, 0), (other, 1)):
+            await client.open()
+            await client.next_frame()
+            for _ in range(count):
+                await client.next_frame()
+        await other.command({"command": "read", "id": str(theirs.pk)})
+        await watcher.send({"command": "ping"})
+        next_up = await watcher.next_frame()
+        await watcher.close()
+        await other.close()
+        return next_up
+
+    assert run(scenario())["type"] == "pong"
+
+
+# -- whoami and signing out -------------------------------------------------
+
+
+def test_whoami_names_the_account_when_there_is_one(alice: Any) -> None:
+    notify_user(alice, "One")
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.next_frame()
+        who = await client.command({"command": "whoami"})
+        await client.close()
+        return who
+
+    who = run(scenario())
+    assert who["authenticated"] is True
+    assert who["user"]["username"] == "alice"
+    assert who["unread"] == 1
+
+
+def test_whoami_answers_rather_than_refuses_when_there_is_nobody() -> None:
+    """ "You are nobody" is the useful reply -- a reconnecting client asks because
+    it does not know."""
+
+    async def scenario() -> dict[str, Any]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        who = await client.command({"command": "whoami"})
+        await client.close()
+        return who
+
+    assert run(scenario()) == {
+        "type": "whoami",
+        "authenticated": False,
+        "user": None,
+        "unread": 0,
+    }
+
+
+def test_signing_out_keeps_the_connection_and_the_public_feed(alice: Any) -> None:
+    """A shared browser signing out should still see the announcements."""
+    token = access_token(alice)
+
+    async def scenario() -> list[dict[str, Any]]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        gone = await client.command({"command": "deauthenticate"})
+        await sync_to_async(notify_everyone)("Still for everybody")
+        public = await client.next_frame()
+        await client.close()
+        return [gone, public]
+
+    gone, public = run(scenario())
+    assert gone["type"] == "deauthenticated"
+    assert gone["user"]["username"] == "alice"
+    assert public["notification"]["subject"] == "Still for everybody"
+
+
+def test_signing_out_stops_this_accounts_private_traffic(alice: Any) -> None:
+    """The subscription cannot leave a channel, so the frames are filtered instead."""
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.command({"command": "deauthenticate"})
+        await sync_to_async(notify_user)(alice, "Private again")
+        await sync_to_async(notify_everyone)("Public")
+        frame = await client.next_frame()
+        await client.close()
+        return frame
+
+    assert run(scenario())["notification"]["subject"] == "Public"
+
+
+def test_signing_out_puts_the_private_commands_back_behind_the_credential(alice: Any) -> None:
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.command({"command": "deauthenticate"})
+        refusal = await client.command({"command": "unread"})
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "AUTHENTICATION_REQUIRED"
+
+
+def test_signing_back_in_after_signing_out_works(alice: Any) -> None:
+    """Not a conflict: the connection stopped claiming that account when it left."""
+    token = access_token(alice)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.command({"command": "deauthenticate"})
+        back = await client.command({"command": "authenticate", "token": token})
+        await client.close()
+        return back
+
+    back = run(scenario())
+    assert back["type"] == "authenticated"
+    assert back["user"]["username"] == "alice"
+
+
+def test_signing_out_when_nobody_was_signed_in_is_answered_not_refused() -> None:
+    async def scenario() -> dict[str, Any]:
+        client = socket()
+        await client.open()
+        await client.next_frame()
+        gone = await client.command({"command": "deauthenticate"})
+        await client.close()
+        return gone
+
+    assert run(scenario()) == {"type": "deauthenticated", "user": None}
+
+
+def test_the_list_command_honours_the_unread_flag(alice: Any) -> None:
+    """The flag is three-valued, so `true` has to be as real a case as absent."""
+    read_already = notify_user(alice, "Old news")
+    notify_user(alice, "Still outstanding")
+    token = access_token(alice)
+
+    async def scenario() -> list[dict[str, Any]]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        for _ in range(2):
+            await client.next_frame()
+        await reply(client, {"command": "read", "id": str(read_already.pk)})
+        outstanding = await reply(client, {"command": "list", "unread": True})
+        done = await reply(client, {"command": "list", "unread": False})
+        await client.close()
+        return [outstanding, done]
+
+    outstanding, done = run(scenario())
+    assert [row["subject"] for row in outstanding["notifications"]] == ["Still outstanding"]
+    assert [row["subject"] for row in done["notifications"]] == ["Old news"]

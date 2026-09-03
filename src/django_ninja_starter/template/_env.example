@@ -62,6 +62,9 @@ DJANGO_NOTIFICATIONS_BROKER=apps.notifications.broadcast.MemoryBroker
 DJANGO_NOTIFICATIONS_REDIS_URL=redis://127.0.0.1:6379/0
 DJANGO_NOTIFICATIONS_CHANNEL_PREFIX=notifications
 DJANGO_NOTIFICATIONS_SOCKET_BACKLOG=20
+# Zero keeps everything. Set a window and schedule
+# `manage.py notifications_prune`; nothing deletes anything until you run it.
+DJANGO_NOTIFICATIONS_RETENTION_DAYS=0
 DJANGO_SHOP_ENABLED=false
 DJANGO_SHOP_CURRENCY=USD
 DJANGO_SHOP_REVIEW_MODERATION=true
