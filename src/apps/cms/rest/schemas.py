@@ -49,10 +49,20 @@ class PageSummaryOut(Schema):
 
 
 class PageMetaOut(Schema):
+    """A page's metadata, with the site's already merged in behind it.
+
+    The four ``og_`` values are what a link to this page looks like when it is
+    shared, and they are resolved rather than raw: blank ones have already
+    fallen back to the page's plainer wording and then to the site's, so a
+    client renders them straight out without a fallback chain of its own.
+    """
+
     title: str
     description: str | None = None
-    keywords: list[str] = []
+    og_title: str = ""
+    og_description: str = ""
     og_image: str = ""
+    og_url: str = ""
 
 
 class PageOut(Schema):
@@ -94,10 +104,12 @@ class SiteOut(Schema):
     name: str
     tagline: str
     description: str
-    keywords: list[str] = []
+    og_title: str = ""
+    og_description: str = ""
     logo: str = ""
     favicon: str = ""
     og_image: str = ""
+    og_url: str = ""
     contact: dict[str, str] = {}
     social_links: list[dict[str, Any]] = []
     extra: dict[str, Any] = {}

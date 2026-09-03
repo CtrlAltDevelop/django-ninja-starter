@@ -45,6 +45,7 @@ def _fields(section: Section, rows: list[dict[str, Any]]) -> None:
         field.help_text = row.get("help_text", "")
         field.field_type = row.get("field_type", field.field_type)
         field.multiple = row.get("multiple", False)
+        field.options = row.get("options", [])
         field.required = row.get("required", False)
         field.order = row.get("order", 0)
         field.is_active = row.get("is_active", True)
@@ -76,8 +77,10 @@ def _page(row: dict[str, Any]) -> Page:
     page.published_at = parse_datetime(published_at) if published_at else None
     page.title = row.get("title", {})
     page.description = row.get("description", {})
-    page.keywords = row.get("keywords", {})
+    page.og_title = row.get("og_title", {})
+    page.og_description = row.get("og_description", {})
     page.og_image = row.get("og_image", "")
+    page.og_url = row.get("og_url", "")
     page.save()
     for section_row in row.get("sections", []):
         _section(page, section_row)

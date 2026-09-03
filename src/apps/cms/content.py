@@ -157,15 +157,33 @@ def page_sections(page: Page, language: str) -> list[dict[str, Any]]:
 
 
 def page_meta(page: Page, site: SiteSettings, language: str) -> dict[str, Any]:
-    """The page's own metadata, with the site's used for whatever it omits."""
+    """The page's own metadata, with the site's used for whatever it omits.
+
+    Open Graph is resolved here rather than left to the client, and it falls
+    back twice: to the page's own plainer wording, then to the site's. So a page
+    that has never had its social card thought about still shares as itself
+    rather than as a blank card or as the home page -- which are the two things
+    that happen when a frontend has to work this chain out for itself and one
+    frontend of the four gets it wrong.
+
+    `keywords` is not here, and is not coming back: no search engine has ranked
+    on the meta keywords tag for well over a decade, and a box editors dutifully
+    fill in that nothing reads is worse than no box.
+    """
+    title = translation(page.title, language) or page.name
+    description = translation(page.description, language) or translation(site.description, language)
     return {
-        "title": translation(page.title, language) or page.name,
-        "description": translation(page.description, language)
-        or translation(site.description, language),
-        "keywords": translation(page.keywords, language)
-        or translation(site.keywords, language)
-        or [],
+        "title": title,
+        "description": description,
+        "og_title": translation(page.og_title, language)
+        or translation(site.og_title, language)
+        or title,
+        "og_description": translation(page.og_description, language)
+        or translation(site.og_description, language)
+        or description
+        or "",
         "og_image": page.og_image or site.og_image,
+        "og_url": page.og_url or site.og_url,
     }
 
 
@@ -225,10 +243,14 @@ def site_payload(site: SiteSettings, language: str) -> dict[str, Any]:
         "name": translation(site.name, language) or "",
         "tagline": translation(site.tagline, language) or "",
         "description": translation(site.description, language) or "",
-        "keywords": translation(site.keywords, language) or [],
+        "og_title": translation(site.og_title, language) or translation(site.name, language) or "",
+        "og_description": translation(site.og_description, language)
+        or translation(site.description, language)
+        or "",
         "logo": site.logo,
         "favicon": site.favicon,
         "og_image": site.og_image,
+        "og_url": site.og_url,
         "contact": site.contact,
         "social_links": site.social_links,
         "extra": site.extra,

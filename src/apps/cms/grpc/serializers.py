@@ -38,8 +38,10 @@ class Section(serializers.Serializer[dict[str, object]]):
 class PageMeta(serializers.Serializer[dict[str, object]]):
     title = serializers.CharField()
     description = serializers.CharField()
-    keywords = serializers.ListField(child=serializers.CharField())
+    og_title = serializers.CharField()
+    og_description = serializers.CharField()
     og_image = serializers.CharField()
+    og_url = serializers.CharField()
 
 
 class MenuItem(serializers.Serializer[dict[str, object]]):

@@ -37,8 +37,10 @@ class SectionType:
 class PageMetaType:
     title: str
     description: str | None
-    keywords: list[str]
+    og_title: str
+    og_description: str
     og_image: str
+    og_url: str
 
 
 @strawberry.type
@@ -96,10 +98,12 @@ class SiteType:
     name: str
     tagline: str
     description: str
-    keywords: list[str]
+    og_title: str
+    og_description: str
     logo: str
     favicon: str
     og_image: str
+    og_url: str
     contact: JSON
     social_links: JSON
     extra: JSON
@@ -146,8 +150,10 @@ def page_type(page: dict[str, Any]) -> PageType:
         meta=PageMetaType(
             title=meta["title"],
             description=meta.get("description"),
-            keywords=meta.get("keywords", []),
+            og_title=meta.get("og_title", ""),
+            og_description=meta.get("og_description", ""),
             og_image=meta.get("og_image", ""),
+            og_url=meta.get("og_url", ""),
         ),
         sections=[section_type(section) for section in page.get("sections", [])],
     )
@@ -179,10 +185,12 @@ def site_type(site: dict[str, Any]) -> SiteType:
         name=site["name"],
         tagline=site["tagline"],
         description=site["description"],
-        keywords=site.get("keywords", []),
+        og_title=site.get("og_title", ""),
+        og_description=site.get("og_description", ""),
         logo=site.get("logo", ""),
         favicon=site.get("favicon", ""),
         og_image=site.get("og_image", ""),
+        og_url=site.get("og_url", ""),
         contact=site.get("contact", {}),
         social_links=site.get("social_links", []),
         extra=site.get("extra", {}),

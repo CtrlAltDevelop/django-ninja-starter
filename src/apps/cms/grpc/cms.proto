@@ -64,8 +64,10 @@ message PageList {
 message PageMeta {
     string title = 1;
     string description = 2;
-    repeated string keywords = 3;
     string og_image = 4;
+    string og_title = 5;
+    string og_description = 6;
+    string og_url = 7;
 }
 
 message PageRequest {
@@ -100,13 +102,15 @@ message SiteInfo {
     string name = 4;
     string tagline = 5;
     string description = 6;
-    repeated string keywords = 7;
     string logo = 8;
     string favicon = 9;
     string og_image = 10;
     string contact_json = 11;
     string social_links_json = 12;
     string extra_json = 13;
+    string og_title = 14;
+    string og_description = 15;
+    string og_url = 16;
 }
 
 message SiteRequest {
