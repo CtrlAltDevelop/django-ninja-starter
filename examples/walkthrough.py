@@ -4,10 +4,17 @@
     python examples/walkthrough.py
 
 Four login methods, four second factors, four social providers, a token mode,
-the accounts and health endpoints, both feature apps the starter ships -- the
-CMS and notifications, socket included -- the notes app you would write
-yourself, the audit trail and the generated OpenAPI documents. All of it printed
-as a transcript of the calls a real client would make.
+the accounts and health endpoints, all three feature apps the starter ships --
+the CMS, notifications with its socket, and the shop from catalogue to settled
+invoice -- the notes app you would write yourself, the audit trail, the
+generated OpenAPI documents, and every admin screen any of them registers. All
+of it printed as a transcript of the calls a real client would make.
+
+The admin is the last section and is not an afterthought. The API is half of
+what this project is; the other half is the screen the people who run it use,
+and it is walked from Django's own registry rather than from a list written
+here -- so an app added tomorrow is covered without this file being edited, and
+one that ships a broken changelist fails the tour.
 
 What it runs against is the point. Not this checkout's ``src/``, but the example
 project ``examples/build.py`` produces with the packaged generator: a tree with
@@ -181,6 +188,9 @@ class Api:
 
     def patch(self, path: str, payload: dict[str, Any], **kwargs: Any) -> Any:
         return self.request("PATCH", path, payload, **kwargs)
+
+    def put(self, path: str, payload: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+        return self.request("PUT", path, payload if payload is not None else {}, **kwargs)
 
     def delete(self, path: str, **kwargs: Any) -> Any:
         return self.request("DELETE", path, **kwargs)
@@ -584,6 +594,12 @@ def section_cms(api: Api) -> None:
         name={"en-us": "Example Co", "fa": "شرکت نمونه"},
         tagline={"en-us": "We make examples"},
         description={"en-us": "Everything this starter ships, in one project."},
+        # What a link to this site becomes when somebody shares it. Separate
+        # from the pair above because the good version of each is different: a
+        # page title is read next to the site's chrome, a card is read alone.
+        og_title={"en-us": "Example Co — every app, in one project"},
+        og_image="https://cdn.example.com/card.png",
+        og_url="https://example.com/",
         logo="https://cdn.example.com/logo.svg",
         contact={"email": "hello@example.com"},
     )
@@ -591,6 +607,7 @@ def section_cms(api: Api) -> None:
         name="Home",
         slug="home",
         title={"en-us": "Example Co - Home"},
+        description={"en-us": "Everything this starter ships."},
         status=PageStatus.PUBLISHED,
     )
     hero = Section.objects.create(page=home, name="Hero", slug="hero")
@@ -612,6 +629,54 @@ def section_cms(api: Api) -> None:
         # canonical object, because the value is normalised on the way in.
         values={"en-us": "https://cdn.example.com/hero.jpg"},
     )
+    # One field of each remaining family, because the admin's whole promise is
+    # that a type changes what an editor types into -- and a page with three
+    # text fields on it never demonstrates that.
+    Field.objects.create(
+        section=hero,
+        name="Standfirst",
+        slug="standfirst",
+        field_type=FieldType.TEXTAREA,
+        order=2,
+        values={"en-us": "Four login methods, three feature apps, one project."},
+    )
+    Field.objects.create(
+        section=hero,
+        name="Width",
+        slug="width",
+        field_type=FieldType.SELECT,
+        options=[{"value": "full", "label": "Full bleed"}, {"value": "boxed", "label": "Boxed"}],
+        order=3,
+        values={"en-us": "full"},
+    )
+    Field.objects.create(
+        section=hero,
+        name="Accent",
+        slug="accent",
+        field_type=FieldType.COLOR,
+        order=4,
+        values={"en-us": "#2563EB"},
+    )
+    Field.objects.create(
+        section=hero,
+        name="Gallery",
+        slug="gallery",
+        field_type=FieldType.IMAGE,
+        multiple=True,
+        order=5,
+        values={"en-us": ["https://cdn.example.com/one.jpg", "https://cdn.example.com/two.jpg"]},
+    )
+    Field.objects.create(
+        section=hero,
+        name="Read more",
+        slug="read-more",
+        field_type=FieldType.PAGE,
+        order=6,
+        # Another page by name, not by address: a client routes its own pages,
+        # and renaming the slug is the one thing that visibly breaks this.
+        values={"en-us": "about-us"},
+    )
+
     plans = Section.objects.create(page=home, name="Plans", slug="plans", order=1)
     basic = Section.objects.create(page=home, parent=plans, name="Basic", slug="basic")
     Field.objects.create(
@@ -622,6 +687,12 @@ def section_cms(api: Api) -> None:
         values={"en-us": 9},
     )
     about = Page.objects.create(name="About us", slug="about-us", order=1)
+    note(
+        "The colour is stored lower-cased, the choice is checked against that "
+        "field's own options, and the gallery is a list of canonical image "
+        "objects -- all of it normalised on the way in, so a client switches on "
+        "`type` and knows exactly what it has."
+    )
 
     # A library section: written once, placed on whichever pages want it.
     footer = Section.objects.create(page=None, name="Footer", slug="footer", order=99)
@@ -643,12 +714,18 @@ def section_cms(api: Api) -> None:
     note("What a menu is built from. `id` is what the detail route takes.")
     api.get("/api/v1/cms/pages", token="")
 
-    note("The site itself: name, tagline, logo, contact, and the languages on offer.")
+    note(
+        "The site itself: name, tagline, logo, contact, the languages on offer, "
+        "and the Open Graph card a link to it becomes. No meta keywords -- "
+        "nothing has read them for over a decade."
+    )
     api.get("/api/v1/cms/site", token="", show=False)
 
     note(
         "One page, whole: its own sections and the shared footer in one list, "
-        "each field carrying the type of its value."
+        "each field carrying the type of its value. `meta` arrives with the "
+        "site's values already merged behind the page's own, so a client renders "
+        "a <head> without a fallback chain of its own."
     )
     api.get("/api/v1/cms/pages/home", token="")
 
@@ -858,9 +935,271 @@ async def _notification_sockets(api: Api, user: Any) -> None:
             await handshake.frame("notification", show=False)
 
 
-def section_email_code(api: Api) -> None:
+def section_shop(api: Api) -> None:
+    """The third feature app: a catalogue anyone may read, a basket only you may fill."""
+    from django.apps import apps as django_apps
+    from django.conf import settings
+
+    if not settings.SHOP_ENABLED or not django_apps.is_installed("apps.shop"):
+        # Optional like every other app here, and said out loud rather than
+        # skipped silently.
+        heading(9, "Shop", "apps.shop", "Not installed: DJANGO_SHOP_ENABLED is not set.")
+        return
+
+    from decimal import Decimal
+
+    from django.contrib.auth import get_user_model
+    from django.utils import timezone
+
+    from apps.shop.attributes import AttributeType
+    from apps.shop.models import (
+        Address,
+        Brand,
+        Category,
+        CategoryAttribute,
+        Collection,
+        CollectionItem,
+        Coupon,
+        Discount,
+        DiscountKind,
+        Product,
+        ProductAttribute,
+        ProductImage,
+        ProductOffer,
+        ProductStatus,
+        ProductVariant,
+        Seller,
+        ShippingMethod,
+        Tag,
+    )
+
     heading(
         9,
+        "A shop, from the catalogue to a settled invoice",
+        "apps.shop",
+        "Two halves governed differently: a catalogue anybody may read without "
+        "a credential, and a basket, an order and an invoice that are nobody's "
+        "but the caller's.",
+    )
+
+    # The catalogue an editor would build in the admin. Deliberately not
+    # minimal: half of what this app does only shows up when there is a tree
+    # rather than a category, a product with variants beside one without, and a
+    # second seller undercutting the shop on its own listing.
+    electronics = Category.objects.create(name="Electronics", slug="electronics", order=0)
+    laptops = Category.objects.create(name="Laptops", slug="laptops", parent=electronics, order=0)
+    CategoryAttribute.objects.create(
+        category=laptops,
+        name="Screen size",
+        code="screen-size",
+        attribute_type=AttributeType.NUMBER,
+        unit="in",
+        required=True,
+    )
+    shirts = Category.objects.create(name="Shirts", slug="shirts", order=1)
+    CategoryAttribute.objects.create(
+        category=shirts,
+        name="Size",
+        code="size",
+        attribute_type=AttributeType.CHOICE,
+        choices=["S", "M", "L"],
+        is_variant=True,
+    )
+
+    acme = Brand.objects.create(name="Acme", slug="acme", website="https://acme.example.com")
+    store = Seller.objects.create(name="Acme Store", slug="acme-store", city="Bristol", order=0)
+    bargains = Seller.objects.create(name="Bargain Bin", slug="bargain-bin", city="Leeds", order=1)
+
+    laptop = Product.objects.create(
+        category=laptops,
+        brand=acme,
+        seller=store,
+        name="Acme Featherbook 14",
+        slug="featherbook-14",
+        subtitle="Thin, light, quiet",
+        summary="A small laptop for writing on trains.",
+        sku="FB-14",
+        price=Decimal("1200.00"),
+        status=ProductStatus.ACTIVE,
+        stock=5,
+        is_featured=True,
+        sales_count=40,
+    )
+    laptop.tags.add(Tag.objects.create(name="Portable", slug="portable"))
+    ProductImage.objects.create(
+        product=laptop, url="https://cdn.example.com/fb14.jpg", alt="A laptop", is_primary=True
+    )
+    ProductAttribute.objects.create(
+        product=laptop, attribute=laptops.attributes.get(code="screen-size"), value=14
+    )
+    # A second seller, cheaper and in stock: the buy box has a decision to make.
+    ProductOffer.objects.create(
+        product=laptop, seller=bargains, price=Decimal("1100.00"), stock=2, lead_time_days=2
+    )
+    tee = Product.objects.create(
+        category=shirts,
+        name="Plain tee",
+        slug="plain-tee",
+        summary="A shirt with nothing on it.",
+        sku="TEE",
+        price=Decimal("20.00"),
+        status=ProductStatus.ACTIVE,
+        has_variants=True,
+    )
+    ProductVariant.objects.create(product=tee, sku="TEE-M", options={"size": "M"}, stock=3)
+    ProductVariant.objects.create(
+        product=tee, sku="TEE-L", options={"size": "L"}, price=Decimal("22.00"), stock=0, order=1
+    )
+    Product.objects.create(
+        category=laptops,
+        name="Unannounced thing",
+        slug="unannounced",
+        sku="SECRET",
+        price=Decimal("99.00"),
+        status=ProductStatus.DRAFT,
+        stock=1,
+    )
+
+    sale = Discount.objects.create(
+        name="Spring sale",
+        kind=DiscountKind.PERCENT,
+        value=Decimal("10.00"),
+        starts_at=timezone.now() - timezone.timedelta(days=1),
+        ends_at=timezone.now() + timezone.timedelta(days=1),
+    )
+    sale.products.add(laptop)
+    picks = Collection.objects.create(
+        name="Staff picks", slug="staff-picks", description="What we would buy."
+    )
+    CollectionItem.objects.create(collection=picks, product=laptop, order=0)
+    Coupon.objects.create(code="WELCOME", percent=Decimal("5.00"))
+    shipping = ShippingMethod.objects.create(
+        name="Standard", price=Decimal("5.00"), free_from=Decimal("2000.00")
+    )
+    zoe = get_user_model().objects.get(username="zoe")
+    address = Address.objects.create(
+        user=zoe,
+        full_name="Zoe Example",
+        phone="+441234567890",
+        country="GB",
+        city="Bristol",
+        postal_code="BS1 4ST",
+        line1="1 Example Street",
+    )
+
+    note("The category tree, with a count on each node. No credential anywhere here.")
+    api.get("/api/v1/shop/categories", token="")
+
+    note(
+        "One endpoint answers search, a category page and every filter on it. "
+        "A category includes everything underneath it, so `electronics` finds "
+        "the laptop filed under `electronics/laptops`."
+    )
+    api.get("/api/v1/shop/products?category=electronics&sort=price_low", token="", show=False)
+
+    note("Attribute filters read `code:value` and are repeatable; every one has to match.")
+    api.get("/api/v1/shop/products?attribute=screen-size:14", token="", show=False)
+
+    note("The draft is in the table and in nothing public.")
+    api.get("/api/v1/shop/products/unannounced", token="", expect=404, show=False)
+
+    note(
+        "One product: its price after the running discount, the sellers who can "
+        "fill it, and which of them wins the buy box."
+    )
+    api.get("/api/v1/shop/products/featherbook-14", token="")
+
+    note("Named lists are filters over the live catalogue, so none of them can go stale.")
+    api.get("/api/v1/shop/listings", token="", show=False)
+    api.get("/api/v1/shop/listings/bestsellers", token="", show=False)
+    api.get("/api/v1/shop/collections/staff-picks", token="", show=False)
+    api.get("/api/v1/shop/sellers/bargain-bin", token="", show=False)
+
+    note("A view is recorded without a credential; popularity is a public fact.")
+    api.post("/api/v1/shop/products/featherbook-14/view", token="", show=False)
+
+    note("The basket needs one. Without a seller named, it takes the one the page showed.")
+    api.post("/api/v1/shop/cart/items", {"product": "featherbook-14", "quantity": 1})
+
+    note("A variant product is bought through a variant, never through the product.")
+    api.post(
+        "/api/v1/shop/cart/items",
+        {"product": "plain-tee", "variant": str(tee.variants.get(sku="TEE-M").pk), "quantity": 2},
+        show=False,
+    )
+
+    note("More than the shelf holds is refused, with the number that is left.")
+    api.post(
+        "/api/v1/shop/cart/items",
+        {"product": "plain-tee", "variant": str(tee.variants.get(sku="TEE-L").pk)},
+        expect=400,
+        show=False,
+    )
+
+    cart = api.get("/api/v1/shop/cart")
+
+    note("Quantities change on the line, and the basket re-totals itself.")
+    api.patch(f"/api/v1/shop/cart/items/{cart['items'][0]['id']}", {"quantity": 2}, show=False)
+
+    note("Likes and reviews are the shopper's own opinions, one per product.")
+    api.put("/api/v1/shop/products/featherbook-14/like", show=False)
+    api.post(
+        "/api/v1/shop/products/featherbook-14/reviews",
+        {"rating": 5, "title": "Quiet", "body": "Wrote a book on it."},
+        show=False,
+    )
+    note(
+        "Moderation is on by default, so it is not public yet -- and the author "
+        "can still see their own."
+    )
+    api.get("/api/v1/shop/products/featherbook-14/reviews", token="", show=False)
+    api.get("/api/v1/shop/reviews/mine", show=False)
+    api.get("/api/v1/shop/favourites", show=False)
+
+    note(
+        "Checkout is one atomic step: it prices the basket, holds the stock, "
+        "writes an immutable order and issues its invoice."
+    )
+    order = api.post(
+        "/api/v1/shop/checkout",
+        {
+            "address": str(address.pk),
+            "shipping_method": str(shipping.pk),
+            "coupon": "WELCOME",
+        },
+    )
+
+    note("The basket is empty afterwards: what was in it is on the order now.")
+    api.get("/api/v1/shop/cart", show=False)
+
+    note(
+        "The invoice is a document, not a view of the order: the address, the "
+        "prices and the totals are copied, so editing either afterwards cannot "
+        "rewrite what somebody was charged."
+    )
+    api.get(f"/api/v1/shop/orders/{order['number']}/invoice")
+
+    note(
+        "This starter wires up no gateway. Payments are created against the "
+        "`manual` provider, and this is the seam a real callback is pointed at."
+    )
+    api.post(
+        f"/api/v1/shop/orders/{order['number']}/payment/confirm",
+        {"reference": "bank-statement-4417"},
+        show=False,
+    )
+    api.get(f"/api/v1/shop/orders/{order['number']}", show=False)
+
+    note("An order that has been paid for can no longer be cancelled.")
+    api.post(f"/api/v1/shop/orders/{order['number']}/cancel", expect=400, show=False)
+
+    note("And somebody else's order number is a 404, not a 403.")
+    api.get("/api/v1/shop/orders/S00000000XXXX0000", expect=404, show=False)
+
+
+def section_email_code(api: Api) -> None:
+    heading(
+        10,
         "One-time code by email",
         "auth_email_code",
         "No password at all: a ticket goes to the client, a code goes to the "
@@ -906,7 +1245,7 @@ def section_email_code(api: Api) -> None:
 
 def section_sms_code(api: Api) -> None:
     heading(
-        10,
+        11,
         "One-time code by SMS",
         "auth_sms_code",
         "The same two steps over a phone number, which is the one identifier "
@@ -923,7 +1262,7 @@ def section_sms_code(api: Api) -> None:
 
 def section_magic_link(api: Api) -> None:
     heading(
-        11,
+        12,
         "Magic link",
         "auth_magic_link",
         "One emailed link, good once. The client never sees a code: the token in "
@@ -939,7 +1278,7 @@ def section_magic_link(api: Api) -> None:
 
 def section_twofactor(api: Api) -> None:
     heading(
-        12,
+        13,
         "Second factors",
         "auth_twofactor",
         "Four factors on one app. Enrolment is not real until a code confirms "
@@ -1031,7 +1370,7 @@ def section_tokens(api: Api) -> None:
 
     mode = settings.AUTH_TOKEN_MODE
     heading(
-        13,
+        14,
         f"Token mode: {mode}",
         "no token app" if mode == "none" else f"oauth_core, oauth_{mode}",
         "All three modes publish the same endpoints under /auth/token, so a "
@@ -1089,7 +1428,7 @@ def section_social(api: Api) -> None:
     from django.conf import settings
 
     heading(
-        14,
+        15,
         "Social sign-in",
         ", ".join(f"oauth_{name}" for name in settings.OAUTH_PROVIDERS),
         "Each provider mounts a start and a callback. Start is the half this "
@@ -1109,7 +1448,7 @@ def section_audit(api: Api) -> None:
     from infrastructure.oauth.core import jwt_tokens
 
     heading(
-        15,
+        16,
         "What was recorded",
         "auth_core, oauth_core",
         "Every step above left an audit row, and every credential above was a "
@@ -1139,7 +1478,7 @@ def section_audit(api: Api) -> None:
 
 def section_openapi(api: Api) -> None:
     heading(
-        16,
+        17,
         "The document all of that produced",
         "config.api",
         "One NinjaAPI per registered version, every enabled app's router "
@@ -1175,6 +1514,150 @@ def section_openapi(api: Api) -> None:
     )
 
 
+class AdminTour:
+    """A signed-in staff browser: one page, one printed line.
+
+    Separate from :class:`Api` because it is a different kind of client. The API
+    carries a bearer token and reads JSON; the admin carries a session cookie
+    and reads HTML, and the thing worth printing about an admin page is not its
+    body but whether it rendered at all.
+    """
+
+    def __init__(self) -> None:
+        from django.contrib.auth import get_user_model
+        from django.test import Client
+
+        self.client = Client()
+        self.user = get_user_model().objects.create_superuser(
+            username="root", email="root@example.com", password=PASSWORD
+        )
+        self.client.force_login(self.user)
+        self.visited = 0
+
+    def visit(self, path: str, label: str = "", *, expect: int = 200) -> Any:
+        response = self.client.get(path)
+        ok = response.status_code == expect
+        tint = GREEN if ok else RED
+        suffix = f"  {DIM}{label}{OFF}" if label else ""
+        print(f"  {CYAN}{'GET':<6}{OFF} {path} {tint}→ {response.status_code}{OFF}{suffix}")
+        if not ok:
+            raise WalkthroughError(f"admin {path} returned {response.status_code}, not {expect}")
+        self.visited += 1
+        return response
+
+
+def section_admin(api: Api) -> None:
+    """Every registered admin, opened. The half of this project nobody curls."""
+    from django.contrib import admin as django_admin
+    from django.urls import reverse
+
+    heading(
+        18,
+        "The admin, every app of it",
+        "all apps",
+        "The API is half the project; the other half is the screen the people "
+        "who run it use. Every model any installed app registered is opened "
+        "here, so an app that ships a broken changelist fails the tour.",
+    )
+
+    tour = AdminTour()
+    note("The index lists exactly the apps this .env turned on.")
+    tour.visit("/admin/", "the index")
+
+    # Walked from the registry rather than from a list written here, so an app
+    # added tomorrow is covered without this file being edited -- and an app
+    # left out of the .env is simply absent rather than a hard-coded 404.
+    registered = sorted(
+        django_admin.site._registry.items(),
+        key=lambda row: (row[0]._meta.app_label, row[0]._meta.object_name or ""),
+    )
+    grouped: dict[str, list[Any]] = {}
+    for model, _ in registered:
+        grouped.setdefault(model._meta.app_label, []).append(model)
+
+    for app_label, models in grouped.items():
+        note(f"{app_label}: {len(models)} model(s) registered.")
+        for model in models:
+            name = model._meta.model_name
+            columns = getattr(django_admin.site._registry[model], "list_display", ())
+            tour.visit(
+                reverse(f"admin:{app_label}_{name}_changelist"),
+                f"{model._meta.verbose_name_plural} · {len(columns)} columns",
+            )
+
+    note(
+        "The changelists are only the door. Two screens are worth opening on "
+        "their own, because neither is an ordinary Django change form."
+    )
+    _admin_content_screen(tour)
+    _admin_notification_form(tour)
+    _admin_shop_order(tour)
+
+    note(f"{tour.visited} admin pages opened, all of them rendering.")
+
+
+def _admin_content_screen(tour: AdminTour) -> None:
+    """The CMS's own editing screen: one page, one language, a widget per type."""
+    from django.apps import apps as django_apps
+    from django.urls import reverse
+
+    if not django_apps.is_installed("apps.cms"):
+        return
+
+    from apps.cms.models import Page
+
+    page = Page.objects.filter(slug="home").first()
+    if page is None:  # pragma: no cover - only if the CMS section did not run
+        return
+    note(
+        "The CMS content screen. Not a change form: sections in reader order, "
+        "one language at a time, and the input each field type deserves."
+    )
+    url = reverse("admin:cms_page_content", args=(page.pk,))
+    body = tour.visit(url, "page content, default language").content.decode()
+    tour.visit(f"{url}?language=fa", "the same page in Persian")
+    for widget, what in (
+        ('type="file"', "an upload button on the image field"),
+        ('type="url"', "the address box beside it"),
+        ("<textarea", "a box with rows for the long types"),
+        ('type="color"', "a colour picker"),
+        ("<select", "a dropdown over the choice field's own options"),
+        ("multiple", "a multi-file input for the gallery"),
+    ):
+        found = GREEN + "found" + OFF if widget in body else RED + "missing" + OFF
+        print(f"  {DIM}│{OFF} {widget:<16} {found}  {DIM}{what}{OFF}")
+    tour.visit(reverse("admin:cms_sitesettings_changelist"), "site metadata, per language")
+
+
+def _admin_notification_form(tour: AdminTour) -> None:
+    """Writing one is an admin job, so the add form is part of the app."""
+    from django.apps import apps as django_apps
+    from django.urls import reverse
+
+    if not django_apps.is_installed("apps.notifications"):
+        return
+    note("Writing a notification to everybody is a form, not a shell session.")
+    tour.visit(reverse("admin:notifications_notification_add"), "compose")
+
+
+def _admin_shop_order(tour: AdminTour) -> None:
+    """An order and its invoice, which is where a shop is actually run from."""
+    from django.apps import apps as django_apps
+    from django.urls import reverse
+
+    if not django_apps.is_installed("apps.shop"):
+        return
+
+    from apps.shop.models import Order
+
+    order = Order.objects.first()
+    if order is None:  # pragma: no cover - only if the shop section did not run
+        return
+    note("The order placed above, as whoever packs it sees it.")
+    tour.visit(reverse("admin:shop_order_change", args=(order.pk,)), f"order {order.number}")
+    tour.visit(reverse("admin:shop_product_add"), "add a product")
+
+
 def tour() -> int:
     """The tour itself, running inside the example project."""
     configure()
@@ -1190,6 +1673,7 @@ def tour() -> int:
         section_notes(api)
         section_cms(api)
         section_notifications(api)
+        section_shop(api)
         section_email_code(api)
         section_sms_code(api)
         section_magic_link(api)
@@ -1198,6 +1682,7 @@ def tour() -> int:
         section_social(api)
         section_audit(api)
         section_openapi(api)
+        section_admin(api)
     except WalkthroughError as error:
         print(f"\n{RED}The tour stopped: {error}{OFF}")
         return 1
