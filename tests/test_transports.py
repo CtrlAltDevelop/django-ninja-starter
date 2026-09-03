@@ -8,6 +8,8 @@ into the project, and each app's `.proto` is the one its services would produce
 right now.
 """
 
+import json
+import os
 import subprocess
 import sys
 from importlib import import_module
@@ -129,3 +131,56 @@ def test_the_committed_protos_match_what_the_services_declare() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_graphql_editor_is_on_in_the_development_settings() -> None:
+    """The one place the in-browser editor is wanted is the one it was off in.
+
+    `base` reads its own `DEBUG` -- always False -- so a default derived from it
+    could never see `development.py` raising it a moment later, and the editor
+    was off exactly where it is meant to be on. Strawberry answers a browser GET
+    with a 404 when it has no editor to render, which is a confusing way to be
+    told a setting did not take.
+    """
+    settings = _settings_module("config.settings.development")
+
+    assert settings["DEBUG"] is True
+    assert settings["GRAPHQL_GRAPHIQL"] is True
+
+
+def test_the_graphql_editor_is_off_by_default() -> None:
+    """Left on, it is an unauthenticated schema browser.
+
+    Asserted against `base`, which is what `production` inherits and what a
+    deployment that names neither gets.
+    """
+    settings = _settings_module("config.settings.base")
+
+    assert settings["DEBUG"] is False
+    assert settings["GRAPHQL_GRAPHIQL"] is False
+
+
+def _settings_module(dotted: str) -> dict[str, object]:
+    """Read one settings module's values in a child process.
+
+    Django holds one settings module for the life of a process and this suite is
+    already running under another, so importing it here would either be refused
+    or answer for the wrong one.
+    """
+    script = (
+        "import json, sys; sys.path.insert(0, 'src');"
+        f"from {dotted} import DEBUG, GRAPHQL_GRAPHIQL;"
+        "print(json.dumps({'DEBUG': DEBUG, 'GRAPHQL_GRAPHIQL': GRAPHQL_GRAPHIQL}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        # From nothing, so this machine's own `.env` -- which may well set
+        # `DJANGO_GRAPHQL_GRAPHIQL` -- does not decide what the shipped default is.
+        env={"PATH": os.environ["PATH"], "DJANGO_ENV_FILE": ""},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    values: dict[str, object] = json.loads(result.stdout)
+    return values

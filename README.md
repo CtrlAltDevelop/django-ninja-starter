@@ -481,6 +481,10 @@ variables as needed:
 | `DJANGO_NOTIFICATIONS_CHANNEL_PREFIX` | Namespace for the broker's channels | `notifications` |
 | `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG` | Unread a client is caught up with on connect, 0 through 500 | `20` |
 | `DJANGO_NOTIFICATIONS_RETENTION_DAYS` | How long `manage.py notifications_prune` keeps a notification. `0` keeps everything, and nothing is deleted until you run the command | `0` |
+| `DJANGO_GRAPHQL_ENABLED` | Publish the GraphQL endpoint at `/graphql` | `true` |
+| `DJANGO_GRAPHQL_GRAPHIQL` | The in-browser query editor. On in the development settings; an unauthenticated schema browser if left on in production | `false` |
+| `DJANGO_GRPC_ENABLED` | Register the gRPC services | `true` |
+| `DJANGO_GRPC_PORT` | Port `manage.py grpcrunaioserver` listens on | `50051` |
 | `DJANGO_SHOP_ENABLED` | Install the shop: its tables, routes and admin | `false` |
 | `DJANGO_SHOP_CURRENCY` | ISO 4217 code every price is quoted in | `USD` |
 | `DJANGO_SHOP_REVIEW_MODERATION` | Hold a review for a moderator before it is readable | `true` |

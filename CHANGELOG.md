@@ -374,6 +374,22 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A category's product count read as `null` rather than `0`** when it had none
   of its own, which is indistinguishable from "counts were not requested".
 
+### Fixed
+
+- **`/graphql` answered a browser with a `404` in development.** The in-browser
+  editor is meant to follow `DEBUG`, and its default was written as
+  `str(DEBUG)` in `base` -- where `DEBUG` is always `False`, since
+  `development.py` raises it only after that line has run. So the editor was off
+  in the one place it is wanted, and Strawberry answers a browser `GET` with a
+  `404` when it has no editor to render, which is a confusing way to be told a
+  setting did not take. `development.py` now turns it on itself, and both
+  settings modules are asserted rather than reasoned about.
+- `DJANGO_GRAPHQL_ENABLED`, `DJANGO_GRAPHQL_GRAPHIQL`, `DJANGO_GRPC_ENABLED` and
+  `DJANGO_GRPC_PORT` were in neither `.env.example` nor the README's table.
+  `DJANGO_GRAPHQL_GRAPHIQL` ships commented out on purpose: written out with a
+  value, copying the example into a `.env` is what would turn the editor back
+  off.
+
 ### Changed
 
 - **A one-sided settings bound reads as one.** The generated settings tables

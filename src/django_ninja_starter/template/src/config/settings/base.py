@@ -518,9 +518,12 @@ OAUTH_USER_RESOLVER = os.getenv("DJANGO_OAUTH_USER_RESOLVER", "")
 # endpoint and changes no behaviour.
 GRAPHQL_ENABLED = os.getenv("DJANGO_GRAPHQL_ENABLED", "true").lower() == "true"
 # The in-browser query editor. Handy in development, and an unauthenticated
-# schema browser in production, so it follows DEBUG unless a deployment says
-# otherwise.
-GRAPHQL_GRAPHIQL = os.getenv("DJANGO_GRAPHQL_GRAPHIQL", str(DEBUG)).lower() == "true"
+# schema browser in production, so it is off here and turned on by the
+# development settings -- which is the only honest way to write it. Deriving the
+# default from `DEBUG` reads better and does not work: this module's `DEBUG` is
+# always False, and `development.py` raising it does so after this line has
+# already run, so the editor would be off in the one place it is wanted.
+GRAPHQL_GRAPHIQL = os.getenv("DJANGO_GRAPHQL_GRAPHIQL", "false").lower() == "true"
 GRPC_ENABLED = os.getenv("DJANGO_GRPC_ENABLED", "true").lower() == "true"
 GRPC_PORT = int(os.getenv("DJANGO_GRPC_PORT", "50051"))
 
