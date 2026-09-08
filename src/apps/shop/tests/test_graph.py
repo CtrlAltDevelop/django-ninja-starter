@@ -453,6 +453,14 @@ query($slug: String!) {
   }
 }
 """
+VARIANTS = """
+query($slug: String!) {
+  shopProduct(slug: $slug) {
+    variantAttributes { code values { value inStock } }
+    variants { sku stock totalStock inStock sellerCount sellers { seller { slug } } }
+  }
+}
+"""
 ORDERS = "{ shopOrders { total items { number status total invoice } } }"
 ORDER = """
 query($number: String!) {
@@ -479,6 +487,40 @@ mutation($product: String!, $offer: String) {
   }
 }
 """
+
+
+class TestVariantsOverGraphql:
+    """The picker's two questions, in Strawberry's vocabulary."""
+
+    def test_a_size_carries_its_own_sellers_and_totals(
+        self, tshirt: Product, resellers: Seller
+    ) -> None:
+        ProductOffer.objects.create(
+            product=tshirt,
+            seller=resellers,
+            variant=tshirt.variants.get(sku="TEE-L"),
+            price=Decimal("21.00"),
+            stock=4,
+        )
+
+        product = graphql(VARIANTS, slug="plain-tee")["data"]["shopProduct"]
+
+        large = product["variants"][1]
+        assert large["stock"] == 0
+        assert large["totalStock"] == 4
+        assert large["inStock"] is True
+        assert large["sellerCount"] == 1
+        assert [row["seller"]["slug"] for row in large["sellers"]] == ["bargain-bin"]
+
+    def test_the_axis_says_which_values_are_left(self, tshirt: Product) -> None:
+        product = graphql(VARIANTS, slug="plain-tee")["data"]["shopProduct"]
+
+        [axis] = product["variantAttributes"]
+        assert axis["code"] == "size"
+        assert axis["values"] == [
+            {"value": "M", "inStock": True},
+            {"value": "L", "inStock": False},
+        ]
 
 
 class TestSellersOverGraphql:
@@ -546,6 +588,17 @@ class TestSellersOverGraphql:
         assert refusal(body)["status"] == 404
 
 
+CONFIRM_PAYMENT = """
+mutation($number: String!, $reference: String!) {
+  shopConfirmPayment(number: $number, reference: $reference) {
+    number
+    status
+    paymentStatus
+  }
+}
+"""
+
+
 class TestOrdersOverGraphql:
     @pytest.fixture
     def placed(self, alice: Any, laptop: Product) -> Any:
@@ -595,3 +648,23 @@ class TestOrdersOverGraphql:
 
     def test_another_accounts_invoice_is_a_refusal(self, placed: Any, bob: Any) -> None:
         assert refusal(graphql(INVOICE, bob, number=placed.number))["status"] == 404
+
+    def test_confirming_the_payment_settles_the_order(self, placed: Any, alice: Any) -> None:
+        """The callback seam. This starter ships no gateway, so a `manual`
+        payment is settled here exactly the way the admin settles it."""
+        order = graphql(CONFIRM_PAYMENT, alice, number=placed.number, reference="bank-ref-1")[
+            "data"
+        ]["shopConfirmPayment"]
+
+        assert order["paymentStatus"] == "succeeded"
+        assert order["status"] != "pending"
+
+    def test_another_account_cannot_settle_it(self, placed: Any, bob: Any) -> None:
+        answer = graphql(CONFIRM_PAYMENT, bob, number=placed.number, reference="")
+
+        assert refusal(answer)["status"] == 404
+
+    def test_settling_needs_a_credential(self, placed: Any) -> None:
+        answer = graphql(CONFIRM_PAYMENT, number=placed.number, reference="")
+
+        assert refusal(answer)["title"] == "AUTHENTICATION_REQUIRED"
