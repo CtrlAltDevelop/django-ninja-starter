@@ -201,23 +201,90 @@ def price_of(
     )
 
 
-def sellable_offers(product: "Product", variant: "ProductVariant | None" = None) -> list[Any]:
+def shelf(
+    product: "Product",
+    variant: "ProductVariant | None" = None,
+    offer: "ProductOffer | None" = None,
+) -> int:
+    """How many of one thing one seller has, read off the row that owns the count.
+
+    Three tables carry a ``stock`` column and they are not alternatives: a
+    product's own row is the primary seller's shelf, a variant's is that size in
+    that colour, and an offer's is somebody else's warehouse. Most specific
+    wins, exactly as :func:`base_price` picks which price applies -- and every
+    question about availability in this app is asked through here, so the three
+    of them cannot drift apart into three slightly different rules.
+    """
+    if offer is not None:
+        return offer.stock
+    if variant is not None:
+        return variant.stock
+    return product.available_stock
+
+
+def can_fill(
+    product: "Product",
+    variant: "ProductVariant | None" = None,
+    offer: "ProductOffer | None" = None,
+    quantity: int = 1,
+) -> bool:
+    """Whether that one seller could fill an order for that many, right now.
+
+    A product nobody counts, and a product that takes backorders, can always
+    fill one: the shop has said so on the product row, and the answer is the
+    same whichever shelf the line names.
+    """
+    if not product.track_inventory or product.allow_backorder:
+        return True
+    return shelf(product, variant, offer) >= quantity
+
+
+def sellable_offers(
+    product: "Product", variant: "ProductVariant | None" = None, *, any_variant: bool = False
+) -> list[Any]:
     """The other sellers who could fill an order for this, cheapest first.
 
     Filtered in Python over the prefetched rows rather than queried, because a
     product page and a listing of forty have already loaded them: asking the
     database again per product is how a catalogue page becomes eighty queries.
+
+    ``any_variant`` drops the variant filter rather than matching it, which is
+    what a product *page* wants: it is showing every size at once, so it needs
+    everybody selling any of them, not just the sellers of the product row.
     """
+    wanted = variant.pk if variant else None
     return sorted(
         (
             offer
             for offer in product.offers.all()
             if offer.is_active
             and offer.seller.is_active
-            and offer.variant_id == (variant.pk if variant else None)
-            and (offer.stock > 0 or not product.track_inventory or product.allow_backorder)
+            and (any_variant or offer.variant_id == wanted)
+            and can_fill(product, variant, offer)
         ),
         key=lambda offer: (Decimal(offer.price), offer.lead_time_days),
+    )
+
+
+def total_stock(product: "Product", variant: "ProductVariant | None" = None) -> int:
+    """Every unit of this one thing anybody could sell, across all of its sellers.
+
+    The number a product page prints next to a size. A shopper does not care
+    which warehouse it is in, and a page that showed only the primary seller's
+    count would say "out of stock" over a size three other shops have.
+    """
+    own = shelf(product, variant) if own_row_is_sellable(product, variant) else 0
+    return own + sum(offer.stock for offer in sellable_offers(product, variant))
+
+
+def is_available(
+    product: "Product", variant: "ProductVariant | None" = None, quantity: int = 1
+) -> bool:
+    """Whether *anybody* -- the shop or another seller -- could fill an order for this."""
+    if can_fill(product, variant, None, quantity):
+        return True
+    return any(
+        can_fill(product, variant, offer, quantity) for offer in sellable_offers(product, variant)
     )
 
 
@@ -240,7 +307,7 @@ def buy_box(
     """
     own = price_of(product, variant, discounts, branches)
     candidates: list[tuple[Any | None, Price]] = []
-    if _own_row_is_sellable(product, variant):
+    if own_row_is_sellable(product, variant):
         candidates.append((None, own))
     for offer in sellable_offers(product, variant):
         candidates.append((offer, price_of(product, variant, discounts, branches, offer)))
@@ -251,13 +318,9 @@ def buy_box(
     return min(candidates, key=lambda row: (row[1].amount, _lead_time(row[0])))
 
 
-def _own_row_is_sellable(product: "Product", variant: "ProductVariant | None") -> bool:
+def own_row_is_sellable(product: "Product", variant: "ProductVariant | None" = None) -> bool:
     """Whether the primary seller could fill an order for one of these."""
-    if not product.track_inventory or product.allow_backorder:
-        return True
-    if variant is not None:
-        return variant.stock > 0
-    return product.stock > 0 if not product.has_variants else product.available_stock > 0
+    return can_fill(product, variant)
 
 
 def _lead_time(offer: Any | None) -> int:

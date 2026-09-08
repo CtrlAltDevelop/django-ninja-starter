@@ -39,15 +39,18 @@ The theme is whatever :mod:`apps.shop.theme` resolves: Unfold where the project
 installs it, Django's own admin where it does not.
 """
 
+from datetime import timedelta
 from typing import Any
 
 from django.contrib import admin, messages
-from django.db.models import Count, Prefetch, QuerySet
+from django.db.models import Case, Count, F, Prefetch, Q, QuerySet, Sum, When
 from django.http import HttpRequest
-from django.utils.html import format_html
+from django.utils import timezone
+from django.utils.html import format_html, format_html_join
 
 from apps.shop import options
 from apps.shop.models import (
+    Address,
     Brand,
     Cart,
     CartItem,
@@ -57,8 +60,10 @@ from apps.shop.models import (
     CollectionItem,
     Coupon,
     Discount,
+    InventoryReservation,
     Invoice,
     Order,
+    OrderEvent,
     OrderItem,
     OrderStatus,
     Payment,
@@ -93,8 +98,73 @@ RED = "#dc2626"
 GREY = "#6b7280"
 
 
+BLUE = "#2563eb"
+
+#: What colour each order status is drawn in, everywhere it is drawn. One
+#: dictionary rather than three, because an order that is amber on the order
+#: list and green on the invoice list is a shop with two ideas of what "paid"
+#: looks like.
+#: Keyed by ``str(...)`` for the same reason as ``ORDER_TRANSITIONS``: the value
+#: in the column is the member's string, not the member.
+ORDER_COLOURS = {
+    str(OrderStatus.PENDING): AMBER,
+    str(OrderStatus.PAID): GREEN,
+    str(OrderStatus.PROCESSING): BLUE,
+    str(OrderStatus.SHIPPED): BLUE,
+    str(OrderStatus.COMPLETED): GREEN,
+    str(OrderStatus.CANCELLED): GREY,
+    str(OrderStatus.REFUNDED): RED,
+}
+
+
 def _swatch(colour: str, text: str) -> Any:
     return format_html('<span style="color: {}; font-weight: 600">{}</span>', colour, text)
+
+
+def _pill(colour: str, text: str) -> Any:
+    """A badge, for the columns somebody scans down rather than reads."""
+    return format_html(
+        '<span style="background: {}1a; color: {}; border: 1px solid {}55; '
+        "border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; "
+        'white-space: nowrap">{}</span>',
+        colour,
+        colour,
+        colour,
+        text,
+    )
+
+
+def _money(amount: Any, currency: str = "") -> str:
+    return f"{amount} {currency}".strip()
+
+
+def _apply_transition(
+    model_admin: Any,
+    request: HttpRequest,
+    queryset: QuerySet[Any],
+    step: Any,
+    past_tense: str,
+    level: int = messages.SUCCESS,
+) -> None:
+    """Run one order step over a selection, and report both halves of the result.
+
+    Per row rather than as one ``update``, because none of these steps is a word
+    in a column: cancelling and refunding put stock back and refunding closes
+    the payments. A refusal is reported rather than raised -- somebody who
+    selected fifteen orders wants the twelve that could move to have moved.
+    """
+    done, refused = 0, []
+    for order in queryset.select_related("user"):
+        try:
+            step(order, actor=request.user)
+        except ShopRefused as refusal:
+            refused.append(f"{order.number}: {refusal}")
+        else:
+            done += 1
+    if done:
+        model_admin.message_user(request, f"{done} {past_tense}.", level)
+    for problem in refused:
+        model_admin.message_user(request, problem, messages.ERROR)
 
 
 class ReadOnlyAdmin(ModelAdmin):
@@ -427,24 +497,93 @@ class ProductOfferAdmin(ModelAdmin):
         return _swatch(GREEN if offer.stock > 10 else AMBER, str(offer.stock))
 
 
+#: What "how many are on the shelf" means as a database expression rather than a
+#: Python property. ``available_stock`` counts a product's variants where it has
+#: them and its own column where it does not, and an ordering cannot call a
+#: property -- so the same rule is written once, here, and annotated onto any
+#: queryset that has to filter or sort by it.
+ON_HAND = Case(
+    When(
+        has_variants=True,
+        then=Sum(
+            "variants__stock",
+            filter=Q(variants__is_active=True),
+            distinct=False,
+        ),
+    ),
+    default=F("stock"),
+)
+
+
 class StockFilter(admin.SimpleListFilter):
-    """The question a shopkeeper asks first thing in the morning."""
+    """The question a shopkeeper asks first thing in the morning.
+
+    Counted against each product's own ``low_stock_threshold`` rather than one
+    number for the whole shop, because "running low" is four for a fridge and
+    four hundred for a screw -- and the column that says so is already on the
+    product. Variants are counted too: a shirt is out of stock when every size
+    is, and a filter that only looked at the product's own column would say a
+    shop with nothing left to sell had nothing wrong with it.
+    """
 
     title = "Stock"
     parameter_name = "stock_state"
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
-        return [("out", "Out of stock"), ("low", "Running low"), ("in", "In stock")]
+        return [
+            ("out", "Out of stock"),
+            ("low", "Running low"),
+            ("in", "In stock"),
+            ("untracked", "Not tracked"),
+        ]
 
     def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
-        if self.value() == "out":
-            return queryset.filter(track_inventory=True, has_variants=False, stock__lte=0)
-        if self.value() == "low":
-            return queryset.filter(
-                track_inventory=True, has_variants=False, stock__gt=0, stock__lte=10
-            )
-        if self.value() == "in":
+        chosen = self.value()
+        if chosen is None:
+            return queryset
+        if chosen == "untracked":
+            return queryset.filter(track_inventory=False)
+        if chosen == "in":
             return queryset.in_stock()
+        counted = queryset.filter(track_inventory=True).annotate(on_hand=ON_HAND)
+        if chosen == "out":
+            return counted.filter(Q(on_hand__lte=0) | Q(on_hand__isnull=True))
+        if chosen == "low":
+            return counted.filter(on_hand__gt=0, on_hand__lte=F("low_stock_threshold"))
+        return queryset
+
+
+class NeedsAttentionFilter(admin.SimpleListFilter):
+    """The products somebody has to go and finish.
+
+    A shop's catalogue rots quietly: a product published with no picture, a
+    price of nothing, a draft somebody forgot. None of these is invalid -- the
+    model lets every one of them be saved on purpose, because a product is
+    designed before it is filled in -- so they are a filter rather than a
+    constraint, in the one place somebody is in a position to fix them.
+    """
+
+    title = "Needs attention"
+    parameter_name = "attention"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            ("no_image", "No picture"),
+            ("no_price", "Priced at nothing"),
+            ("stale_draft", "Draft, untouched for 30 days"),
+        ]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        chosen = self.value()
+        if chosen == "no_image":
+            return queryset.filter(images__isnull=True)
+        if chosen == "no_price":
+            return queryset.filter(price__lte=0)
+        if chosen == "stale_draft":
+            return queryset.filter(
+                status=ProductStatus.DRAFT,
+                updated_at__lt=timezone.now() - timedelta(days=30),
+            )
         return queryset
 
 
@@ -469,6 +608,7 @@ class ProductAdmin(ModelAdmin):
         dropdown_filter("brand", RelatedDropdownFilter),
         dropdown_filter("seller", RelatedDropdownFilter),
         StockFilter,
+        NeedsAttentionFilter,
         "is_featured",
         "has_variants",
         "created_at",
@@ -821,9 +961,16 @@ class DiscountAdmin(ModelAdmin):
 
 
 class CartItemInline(TabularInline):
+    """What is in the basket, including which seller each line is from.
+
+    ``offer`` is in here because without it two lines of the same product read
+    as a duplicate rather than as what they are: the same thing from two
+    different sellers, at two different prices.
+    """
+
     model = CartItem
     extra = 0
-    fields = ("product", "variant", "quantity", "created_at")
+    fields = ("product", "variant", "offer", "quantity", "created_at")
     readonly_fields = fields
     can_delete = False
 
@@ -970,63 +1117,397 @@ class ProductLikeAdmin(ReadOnlyAdmin):
         return super().get_queryset(request).select_related("product", "user")
 
 
+@admin.register(Address)
+class AddressAdmin(ReadOnlyAdmin):
+    """Where shoppers have asked for things to be sent. A support screen.
+
+    Read-only, and for the reason carts and likes are: it is somebody's own
+    data, typed in by them, and a shop that can edit a customer's address by
+    hand can misdeliver a parcel and have nothing that says who did it. Orders
+    are unaffected either way -- an order carries a flat copy of the address it
+    was sent to, taken when it was placed.
+    """
+
+    list_display = ("full_name", "account", "city", "country", "postal_code", "default_badge")
+    list_filter = ("country", "is_default")
+    search_fields = (
+        "full_name",
+        "city",
+        "postal_code",
+        "line1",
+        "user__username",
+        "user__email",
+    )
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Address]:
+        return super().get_queryset(request).select_related("user")
+
+    @admin.display(description="Account", ordering="user")
+    def account(self, address: Address) -> str:
+        return address.user.get_username()
+
+    @admin.display(description="Default", ordering="is_default")
+    def default_badge(self, address: Address) -> Any:
+        return _pill(BLUE, "Default") if address.is_default else ""
+
+
+@admin.register(InventoryReservation)
+class InventoryReservationAdmin(ReadOnlyAdmin):
+    """Why the shelf says what it says.
+
+    Registered because "this product has three left and I know we have twelve"
+    is a question with exactly one answer -- nine of them are held by orders
+    that have not been paid for or cancelled yet -- and until this screen
+    existed there was nowhere to read it.
+    """
+
+    list_display = ("product", "variant", "seller", "quantity", "order_link", "state")
+    list_filter = (
+        ("released_at", admin.EmptyFieldListFilter),
+        dropdown_filter("product__category", RelatedDropdownFilter),
+    )
+    search_fields = ("product__name", "product__sku", "order__number")
+    date_hierarchy = "created_at"
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[InventoryReservation]:
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("product", "variant", "offer__seller", "order")
+        )
+
+    @admin.display(description="Seller")
+    def seller(self, reservation: InventoryReservation) -> str:
+        return reservation.offer.seller.name if reservation.offer_id else "The shop"
+
+    @admin.display(description="Order", ordering="order__number")
+    def order_link(self, reservation: InventoryReservation) -> str:
+        return reservation.order.number
+
+    @admin.display(description="State", ordering="released_at")
+    def state(self, reservation: InventoryReservation) -> Any:
+        if reservation.released_at:
+            return _swatch(GREY, f"Put back {reservation.released_at:%d %b}")
+        return _swatch(AMBER, "Held")
+
+
+@admin.register(OrderEvent)
+class OrderEventAdmin(ReadOnlyAdmin):
+    """Every step every order has taken, across the whole shop.
+
+    The same rows the order screen shows in place, read the other way round:
+    "what did we do yesterday" rather than "what happened to this order".
+    """
+
+    list_display = ("created_at", "order_number", "status_badge", "note", "actor")
+    list_filter = (dropdown_filter("status", ChoicesDropdownFilter), "created_at")
+    search_fields = ("order__number", "note", "actor__username")
+    date_hierarchy = "created_at"
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[OrderEvent]:
+        return super().get_queryset(request).select_related("order", "actor")
+
+    @admin.display(description="Order", ordering="order__number")
+    def order_number(self, event: OrderEvent) -> str:
+        return event.order.number
+
+    @admin.display(description="Became", ordering="status")
+    def status_badge(self, event: OrderEvent) -> Any:
+        return _pill(ORDER_COLOURS.get(str(event.status), GREY), event.get_status_display())
+
+
 @admin.register(ShippingMethod)
 class ShippingMethodAdmin(ModelAdmin):
-    list_display = ("name", "price", "free_from", "min_days", "max_days", "is_active", "order")
-    list_editable = ("order", "is_active")
+    """How orders get there, what that costs, and how long it takes."""
+
+    list_display = ("name", "cost_summary", "speed", "is_active", "order")
+    list_filter = (dropdown_filter("is_active", BooleanRadioFilter),)
+    list_editable = ("order",)
+    search_fields = ("name", "description")
+    readonly_fields = ("id", "created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("name", "description", "is_active", "order")}),
+        (
+            "What it costs",
+            {
+                "description": (
+                    "Free delivery over a threshold belongs here rather than in a "
+                    "discount, because it is a property of the option and a shopper "
+                    "comparing two of them needs to see it beside each."
+                ),
+                "fields": ("price", "free_from"),
+            },
+        ),
+        ("How long it takes", {"fields": ("min_days", "max_days")}),
+        ("Record", {"classes": ("collapse",), "fields": ("id", "created_at", "updated_at")}),
+    )
+
+    @admin.display(description="Cost", ordering="price")
+    def cost_summary(self, method: ShippingMethod) -> Any:
+        price = _money(method.price, options.currency())
+        if method.free_from is None:
+            return price
+        return format_html("{} <small>(free over {})</small>", price, method.free_from)
+
+    @admin.display(description="Takes", ordering="min_days")
+    def speed(self, method: ShippingMethod) -> str:
+        if method.min_days == method.max_days:
+            return f"{method.min_days} day(s)"
+        return f"{method.min_days}-{method.max_days} days"
 
 
 @admin.register(Coupon)
 class CouponAdmin(ModelAdmin):
-    list_display = (
-        "code",
-        "percent",
-        "amount",
-        "minimum_subtotal",
-        "used_count",
-        "usage_limit",
-        "is_active",
-    )
-    list_filter = ("is_active",)
+    """The codes shoppers type in, and how much life each of them has left.
+
+    A campaign applies by itself and can be printed on a product page; a coupon
+    depends on what somebody types into a basket and cannot. That is why they
+    are two screens rather than one, and why this one is mostly about limits --
+    a window, a minimum, a number of uses -- which are what a shop reaches for
+    when a code escapes onto a deals site.
+    """
+
+    list_display = ("code", "worth", "minimum_subtotal", "usage", "window", "state")
+    list_filter = (dropdown_filter("is_active", BooleanRadioFilter),)
     search_fields = ("code",)
+    readonly_fields = ("id", "used_count", "created_at", "updated_at")
+    fieldsets = (
+        (
+            None,
+            {
+                "description": (
+                    "A coupon is worth a percentage or an amount, never both -- "
+                    "filling in both is refused rather than silently preferring one."
+                ),
+                "fields": ("code", "percent", "amount", "is_active"),
+            },
+        ),
+        ("Limits", {"fields": ("minimum_subtotal", "usage_limit", "used_count")}),
+        (
+            "When it works",
+            {
+                "description": "Leave either end empty for a code with no start or no end.",
+                "fields": ("starts_at", "ends_at"),
+            },
+        ),
+        ("Record", {"classes": ("collapse",), "fields": ("id", "created_at", "updated_at")}),
+    )
+
+    @admin.display(description="Worth")
+    def worth(self, coupon: Coupon) -> str:
+        if coupon.percent is not None:
+            return f"{coupon.percent}% off"
+        return f"{_money(coupon.amount, options.currency())} off"
+
+    @admin.display(description="Used", ordering="used_count")
+    def usage(self, coupon: Coupon) -> Any:
+        if coupon.usage_limit is None:
+            return f"{coupon.used_count} (no limit)"
+        left = coupon.usage_limit - coupon.used_count
+        colour = RED if left <= 0 else (AMBER if left <= 5 else GREY)
+        return _swatch(colour, f"{coupon.used_count} of {coupon.usage_limit}")
+
+    @admin.display(description="Window")
+    def window(self, coupon: Coupon) -> str:
+        start = f"{coupon.starts_at:%d %b %Y}" if coupon.starts_at else "always"
+        end = f"{coupon.ends_at:%d %b %Y}" if coupon.ends_at else "no end"
+        return f"{start} - {end}"
+
+    @admin.display(description="Now")
+    def state(self, coupon: Coupon) -> Any:
+        """Whether the code works right now, before any basket is considered.
+
+        The same question the checkout asks, minus the minimum -- which is about
+        a basket and cannot be answered on a list screen.
+        """
+        return _pill(GREEN, "Working") if coupon.is_running else _pill(GREY, "Not in use")
 
 
 class OrderItemInline(TabularInline):
+    """What was sold, at the prices that were agreed. Every field of it read-only.
+
+    ``seller`` and ``seller_name`` are in here as well as the product's own
+    columns, because on a marketplace "who sold this line" is the first question
+    a refund raises -- and because a snapshot with an editable field on it is
+    not a snapshot.
+    """
+
     model = OrderItem
     extra = 0
-    readonly_fields = (
+    fields = (
         "product",
         "variant",
         "product_name",
+        "seller_name",
         "sku",
         "quantity",
         "unit_price",
         "tax_rate",
         "line_total",
     )
+    readonly_fields = fields
     can_delete = False
+
+    def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        """A line is written by a checkout. One typed in here would be a lie."""
+        return False
+
+
+class OrderEventInline(TabularInline):
+    """Everything that has happened to this order, oldest first.
+
+    The screen's centre of gravity. An order's status is one word and the
+    question somebody in support is actually answering is "what happened to it,
+    when, and who did that" -- which is four columns and no amount of staring at
+    a status field.
+    """
+
+    model = OrderEvent
+    extra = 0
+    fields = ("created_at", "status", "note", "actor")
+    readonly_fields = fields
+    ordering = ("created_at",)
+    can_delete = False
+    verbose_name_plural = "History"
+
+    def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[OrderEvent]:
+        return super().get_queryset(request).select_related("actor")
+
+
+class PaymentInline(TabularInline):
+    """Every attempt to collect this order, including the ones that failed.
+
+    On the order because that is where somebody asks it. A declined card
+    followed by a successful one is two rows, and an order screen showing only
+    the second cannot answer why the customer is on the phone.
+    """
+
+    model = Payment
+    extra = 0
+    fields = ("created_at", "provider", "status", "amount", "provider_reference", "paid_at")
+    readonly_fields = fields
+    can_delete = False
+    verbose_name_plural = "Payment attempts"
+
+    def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+
+class ReservationInline(TabularInline):
+    """The stock this order took off the shelf, and whether it went back.
+
+    Shown because "why is this product out of stock" is answered here and
+    nowhere else: a reservation with no ``released_at`` is stock a pending order
+    is holding, and a shopkeeper looking at an empty shelf deserves to be told
+    that rather than left to work it out.
+    """
+
+    model = InventoryReservation
+    extra = 0
+    fields = ("product", "variant", "offer", "quantity", "released_at")
+    readonly_fields = fields
+    can_delete = False
+    verbose_name_plural = "Stock held"
+
+    def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[InventoryReservation]:
+        return super().get_queryset(request).select_related("product", "variant", "offer__seller")
+
+
+class OrderAttentionFilter(admin.SimpleListFilter):
+    """The orders somebody has to do something about, which is not "all of them".
+
+    A shop's order list is mostly finished orders. What a morning starts with is
+    the three that are not: money that has not arrived, parcels that have not
+    gone out, and things that were paid for days ago and are still sitting here.
+    """
+
+    title = "Needs attention"
+    parameter_name = "attention"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            ("unpaid", "Awaiting payment"),
+            ("to_send", "Paid, not yet sent"),
+            ("stalled", "Paid over 3 days ago, not yet sent"),
+        ]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        chosen = self.value()
+        waiting = (OrderStatus.PAID, OrderStatus.PROCESSING)
+        if chosen == "unpaid":
+            return queryset.filter(status=OrderStatus.PENDING)
+        if chosen == "to_send":
+            return queryset.filter(status__in=waiting)
+        if chosen == "stalled":
+            return queryset.filter(
+                status__in=waiting, updated_at__lt=timezone.now() - timedelta(days=3)
+            )
+        return queryset
 
 
 @admin.register(Order)
 class OrderAdmin(ModelAdmin):
+    """One order, everything that has happened to it, and the steps it can take next.
+
+    The status is **not** an editable field, and that is the whole design of this
+    screen. Three of an order's steps are not a word in a column: cancelling and
+    refunding put stock back on the shelf through the reservations a checkout
+    wrote, and refunding closes the payments that collected the money. A status
+    somebody could type over would let the column and the shelf disagree, and
+    the shelf is the one customers find out about. So every move is an action,
+    every action goes through the same service method a payment gateway's
+    callback would, and the legal moves are
+    :data:`~apps.shop.models.ORDER_TRANSITIONS` rather than a dropdown.
+
+    Three things stay editable, because they are facts somebody types in rather
+    than consequences: who is carrying the parcel, its tracking number, and the
+    note. Filling those in and then running "Mark as sent" is the dispatch
+    workflow, and doing it in that order is why the action does not need a form
+    of its own.
+    """
+
     list_display = (
         "number",
-        "user",
-        "status",
-        "total",
-        "currency",
+        "customer",
+        "status_badge",
+        "line_count",
+        "money",
+        "fulfilment",
         "invoice_number",
         "created_at",
     )
-    list_filter = (dropdown_filter("status", ChoicesDropdownFilter), "currency")
-    search_fields = ("number", "user__email", "user__username")
-    inlines = (OrderItemInline,)
+    list_filter = (
+        dropdown_filter("status", ChoicesDropdownFilter),
+        OrderAttentionFilter,
+        "currency",
+        "created_at",
+        dropdown_filter("shipping_method", RelatedDropdownFilter),
+    )
+    search_fields = (
+        "number",
+        "user__email",
+        "user__username",
+        "tracking_number",
+        "items__product_name",
+        "items__sku",
+    )
+    date_hierarchy = "created_at"
+    inlines = (OrderItemInline, PaymentInline, ReservationInline, OrderEventInline)
+    list_filter_submit = True
     readonly_fields = (
         "id",
         "number",
         "user",
+        "status_badge",
+        "next_steps",
         "currency",
-        "shipping_address",
+        "delivery_address",
         "shipping_method",
         "coupon",
         "subtotal",
@@ -1034,20 +1515,163 @@ class OrderAdmin(ModelAdmin):
         "shipping_total",
         "tax_total",
         "total",
-        "note",
+        "collected",
+        "shipped_at",
         "created_at",
         "updated_at",
     )
+    fieldsets = (
+        (
+            None,
+            {
+                "description": (
+                    "An order is a record of an agreement. Every price on it was "
+                    "copied down when it was placed and nothing recomputes them."
+                ),
+                "fields": ("number", "user", "status_badge", "next_steps", "created_at"),
+            },
+        ),
+        (
+            "Delivery",
+            {
+                "description": (
+                    "Fill the carrier and the tracking number in, save, then run "
+                    "\u201cMark as sent\u201d -- the action posts whatever is here."
+                ),
+                "fields": (
+                    "delivery_address",
+                    "shipping_method",
+                    "carrier",
+                    "tracking_number",
+                    "tracking_url",
+                    "shipped_at",
+                ),
+            },
+        ),
+        (
+            "Money",
+            {
+                "fields": (
+                    "currency",
+                    "subtotal",
+                    "coupon",
+                    "coupon_discount",
+                    "shipping_total",
+                    "tax_total",
+                    "total",
+                    "collected",
+                ),
+            },
+        ),
+        ("Note", {"fields": ("note",)}),
+        ("Record", {"classes": ("collapse",), "fields": ("id", "updated_at")}),
+    )
 
-    actions = ("mark_paid", "cancel_orders")
+    actions = (
+        "mark_paid",
+        "start_processing",
+        "mark_sent",
+        "mark_completed",
+        "cancel_orders",
+        "refund_orders",
+    )
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Order]:
         return (
             super()
             .get_queryset(request)
-            .select_related("user", "shipping_method", "invoice")
+            .select_related("user", "shipping_method", "invoice", "coupon")
             .prefetch_related("payments")
+            .annotate(lines=Count("items", distinct=True))
         )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        """An order is placed by a shopper going through a checkout.
+
+        One typed in here would have no reservation behind it and no payment to
+        settle, which is to say it would be a row that looks like an order and
+        behaves like nothing.
+        """
+        return False
+
+    @admin.display(description="Customer", ordering="user")
+    def customer(self, order: Order) -> str:
+        return order.user.get_username()
+
+    @admin.display(description="Lines", ordering="lines")
+    def line_count(self, order: Order) -> int:
+        return getattr(order, "lines", 0)
+
+    @admin.display(description="Status", ordering="status")
+    def status_badge(self, order: Order) -> Any:
+        return _pill(ORDER_COLOURS.get(str(order.status), GREY), order.get_status_display())
+
+    @admin.display(description="Total", ordering="total")
+    def money(self, order: Order) -> Any:
+        """What it came to, and whether the money has actually arrived."""
+        collected = order.paid_amount
+        if collected >= order.total:
+            return _swatch(GREEN, _money(order.total, order.currency))
+        if collected:
+            return _swatch(AMBER, f"{collected} of {_money(order.total, order.currency)}")
+        return _swatch(GREY, _money(order.total, order.currency))
+
+    @admin.display(description="Collected")
+    def collected(self, order: Order) -> str:
+        """The sum of the payments that actually succeeded, not what was asked for."""
+        return _money(order.paid_amount, order.currency)
+
+    @admin.display(description="Delivery")
+    def fulfilment(self, order: Order) -> Any:
+        if order.shipped_at:
+            carried = f" via {order.carrier}" if order.carrier else ""
+            return _swatch(GREEN, f"Sent {order.shipped_at:%d %b}{carried}")
+        if str(order.status) in {OrderStatus.PAID, OrderStatus.PROCESSING}:
+            return _swatch(AMBER, "Waiting to go out")
+        return _swatch(GREY, "-")
+
+    @admin.display(description="Where it can go next")
+    def next_steps(self, order: Order) -> Any:
+        """The legal moves from here, spelled out beside the buttons that make them.
+
+        Written on the form because an admin who has just been refused a step
+        should be able to see why without reading the source: an order is not
+        cancellable once it has shipped, and this is where that is said.
+        """
+        if not order.pk:
+            return "-"
+        steps = order.next_statuses
+        if not steps:
+            return _swatch(GREY, "Nowhere -- this order is finished.")
+        return format_html_join(
+            ", ",
+            "{}",
+            ((OrderStatus(step).label,) for step in steps),
+        )
+
+    @admin.display(description="Sent to")
+    def delivery_address(self, order: Order) -> Any:
+        """The address copied onto the order, not the one in the shopper's book.
+
+        They are different things on purpose: editing an address must not
+        rewrite a parcel that has already gone out. Printed as lines rather than
+        as the raw JSON the column holds, because somebody is reading it to
+        write on a label.
+        """
+        address = order.shipping_address or {}
+        if not address:
+            return "-"
+        lines = [
+            address.get("full_name", ""),
+            address.get("line1", ""),
+            address.get("line2", ""),
+            address.get("city", ""),
+            address.get("province", ""),
+            address.get("postal_code", ""),
+            address.get("country", ""),
+            address.get("phone", ""),
+        ]
+        return format_html_join("", "{}<br>", ((line,) for line in lines if line))
 
     @admin.display(description="Invoice")
     def invoice_number(self, order: Order) -> str:
@@ -1055,28 +1679,60 @@ class OrderAdmin(ModelAdmin):
 
     @admin.action(description="Mark as paid")
     def mark_paid(self, request: HttpRequest, queryset: QuerySet[Order]) -> None:
-        """The same settling the payment screen does, from the order's side."""
+        """Settle the payment, and turn the stock this order reserved into a sale."""
+        _apply_transition(self, request, queryset, shop_service.settle_order, "marked paid")
+
+    @admin.action(description="Start picking")
+    def start_processing(self, request: HttpRequest, queryset: QuerySet[Order]) -> None:
+        _apply_transition(
+            self, request, queryset, shop_service.start_processing, "now being picked"
+        )
+
+    @admin.action(description="Mark as sent, with whatever tracking is on the order")
+    def mark_sent(self, request: HttpRequest, queryset: QuerySet[Order]) -> None:
+        """Dispatch, using the carrier and tracking number already saved on each order.
+
+        The action takes no form of its own on purpose: the tracking number
+        arrives one order at a time from whoever printed the label, and it is
+        typed into the order it belongs to. An order sent without one is a
+        legitimate thing -- a shop that hands parcels over a counter has no
+        number to give -- so this does not insist on one.
+        """
         done, refused = 0, []
         for order in queryset:
             try:
-                shop_service.settle_order(order)
+                shop_service.ship_order(
+                    order,
+                    carrier=order.carrier,
+                    tracking_number=order.tracking_number,
+                    tracking_url=order.tracking_url,
+                    actor=request.user,
+                )
             except ShopRefused as refusal:
                 refused.append(f"{order.number}: {refusal}")
             else:
                 done += 1
         if done:
-            self.message_user(request, f"{done} marked paid.", messages.SUCCESS)
+            self.message_user(request, f"{done} marked as sent.", messages.SUCCESS)
         for problem in refused:
             self.message_user(request, problem, messages.ERROR)
 
-    @admin.action(description="Cancel and release the stock")
+    @admin.action(description="Mark as delivered")
+    def mark_completed(self, request: HttpRequest, queryset: QuerySet[Order]) -> None:
+        _apply_transition(self, request, queryset, shop_service.complete_order, "completed")
+
+    @admin.action(description="Cancel, and put the stock back")
     def cancel_orders(self, request: HttpRequest, queryset: QuerySet[Order]) -> None:
-        """The other end of a refused payment: the order is done, so the stock
-        goes back on the shelf."""
+        """For an order nobody paid for. A paid one is refunded instead."""
         done, refused = 0, []
         for order in queryset.select_related("user"):
             try:
-                shop_service.cancel_order(order.user, order.number)
+                shop_service.advance_order(
+                    order,
+                    str(OrderStatus.CANCELLED),
+                    actor=request.user,
+                    note="Cancelled in the admin.",
+                )
             except ShopRefused as refusal:
                 refused.append(f"{order.number}: {refusal}")
             else:
@@ -1085,6 +1741,18 @@ class OrderAdmin(ModelAdmin):
             self.message_user(request, f"{done} cancelled.", messages.WARNING)
         for problem in refused:
             self.message_user(request, problem, messages.ERROR)
+
+    @admin.action(description="Refund, and put the stock back")
+    def refund_orders(self, request: HttpRequest, queryset: QuerySet[Order]) -> None:
+        """The other end of a sale: the money goes back and so does the stock.
+
+        Distinct from cancelling, which is for an order that was never paid for.
+        Refunding also takes the units back out of each product's sales count,
+        so a bestsellers list is not led by something that was all returned.
+        """
+        _apply_transition(
+            self, request, queryset, shop_service.refund_order, "refunded", messages.WARNING
+        )
 
 
 @admin.register(Payment)

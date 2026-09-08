@@ -23,11 +23,15 @@ import strawberry
 from strawberry.types import Info
 
 from apps.shop.graph.types import (
+    AddressInput,
+    AddressRemovedType,
+    AddressType,
     BrandType,
     CartType,
     CategoryNodeType,
     CategoryType,
     CollectionType,
+    CouponPreviewType,
     InvoiceType,
     LikeType,
     ListingSummaryType,
@@ -43,11 +47,14 @@ from apps.shop.graph.types import (
     ReviewType,
     SellerDetailType,
     SellerType,
+    ShippingMethodType,
+    address_type,
     brand_type,
     cart_type,
     category_node_type,
     category_type,
     collection_type,
+    coupon_preview_type,
     invoice_type,
     listing_type,
     order_page_type,
@@ -59,6 +66,7 @@ from apps.shop.graph.types import (
     review_type,
     seller_detail_type,
     seller_type,
+    shipping_method_type,
 )
 from apps.shop.services import ShopNotFound, ShopRefused, shop_service
 from infrastructure.common.errors import ApiError
@@ -274,6 +282,31 @@ class Query:
         except ShopNotFound as error:
             raise _refuse(error) from None
 
+    @strawberry.field(description="Your saved delivery addresses, the default one first.")
+    @resolver
+    def shop_addresses(self, info: Info[Any, Any]) -> list[AddressType]:
+        return [address_type(row) for row in shop_service.addresses(_caller(info))]
+
+    @strawberry.field(
+        description=("Every delivery option, costed for your basket where you are signed in.")
+    )
+    @resolver
+    def shop_shipping_methods(self, info: Info[Any, Any]) -> list[ShippingMethodType]:
+        return [
+            shipping_method_type(row)
+            for row in shop_service.shipping_methods(_optional_caller(info))
+        ]
+
+    @strawberry.field(
+        description="What a coupon code would take off your basket, without using it."
+    )
+    @resolver
+    def shop_coupon_preview(self, info: Info[Any, Any], code: str) -> CouponPreviewType:
+        try:
+            return coupon_preview_type(shop_service.preview_coupon(_caller(info), code))
+        except ShopRefused as error:
+            raise _refuse(error) from None
+
     @strawberry.field(description="The invoice issued against one of your orders.")
     @resolver
     def shop_invoice(self, info: Info[Any, Any], number: str) -> InvoiceType:
@@ -379,6 +412,101 @@ class Mutation:
         return LikeType(
             product=unliked["product"], liked=unliked["liked"], like_count=unliked["like_count"]
         )
+
+    @strawberry.mutation(description="Save somewhere to send an order to.")
+    @resolver
+    def shop_add_address(self, info: Info[Any, Any], address: AddressInput) -> AddressType:
+        try:
+            return address_type(
+                shop_service.add_address(_caller(info), **strawberry.asdict(address))
+            )
+        except ShopRefused as error:
+            raise _refuse(error) from None
+
+    @strawberry.mutation(description="Edit a saved address. Placed orders keep their own copy.")
+    @resolver
+    def shop_update_address(
+        self, info: Info[Any, Any], address_id: str, address: AddressInput
+    ) -> AddressType:
+        try:
+            return address_type(
+                shop_service.update_address(_caller(info), address_id, **strawberry.asdict(address))
+            )
+        except (ShopNotFound, ShopRefused) as error:
+            raise _refuse(error) from None
+
+    @strawberry.mutation(description="Choose the address a checkout offers first.")
+    @resolver
+    def shop_set_default_address(self, info: Info[Any, Any], address_id: str) -> AddressType:
+        try:
+            return address_type(shop_service.set_default_address(_caller(info), address_id))
+        except (ShopNotFound, ShopRefused) as error:
+            raise _refuse(error) from None
+
+    @strawberry.mutation(description="Forget a saved address.")
+    @resolver
+    def shop_remove_address(self, info: Info[Any, Any], address_id: str) -> AddressRemovedType:
+        try:
+            shop_service.remove_address(_caller(info), address_id)
+        except ShopNotFound as error:
+            raise _refuse(error) from None
+        return AddressRemovedType(deleted=True)
+
+    @strawberry.mutation(
+        description="Turn your basket into an order, an invoice and a payment to settle."
+    )
+    @resolver
+    def shop_checkout(
+        self,
+        info: Info[Any, Any],
+        address_id: str,
+        shipping_method_id: str,
+        coupon: str = "",
+        note: str = "",
+    ) -> OrderType:
+        """Stock moves here rather than when the money arrives, so two shoppers
+        on this page for the last one cannot both succeed."""
+        caller_account = _caller(info)
+        try:
+            order = shop_service.checkout(
+                caller_account,
+                address_id=address_id,
+                shipping_method_id=shipping_method_id,
+                coupon_code=coupon,
+                note=note,
+            )
+        except (ShopNotFound, ShopRefused) as error:
+            raise _refuse(error) from None
+        return order_type(shop_service.order(caller_account, order.number))
+
+    @strawberry.mutation(description="Cancel an unpaid order and put its stock back.")
+    @resolver
+    def shop_cancel_order(self, info: Info[Any, Any], number: str) -> OrderType:
+        caller_account = _caller(info)
+        try:
+            order = shop_service.cancel_order(caller_account, number)
+        except (ShopNotFound, ShopRefused) as error:
+            raise _refuse(error) from None
+        return order_type(shop_service.order(caller_account, order.number))
+
+    @strawberry.mutation(description="Settle a pending order's payment.")
+    @resolver
+    def shop_confirm_payment(
+        self, info: Info[Any, Any], number: str, reference: str = ""
+    ) -> OrderType:
+        """The seam a payment provider's callback is pointed at.
+
+        This starter wires up no gateway -- payments are created against the
+        `manual` provider and settled by somebody in the admin looking at a bank
+        statement. This is what a project points a real callback at once it has
+        one, and it settles the order exactly the way the admin does.
+        """
+        caller_account = _caller(info)
+        try:
+            order = shop_service.confirm_payment(caller_account, number, reference=reference)
+        except (ShopNotFound, ShopRefused) as error:
+            raise _refuse(error) from None
+        return order_type(shop_service.order(caller_account, order.number))
 
     @strawberry.mutation(description="Record that somebody looked at a product.")
     @resolver

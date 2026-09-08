@@ -55,7 +55,13 @@ CHOICE_TYPES = frozenset({AttributeType.CHOICE, AttributeType.MULTI_CHOICE})
 #: The types that can tell one variant of a product from another. A variant is
 #: picked from a dropdown -- "red, size 42" -- so the attribute has to have a
 #: finite, enumerable set of values. A number or a date does not.
-VARIANT_TYPES = frozenset({AttributeType.CHOICE, AttributeType.COLOR, AttributeType.TEXT})
+#:
+#: Free text is not one of them, and that is the point. An option is the key a
+#: shopper picks by, so two spellings of it are two variants: "Red" and "Red "
+#: become separate rows, separate stock and a picker offering the same colour
+#: twice. A choice is bounded by the category's own list, and a colour by the
+#: swatches somebody entered -- both are finite by construction.
+VARIANT_TYPES = frozenset({AttributeType.CHOICE, AttributeType.COLOR})
 
 
 def _text(value: Any, _choices: Sequence[str]) -> str:
@@ -166,6 +172,26 @@ NORMALISERS: dict[Any, Callable[[Any, Sequence[str]], Any]] = {
     AttributeType.DATE: _date,
     AttributeType.URL: _url,
 }
+
+
+def parse_filters(pairs: Sequence[str]) -> dict[str, str]:
+    """Parse ``code:value`` filter pairs into what the catalogue search takes.
+
+    Repeated pairs rather than a JSON blob, because this is what a filter
+    sidebar's checkboxes produce and what a shopper can edit in the address bar.
+
+    A malformed pair is ignored rather than refused: a filter somebody mistyped
+    should show them the unfiltered list, not an error page. It lives here, and
+    not in either transport, because "what counts as a filter" is a fact about
+    attributes -- and a REST door and a gRPC door that disagreed about it would
+    answer the same sidebar two different ways.
+    """
+    filters: dict[str, str] = {}
+    for pair in pairs:
+        code, separator, value = pair.partition(":")
+        if separator and code.strip() and value.strip():
+            filters[code.strip()] = value.strip()
+    return filters
 
 
 def normalize_value(attribute_type: Any, value: Any, *, choices: Sequence[str] = ()) -> Any:

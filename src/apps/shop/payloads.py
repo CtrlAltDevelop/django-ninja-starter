@@ -24,6 +24,7 @@ from django.db.models import Prefetch, QuerySet
 
 from apps.shop import options
 from apps.shop.models import (
+    Address,
     Brand,
     Cart,
     CartItem,
@@ -37,8 +38,9 @@ from apps.shop.models import (
     ProductVariant,
     Review,
     Seller,
+    ShippingMethod,
 )
-from apps.shop.pricing import Price
+from apps.shop.pricing import Price, can_fill, is_available, total_stock
 
 
 def brand_payload(brand: Brand) -> dict[str, Any]:
@@ -183,7 +185,26 @@ def _primary_image(product: Product) -> str:
     return images[0].url if images else ""
 
 
-def variant_payload(variant: ProductVariant, price: Price) -> dict[str, Any]:
+def variant_payload(
+    variant: ProductVariant,
+    price: Price,
+    *,
+    product: Product,
+    sellers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """One buyable version of a product, with everybody who has it.
+
+    ``stock`` is the shop's own shelf and ``total_stock`` is every shelf, which
+    are different numbers the moment a second seller lists the same size. A page
+    that had only the first would print "out of stock" over a size three other
+    shops are holding, so both are stated rather than left to be added up.
+
+    ``sellers`` is this variant's slice of the product's offers, already priced.
+    Handing it down rather than making the client join ``offers`` against
+    ``variants`` on an id is the difference between rendering "M -- from three
+    sellers" and rendering it after a second pass over the payload.
+    """
+    offers = sellers or []
     return {
         "id": str(variant.pk),
         "sku": variant.sku,
@@ -191,9 +212,49 @@ def variant_payload(variant: ProductVariant, price: Price) -> dict[str, Any]:
         "options": dict(variant.options),
         "image": variant.image,
         "stock": variant.stock,
-        "in_stock": variant.stock > 0,
+        "total_stock": total_stock(product, variant),
+        "in_stock": is_available(product, variant),
+        "sellers": offers,
+        "seller_count": (1 if can_fill(product, variant) else 0) + len(offers),
         "price": price.payload(),
     }
+
+
+def _option_key(value: Any) -> str:
+    """One option value as a dictionary key. Variant options are strings by type."""
+    return value if isinstance(value, str) else str(value)
+
+
+def variant_option_payload(
+    attribute: CategoryAttribute,
+    variants: list[ProductVariant],
+    available: set[Any],
+) -> dict[str, Any]:
+    """One axis a shopper picks along, with which of its values are still buyable.
+
+    This is the answer to the question a size picker actually asks: not "what
+    sizes exist" -- the category already said that -- but "which of them can I
+    still press". Without it a storefront has to derive availability by scanning
+    every variant for every swatch it draws, and every storefront derives it
+    slightly differently.
+
+    Values are drawn from the variants that exist rather than from the
+    attribute's declared list, so a category that allows four colours and a
+    product that comes in two offers two. They are ordered by the declared list
+    all the same, so every product in a category prints its sizes S, M, L rather
+    than in whatever order somebody happened to add them.
+    """
+    values: dict[str, dict[str, Any]] = {}
+    for variant in variants:
+        if attribute.code not in variant.options:
+            continue
+        key = _option_key(variant.options[attribute.code])
+        row = values.setdefault(key, {"value": key, "in_stock": False, "variants": []})
+        row["variants"].append(str(variant.pk))
+        row["in_stock"] = row["in_stock"] or variant.pk in available
+    declared = {str(choice): index for index, choice in enumerate(attribute.choices)}
+    ordered = sorted(values.values(), key=lambda row: declared.get(row["value"], len(declared)))
+    return {**attribute_payload(attribute), "values": ordered}
 
 
 def product_attribute_payload(value: ProductAttribute) -> dict[str, Any]:
@@ -259,6 +320,16 @@ def product_payload(
     it in.
     """
     prices = variant_prices or {}
+    sold = offers if offers is not None else []
+    # Every seller of every size arrives in one flat list, and the picker needs
+    # them split by which size they are selling. Grouping here rather than
+    # asking the client to join on an id is what lets a variant carry its own
+    # "from three sellers".
+    by_variant: dict[str, list[dict[str, Any]]] = {}
+    for offer in sold:
+        by_variant.setdefault(offer["variant"] or "", []).append(offer)
+    variants = [variant for variant in product.variants.all() if variant.is_active]
+    available = {variant.pk for variant in variants if is_available(product, variant)}
     return {
         **product_summary(product, price),
         "sold_by": seller_payload(product.seller) if product.seller_id else None,
@@ -286,14 +357,18 @@ def product_payload(
             product_attribute_payload(value) for value in product.attribute_values.all()
         ],
         "variant_attributes": [
-            attribute_payload(attribute)
+            variant_option_payload(attribute, variants, available)
             for attribute in product.category.attribute_schema()
             if attribute.is_variant
         ],
         "variants": [
-            variant_payload(variant, prices.get(variant.pk) or price)
-            for variant in product.variants.all()
-            if variant.is_active
+            variant_payload(
+                variant,
+                prices.get(variant.pk) or price,
+                product=product,
+                sellers=by_variant.get(str(variant.pk), []),
+            )
+            for variant in variants
         ],
         "breadcrumbs": [
             {"name": ancestor.name, "slug": ancestor.slug}
@@ -306,8 +381,8 @@ def product_payload(
         },
         "liked": liked,
         "own_review": review_payload(own_review) if own_review else None,
-        "offers": offers if offers is not None else [],
-        "seller_count": (1 if product.seller_id else 0) + len(offers or []),
+        "offers": sold,
+        "seller_count": (1 if product.seller_id else 0) + len(sold),
     }
 
 
@@ -357,11 +432,7 @@ def _line_is_fillable(item: CartItem) -> bool:
     Which shelf to look at follows the same rule the price does: the offer's if
     the line names one, then the variant's, then the product's.
     """
-    if item.offer_id:
-        return item.offer.stock >= item.quantity or item.product.allow_backorder
-    if item.variant_id:
-        return item.variant.stock >= item.quantity
-    return not item.product.track_inventory or item.product.in_stock
+    return can_fill(item.product, item.variant, item.offer, item.quantity)
 
 
 def cart_line_payload(item: CartItem, price: Price) -> dict[str, Any]:
@@ -446,6 +517,11 @@ def order_payload(order: Any) -> dict[str, Any]:
         "note": order.note,
         "payment_status": str(payment.status) if payment else None,
         "invoice": getattr(getattr(order, "invoice", None), "number", None),
+        "carrier": order.carrier,
+        "tracking_number": order.tracking_number,
+        "tracking_url": order.tracking_url,
+        "shipped_at": order.shipped_at,
+        "history": [order_event_payload(event) for event in order.events.all()],
     }
 
 
@@ -462,6 +538,81 @@ def invoice_payload(invoice: Any) -> dict[str, Any]:
         "due_at": invoice.due_at,
         "notes": invoice.notes,
         "order": order_payload(invoice.order),
+    }
+
+
+def address_payload(address: Address) -> dict[str, Any]:
+    """One saved delivery address, as its owner reads it back.
+
+    The account it belongs to is not in here. Every route that returns one has
+    already filtered by the caller, so naming the owner would be publishing a
+    fact the reader supplied.
+    """
+    return {
+        "id": str(address.pk),
+        "label": address.label,
+        "full_name": address.full_name,
+        "phone": address.phone,
+        "country": address.country,
+        "province": address.province,
+        "city": address.city,
+        "postal_code": address.postal_code,
+        "line1": address.line1,
+        "line2": address.line2,
+        "is_default": address.is_default,
+        "created_at": address.created_at,
+        "updated_at": address.updated_at,
+    }
+
+
+def shipping_method_payload(method: ShippingMethod, subtotal: Any = None) -> dict[str, Any]:
+    """One delivery option, costed for the basket that asked.
+
+    ``cost`` is the number the shopper pays and ``price`` is the number on the
+    tin, because "free over 50" is only useful beside a basket: a checkout page
+    that printed the list price would charge a different number one screen
+    later.
+    """
+    cost = method.price if subtotal is None else method.cost_for(subtotal)
+    return {
+        "id": str(method.pk),
+        "name": method.name,
+        "description": method.description,
+        "price": method.price,
+        "cost": cost,
+        "is_free": subtotal is not None and cost <= 0 < method.price,
+        "free_from": method.free_from,
+        "min_days": method.min_days,
+        "max_days": method.max_days,
+        "currency": options.currency(),
+    }
+
+
+def coupon_preview_payload(code: str, saving: Any, refusal: str, subtotal: Any) -> dict[str, Any]:
+    """What a typed-in code is worth on this basket, or why it is worth nothing.
+
+    One shape for both answers rather than an error for the second, because a
+    checkout page asks this question on every keystroke and a 400 per keystroke
+    is not a thing a client should have to handle.
+    """
+    return {
+        "code": code,
+        "is_valid": not refusal,
+        "reason": refusal,
+        "discount": saving,
+        "subtotal": subtotal,
+        "total": subtotal - saving,
+        "currency": options.currency(),
+    }
+
+
+def order_event_payload(event: Any) -> dict[str, Any]:
+    """One step of an order's history. Who took it is the shop's business, not the shopper's."""
+    return {
+        "status": str(event.status),
+        "status_label": event.get_status_display(),
+        "note": event.note,
+        "at": event.created_at,
     }
 
 

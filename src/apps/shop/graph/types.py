@@ -52,6 +52,22 @@ class AttributeType:
 
 
 @strawberry.type
+class OptionValueType:
+    """One value of one variant axis, and whether a shopper can still press it."""
+
+    value: str
+    in_stock: bool
+    variants: list[str]
+
+
+@strawberry.type
+class VariantAttributeType(AttributeType):
+    """A variant axis on a product page: the attribute, plus which values are left."""
+
+    values: list[OptionValueType]
+
+
+@strawberry.type
 class CategorySummaryType:
     id: str
     name: str
@@ -111,18 +127,6 @@ class ImageType:
     alt: str
     caption: str
     is_primary: bool
-
-
-@strawberry.type
-class VariantType:
-    id: str
-    sku: str
-    label: str
-    options: JSON
-    image: str
-    stock: int
-    in_stock: bool
-    price: PriceType
 
 
 @strawberry.type
@@ -189,6 +193,27 @@ class OfferType:
 
 
 @strawberry.type
+class VariantType:
+    """One buyable version of a product, and everybody holding it.
+
+    ``stock`` is the shop's own shelf; ``total_stock`` counts every seller's.
+    Declared after ``OfferType`` because ``sellers`` names it.
+    """
+
+    id: str
+    sku: str
+    label: str
+    options: JSON
+    image: str
+    stock: int
+    total_stock: int
+    in_stock: bool
+    sellers: list[OfferType]
+    seller_count: int
+    price: PriceType
+
+
+@strawberry.type
 class ProductSummaryType:
     """A card: what a listing, a search result and a related row need."""
 
@@ -232,7 +257,7 @@ class ProductType(ProductSummaryType):
     dimensions_mm: DimensionsType | None
     images: list[ImageType]
     attributes: list[ProductAttributeType]
-    variant_attributes: list[AttributeType]
+    variant_attributes: list[VariantAttributeType]
     variants: list[VariantType]
     breadcrumbs: list[BreadcrumbType]
     meta: SeoType
@@ -351,6 +376,21 @@ class OrderType:
     note: str
     payment_status: str | None
     invoice: str | None
+    carrier: str
+    tracking_number: str
+    tracking_url: str
+    shipped_at: datetime | None
+    history: list["OrderEventType"]
+
+
+@strawberry.type
+class OrderEventType:
+    """One step of an order's history, as the shopper is allowed to see it."""
+
+    status: str
+    status_label: str
+    note: str
+    at: datetime
 
 
 @strawberry.type
@@ -370,6 +410,75 @@ class InvoiceType:
     due_at: datetime | None
     notes: str
     order: OrderType
+
+
+@strawberry.type
+class AddressType:
+    """One saved delivery address. The account it belongs to is never on it."""
+
+    id: str
+    label: str
+    full_name: str
+    phone: str
+    country: str
+    province: str
+    city: str
+    postal_code: str
+    line1: str
+    line2: str
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@strawberry.input
+class AddressInput:
+    """A new address, or an edit. Everything but the six a parcel needs has a default."""
+
+    full_name: str
+    phone: str
+    country: str
+    city: str
+    postal_code: str
+    line1: str
+    label: str = "Home"
+    province: str = ""
+    line2: str = ""
+    is_default: bool = False
+
+
+@strawberry.type
+class AddressRemovedType:
+    deleted: bool
+
+
+@strawberry.type
+class ShippingMethodType:
+    """One delivery option, costed for the basket that asked for it."""
+
+    id: str
+    name: str
+    description: str
+    price: Decimal
+    cost: Decimal
+    is_free: bool
+    free_from: Decimal | None
+    min_days: int
+    max_days: int
+    currency: str
+
+
+@strawberry.type
+class CouponPreviewType:
+    """What a code is worth on this basket -- or, in the same shape, why it is not."""
+
+    code: str
+    is_valid: bool
+    reason: str
+    discount: Decimal
+    subtotal: Decimal
+    total: Decimal
+    currency: str
 
 
 @strawberry.type
@@ -461,6 +570,29 @@ def attribute_type(row: dict[str, Any]) -> AttributeType:
         is_variant=row["is_variant"],
         is_filterable=row["is_filterable"],
         help_text=row["help_text"],
+    )
+
+
+def variant_attribute_type(row: dict[str, Any]) -> VariantAttributeType:
+    """A variant axis, with the values a shopper can still pick."""
+    return VariantAttributeType(
+        code=row["code"],
+        name=row["name"],
+        type=row["type"],
+        unit=row["unit"],
+        choices=list(row["choices"]),
+        required=row["required"],
+        is_variant=row["is_variant"],
+        is_filterable=row["is_filterable"],
+        help_text=row["help_text"],
+        values=[
+            OptionValueType(
+                value=value["value"],
+                in_stock=value["in_stock"],
+                variants=list(value["variants"]),
+            )
+            for value in row.get("values", [])
+        ],
     )
 
 
@@ -616,7 +748,9 @@ def product_type(row: dict[str, Any]) -> ProductType:
             )
             for item in row.get("attributes", [])
         ],
-        variant_attributes=[attribute_type(item) for item in row.get("variant_attributes", [])],
+        variant_attributes=[
+            variant_attribute_type(item) for item in row.get("variant_attributes", [])
+        ],
         variants=[
             VariantType(
                 id=variant["id"],
@@ -625,7 +759,10 @@ def product_type(row: dict[str, Any]) -> ProductType:
                 options=variant["options"],
                 image=variant["image"],
                 stock=variant["stock"],
+                total_stock=variant["total_stock"],
                 in_stock=variant["in_stock"],
+                sellers=[offer_type(offer) for offer in variant.get("sellers", [])],
+                seller_count=variant["seller_count"],
                 price=price_type(variant["price"]),
             )
             for variant in row.get("variants", [])
@@ -714,6 +851,65 @@ def order_type(row: dict[str, Any]) -> OrderType:
         note=row["note"],
         payment_status=row.get("payment_status"),
         invoice=row.get("invoice"),
+        carrier=row.get("carrier", ""),
+        tracking_number=row.get("tracking_number", ""),
+        tracking_url=row.get("tracking_url", ""),
+        shipped_at=row.get("shipped_at"),
+        history=[order_event_type(event) for event in row.get("history", [])],
+    )
+
+
+def order_event_type(row: dict[str, Any]) -> OrderEventType:
+    return OrderEventType(
+        status=row["status"],
+        status_label=row["status_label"],
+        note=row["note"],
+        at=row["at"],
+    )
+
+
+def address_type(row: dict[str, Any]) -> AddressType:
+    return AddressType(
+        id=row["id"],
+        label=row["label"],
+        full_name=row["full_name"],
+        phone=row["phone"],
+        country=row["country"],
+        province=row["province"],
+        city=row["city"],
+        postal_code=row["postal_code"],
+        line1=row["line1"],
+        line2=row["line2"],
+        is_default=row["is_default"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def shipping_method_type(row: dict[str, Any]) -> ShippingMethodType:
+    return ShippingMethodType(
+        id=row["id"],
+        name=row["name"],
+        description=row["description"],
+        price=row["price"],
+        cost=row["cost"],
+        is_free=row["is_free"],
+        free_from=row.get("free_from"),
+        min_days=row["min_days"],
+        max_days=row["max_days"],
+        currency=row["currency"],
+    )
+
+
+def coupon_preview_type(row: dict[str, Any]) -> CouponPreviewType:
+    return CouponPreviewType(
+        code=row["code"],
+        is_valid=row["is_valid"],
+        reason=row["reason"],
+        discount=row["discount"],
+        subtotal=row["subtotal"],
+        total=row["total"],
+        currency=row["currency"],
     )
 
 

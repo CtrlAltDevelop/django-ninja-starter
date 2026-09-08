@@ -59,6 +59,20 @@ class Attribute(serializers.Serializer[dict[str, object]]):
     help_text = serializers.CharField()
 
 
+class OptionValue(serializers.Serializer[dict[str, object]]):
+    """One value of one variant axis, and whether a shopper can still press it."""
+
+    value = serializers.CharField()
+    in_stock = serializers.BooleanField()
+    variants = serializers.ListField(child=serializers.CharField())
+
+
+class VariantAttribute(Attribute):
+    """A variant axis on a product page: the attribute, plus which values are left."""
+
+    values = OptionValue(many=True)
+
+
 class Brand(serializers.Serializer[dict[str, object]]):
     id = serializers.CharField()
     name = serializers.CharField()
@@ -84,6 +98,36 @@ class CategorySummary(serializers.Serializer[dict[str, object]]):
     icon = serializers.CharField()
     parent = serializers.CharField()
     product_count = serializers.IntegerField()
+
+
+class SeoMeta(serializers.Serializer[dict[str, object]]):
+    """What a page puts in its head. Falls back to the record's own name and summary."""
+
+    title = serializers.CharField()
+    description = serializers.CharField()
+    keywords = serializers.ListField(child=serializers.CharField())
+
+
+class CategoryDetail(serializers.Serializer[dict[str, object]]):
+    """One category: what it is, where it sits, and the shape of what is in it.
+
+    ``children`` is one level rather than the whole subtree, for the same reason
+    :class:`CategorySummary` carries ``parent``: protobuf cannot declare a
+    self-nesting message without fixing its depth.
+    """
+
+    id = serializers.CharField()
+    name = serializers.CharField()
+    slug = serializers.CharField()
+    description = serializers.CharField()
+    image = serializers.CharField()
+    icon = serializers.CharField()
+    parent = serializers.CharField()
+    product_count = serializers.IntegerField()
+    breadcrumbs = Breadcrumb(many=True)
+    children = CategorySummary(many=True)
+    attributes = Attribute(many=True)
+    meta = SeoMeta()
 
 
 class Seller(serializers.Serializer[dict[str, object]]):
@@ -130,13 +174,21 @@ class ProductAttributeValue(serializers.Serializer[dict[str, object]]):
 
 
 class Variant(serializers.Serializer[dict[str, object]]):
+    """One buyable version of a product, and everybody holding it.
+
+    ``stock`` is the shop's own shelf; ``total_stock`` counts every seller's.
+    """
+
     id = serializers.CharField()
     sku = serializers.CharField()
     label = serializers.CharField()
     options_json = serializers.CharField()
     image = serializers.CharField()
     stock = serializers.IntegerField()
+    total_stock = serializers.IntegerField()
     in_stock = serializers.BooleanField()
+    sellers = Offer(many=True)
+    seller_count = serializers.IntegerField()
     price = Price()
 
 
@@ -180,6 +232,68 @@ class Review(serializers.Serializer[dict[str, object]]):
     status = serializers.CharField()
     created_at = serializers.CharField()
     updated_at = serializers.CharField()
+
+
+class ProductDetail(serializers.Serializer[dict[str, object]]):
+    """A product page: the card, plus everything only the page itself needs.
+
+    Three encodings are worth naming, because protobuf has no null to lean on:
+
+    * ``stock`` is meaningless unless ``track_inventory`` is set -- an untracked
+      product is always buyable, and a zero there would read as "sold out".
+    * A dimension nobody filled in is ``0``, which is the same answer as "this
+      has no length", and for a shipping estimate those are the same thing.
+    * ``sold_by`` and ``own_review`` are left unset rather than nulled: no
+      direct seller, and no review by this caller.
+    """
+
+    id = serializers.CharField()
+    slug = serializers.CharField()
+    name = serializers.CharField()
+    subtitle = serializers.CharField()
+    summary = serializers.CharField()
+    image = serializers.CharField()
+    brand = serializers.CharField()
+    brand_slug = serializers.CharField()
+    seller = serializers.CharField()
+    seller_slug = serializers.CharField()
+    category = serializers.CharField()
+    category_name = serializers.CharField()
+    price = Price()
+    compare_at_price = serializers.CharField()
+    in_stock = serializers.BooleanField()
+    has_variants = serializers.BooleanField()
+    is_featured = serializers.BooleanField()
+    rating_average = serializers.CharField()
+    rating_count = serializers.IntegerField()
+    like_count = serializers.IntegerField()
+    sales_count = serializers.IntegerField()
+    tags = serializers.ListField(child=serializers.CharField())
+    created_at = serializers.CharField()
+    sold_by = Seller()
+    description = serializers.CharField()
+    sku = serializers.CharField()
+    barcode = serializers.CharField()
+    tax_rate = serializers.CharField()
+    status = serializers.CharField()
+    published_at = serializers.CharField()
+    stock = serializers.IntegerField()
+    track_inventory = serializers.BooleanField()
+    allow_backorder = serializers.BooleanField()
+    weight_grams = serializers.IntegerField()
+    length_mm = serializers.IntegerField()
+    width_mm = serializers.IntegerField()
+    height_mm = serializers.IntegerField()
+    images = ProductImage(many=True)
+    attributes = ProductAttributeValue(many=True)
+    variant_attributes = VariantAttribute(many=True)
+    variants = Variant(many=True)
+    breadcrumbs = Breadcrumb(many=True)
+    meta = SeoMeta()
+    liked = serializers.BooleanField()
+    own_review = Review()
+    offers = Offer(many=True)
+    seller_count = serializers.IntegerField()
 
 
 class CartItem(serializers.Serializer[dict[str, object]]):
@@ -228,6 +342,51 @@ class Cart(serializers.Serializer[dict[str, object]]):
     updated_at = serializers.CharField()
 
 
+class Address(serializers.Serializer[dict[str, object]]):
+    """One saved delivery address. Never the account it belongs to."""
+
+    id = serializers.CharField()
+    label = serializers.CharField()
+    full_name = serializers.CharField()
+    phone = serializers.CharField()
+    country = serializers.CharField()
+    province = serializers.CharField()
+    city = serializers.CharField()
+    postal_code = serializers.CharField()
+    line1 = serializers.CharField()
+    line2 = serializers.CharField()
+    is_default = serializers.BooleanField()
+    created_at = serializers.CharField()
+    updated_at = serializers.CharField()
+
+
+class ShippingMethod(serializers.Serializer[dict[str, object]]):
+    """One delivery option, costed for the basket that asked for it."""
+
+    id = serializers.CharField()
+    name = serializers.CharField()
+    description = serializers.CharField()
+    price = serializers.CharField()
+    cost = serializers.CharField()
+    is_free = serializers.BooleanField()
+    free_from = serializers.CharField()
+    min_days = serializers.IntegerField()
+    max_days = serializers.IntegerField()
+    currency = serializers.CharField()
+
+
+class CouponPreview(serializers.Serializer[dict[str, object]]):
+    """What a code is worth on this basket -- or, in the same shape, why it is not."""
+
+    code = serializers.CharField()
+    is_valid = serializers.BooleanField()
+    reason = serializers.CharField()
+    discount = serializers.CharField()
+    subtotal = serializers.CharField()
+    total = serializers.CharField()
+    currency = serializers.CharField()
+
+
 class ListingSummary(serializers.Serializer[dict[str, object]]):
     key = serializers.CharField()
     name = serializers.CharField()
@@ -242,6 +401,17 @@ class CollectionSummary(serializers.Serializer[dict[str, object]]):
     image = serializers.CharField()
 
 
+class Collection(serializers.Serializer[dict[str, object]]):
+    """One hand-curated list, with its products in the order somebody arranged them."""
+
+    id = serializers.CharField()
+    name = serializers.CharField()
+    slug = serializers.CharField()
+    description = serializers.CharField()
+    image = serializers.CharField()
+    products = ProductSummary(many=True)
+
+
 class OrderLine(serializers.Serializer[dict[str, object]]):
     """One line of an order, read off its snapshot rather than the catalogue."""
 
@@ -253,6 +423,15 @@ class OrderLine(serializers.Serializer[dict[str, object]]):
     unit_price = serializers.CharField()
     tax_rate = serializers.CharField()
     line_total = serializers.CharField()
+
+
+class OrderEvent(serializers.Serializer[dict[str, object]]):
+    """One step of an order's history, in the order it happened."""
+
+    status = serializers.CharField()
+    status_label = serializers.CharField()
+    note = serializers.CharField()
+    at = serializers.CharField()
 
 
 class Order(serializers.Serializer[dict[str, object]]):
@@ -274,6 +453,11 @@ class Order(serializers.Serializer[dict[str, object]]):
     note = serializers.CharField()
     payment_status = serializers.CharField()
     invoice = serializers.CharField()
+    carrier = serializers.CharField()
+    tracking_number = serializers.CharField()
+    tracking_url = serializers.CharField()
+    shipped_at = serializers.CharField()
+    history = OrderEvent(many=True)
 
 
 class Invoice(serializers.Serializer[dict[str, object]]):
