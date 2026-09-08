@@ -11,6 +11,25 @@ Authentication is included and opt-in: four login methods, four second factors, 
 social providers and three token modes, each a separate app that installs nothing until
 you name it. Every login ends by minting a signed JWT.
 
+A CMS is included and opt-in like everything else: name it in
+`DJANGO_CMS_ENABLED` and you get pages made of sections made of typed, translatable
+fields, shared sections, menus, drafts with preview links, and an admin screen built
+for whoever writes the copy rather than for whoever wrote the models. Leave it unset
+and the project carries no CMS tables, routes or admin at all.
+
+Notifications come the same way: name them in `DJANGO_NOTIFICATIONS_ENABLED` and
+you get a notification table, a read API and a WebSocket that pushes new ones the
+moment they are created. The connection is useful before it is authenticated —
+anyone who connects hears what was addressed to everybody, and sending a token
+over the same socket adds that account's own feed to it. The socket then does
+everything the endpoints do — the history, the badge, reading, unreading,
+dismissing and restoring — so a client holding one open needs no HTTP client
+beside it, and a badge cleared on a phone clears on the laptop.
+
+The admin is themed with [Unfold](https://unfoldadmin.com) throughout: a dashboard of
+real numbers instead of a list of models, a sidebar built from the apps you actually
+installed, and an environment badge so nobody edits production by mistake.
+
 **[Read the documentation](docs/README.md)** — one page per app, covering its routes,
 models, admin, setup and usage.
 
@@ -68,7 +87,21 @@ make run
 ```
 
 Open <http://127.0.0.1:8000/api/docs> for interactive API documentation. Swagger's
-top bar lets you select any registered API version.
+top bar lets you select any registered API version, and
+<http://127.0.0.1:8000/api/redoc> renders the same schema as a reference to read.
+ReDoc has no selector, so each version is its own page -- `/api/v1/redoc` -- and
+Swagger links across to whichever one its top bar is showing.
+
+If you are signed into the admin as a staff user, the page authorises itself:
+under every token mode but `none` the API reads `Authorization` and ignores
+cookies, so an admin session would otherwise get a `401` from **Try it out**. The
+page trades that session for a real token and fills **Authorize** in. It leaves
+the session alone, it is staff-only, and
+`DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF=false` removes the route entirely. A line
+above the topbar says which of those you got — authorised as whom, or not signed
+in, or signed in without staff — so the page never looks the same whether it
+worked or not.
+[How it works](docs/signing-in.md#trying-the-api-out-from-the-admin).
 
 ## Create a versioned API
 
@@ -94,13 +127,36 @@ Versions accept `v1`, `v1.1`, or `v1.1.0`. App names use lowercase Python identi
 such as `users` or `order_items`. The command refuses to overwrite an existing version or
 register a duplicate prefix.
 
+## See it running
+
+The repository builds its own example project and tours it, offline and with no
+setup beyond the dev install:
+
+```bash
+python examples/walkthrough.py
+```
+
+That builds `example-api` with the packaged generator, copies
+`examples/env.example` in as its `.env` — every login method, second factor,
+social provider and token mode on, plus the CMS and notifications — registers
+the `notes` feature app at v1 and v2 through `manage.py startapi`, and then
+prints a transcript of the calls a real client would make against it. The tour
+covers the WebSocket too, by calling the ASGI application directly rather than
+starting a server, so it needs no uvicorn and no open port.
+`examples/README.md` has the details, and `tests/test_example_project.py` runs
+the whole thing in CI, so the example cannot drift from the package that
+generates it.
+
 ## Architecture
 
 ```text
 src/
-├── apps/                   # User-created business applications
+├── apps/                   # Feature applications: yours, and the two that ship
+│   ├── cms/                # Pages, sections and typed multilingual content
+│   └── notifications/      # Stored notifications, a read API, and a WebSocket
 ├── infrastructure/
 │   ├── common/             # Project-owned foundation application
+│   ├── accounts/           # The user model and the profile attached to it
 │   ├── auth/               # Login methods and second factors
 │   │   ├── core/           # Challenge store, delivery, throttling, credential issuance
 │   │   ├── password/       # Username-or-email and password
@@ -108,14 +164,20 @@ src/
 │   │   ├── sms_code/       # One-time code by SMS
 │   │   ├── magic_link/     # Single-use emailed link
 │   │   └── twofactor/      # TOTP, SMS, email, and recovery second factors
-│   ├── oauth_core/         # Shared clients, scopes, consent, PKCE, and audit models
-│   ├── oauth_sliding/      # Sliding token mode
-│   ├── oauth_session/      # Server-side session mode
-│   └── oauth_rotation/     # Access/refresh rotation mode
+│   └── oauth/
+│       ├── core/           # Shared clients, scopes, consent, PKCE, and audit models
+│       ├── google/         # Social sign-in providers, one app each
+│       ├── apple/
+│       ├── microsoft/
+│       ├── github/
+│       ├── sliding/        # Sliding token mode
+│       ├── session/        # Server-side session mode
+│       └── rotation/       # Access/refresh rotation mode
 └── config/
     ├── settings/           # Base, development, test, and production settings
     ├── api.py              # Versioned NinjaAPI composition root
-    ├── urls.py
+    ├── urls.py             # Where an HTTP request is routed
+    ├── sockets.py          # Where a WebSocket connection is routed
     ├── asgi.py
     └── wsgi.py
 ```
@@ -233,6 +295,8 @@ A successful first factor returns either a credential or a ticket:
 {"requires_second_factor": true, "login_ticket": "...", "methods": ["totp"]}
 ```
 
+Both are the `data` of [the response envelope](docs/responses.md).
+
 The client then posts the ticket and a code to `POST /auth/2fa/verify`. For `sms` and `email`
 factors it first calls `POST /auth/2fa/challenge` to have a code sent; that returns the *same*
 ticket, so the client only ever tracks one. Enrolment lives at `POST /auth/2fa/totp/enroll`,
@@ -303,13 +367,74 @@ Each method, factor, provider and token mode has its own page under [`docs/`](do
 covering its routes, models, admin, setup and usage. Start with
 [credentials and token modes](docs/credentials.md).
 
+## Feature apps
+
+Two applications ship in `src/apps/` rather than in `src/infrastructure/`, because
+they are features a project chooses rather than plumbing under it. Both are opt-in
+the same way a login method is, both live entirely in their own directory, and
+neither imports anything from the project around it — so either can be copied into
+another Django project or deleted from this one without leaving a hole.
+
+| App | Enabled by | What you get |
+| --- | --- | --- |
+| [`cms`](docs/cms.md) | `DJANGO_CMS_ENABLED=true` | Pages made of sections made of typed, translatable fields; a library of shared sections; menus; drafts, schedules and signed preview links; export/import for moving content between environments; and a content-editing admin screen separate from the structural one |
+| [`notifications`](docs/notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | A notification table addressed to one account or to everybody; per-account read and dismiss receipts, so a broadcast is read and cleared by each person separately; a scoped read API with the same surface over REST, GraphQL, gRPC and a WebSocket that pushes new ones on save and keeps a second device in step; and a retention command |
+| [`shop`](docs/shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare the attributes their products answer; products, variants and stock; timed discount campaigns; search, filters and named listings; reviews and likes; a basket per account; and an order, coupon and payment cycle that reserves stock when the order is placed |
+
+The CMS and notifications are toured end to end by `python examples/walkthrough.py`.
+
+### The notification socket needs an ASGI server
+
+`manage.py runserver` is WSGI and will never serve a WebSocket — the connection
+simply never opens, which is a confusing way to find out. The project ships
+`make serve` for this, which is `uvicorn config.asgi:application --reload
+--app-dir src` and needs the `asgi` extra that `dev` already pulls in.
+
+`config/sockets.py` is where a `websocket` scope is routed, deliberately the
+project's file rather than an app's: an app publishes a socket application the way
+it publishes a router, and the project decides whether it is mounted and where. A
+path with nothing on it is closed with code `4404` rather than left hanging.
+
+In production, set `DJANGO_NOTIFICATIONS_BROKER` to
+`apps.notifications.broadcast.RedisBroker`. The default `MemoryBroker` fans out
+inside a single process, so under two workers a client connected to the first
+never hears about a notification created by the second; `manage.py check` warns
+while it is still in place.
+
+## One shape for every response
+
+Every JSON body — a payload, a refusal, a validation failure — arrives in the same
+envelope, so a client parses it once:
+
+```json
+{
+  "errors": null,
+  "data": { "token_type": "bearer", "access_token": "eyJhbGciOi..." },
+  "isSuccess": true,
+  "statusCode": 200,
+  "title": "SUCCESS",
+  "description": "The request succeeded."
+}
+```
+
+`title` is a member of a fixed enum — `INVALID_CREDENTIALS`, `CODE_EXPIRED`,
+`TOKEN_REUSED` — so a client keys its own translations off it instead of showing
+an English sentence to everyone. Endpoints go on returning their own schemas; the
+wrapping happens once, at the renderer, and `/api/docs` documents it.
+[Full reference](docs/responses.md).
+
 ## Included endpoints
 
 - `GET /api/v1/health/live` — confirms that the web process is serving requests
 - `GET /api/v1/health/ready` — confirms that the database is available
 - `GET /api/docs` — Swagger documentation with an API-version selector
 - `GET /api/<version>/docs` — Swagger documentation opened on a specific version
+- `GET /api/redoc` — the same schema as a ReDoc reference, on the default version
+- `GET /api/<version>/redoc` — the ReDoc reference for a specific version
 - `GET /api/<version>/openapi.json` — OpenAPI schema for a specific version
+- `WS /ws/notifications` — the notification feed, when notifications are enabled.
+  An ASGI server is required; `manage.py runserver` is WSGI and will never serve
+  it. Use `make serve`.
 
 ## Configuration
 
@@ -318,6 +443,7 @@ variables as needed:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
+| `DJANGO_ENV_FILE` | Env file to load, relative to the project root; empty loads none | `.env` |
 | `DJANGO_SETTINGS_MODULE` | Active settings module | `config.settings.development` |
 | `DJANGO_SECRET_KEY` | Django signing key | Unsafe development value |
 | `DJANGO_ALLOWED_HOSTS` | Comma-separated hostnames | `localhost,127.0.0.1` in `.env.example` |
@@ -344,6 +470,27 @@ variables as needed:
 | `DJANGO_AUTH_AUTO_CREATE_USERS` | Create an account on first passwordless sign-in | `true` |
 | `DJANGO_AUTH_TOTP_ISSUER` | Name shown in authenticator apps | `Django Ninja Starter` |
 | `DJANGO_AUTH_RECOVERY_CODE_COUNT` | Codes issued per batch, from 5 through 30 | `10` |
+| `DJANGO_AUTH_SESSION_TOKEN_FOR_STAFF` | Let a staff session be traded for a bearer token, which is what lets `/api/docs` authorise itself | `true` |
+| `DJANGO_CMS_ENABLED` | Install the CMS: its tables, routes and admin | `false` |
+| `DJANGO_CMS_LANGUAGES` | Languages content may be written in, most preferred first | `LANGUAGE_CODE` |
+| `DJANGO_CMS_PREVIEW_TTL_SECONDS` | How long a preview link opens a draft for | `86400` |
+| `DJANGO_NOTIFICATIONS_ENABLED` | Install notifications: tables, routes and the WebSocket | `false` |
+| `DJANGO_NOTIFICATIONS_BROKER` | Dotted path to the fan-out backend | `MemoryBroker` (one process only) |
+| `DJANGO_NOTIFICATIONS_REDIS_URL` | Redis backing `RedisBroker` | `DJANGO_AUTH_REDIS_URL` |
+| `DJANGO_NOTIFICATIONS_WS_PATH` | Path the notification socket is mounted at | `/ws/notifications` |
+| `DJANGO_NOTIFICATIONS_CHANNEL_PREFIX` | Namespace for the broker's channels | `notifications` |
+| `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG` | Unread a client is caught up with on connect, 0 through 500 | `20` |
+| `DJANGO_NOTIFICATIONS_RETENTION_DAYS` | How long `manage.py notifications_prune` keeps a notification. `0` keeps everything, and nothing is deleted until you run the command | `0` |
+| `DJANGO_GRAPHQL_ENABLED` | Publish the GraphQL endpoint at `/graphql` | `true` |
+| `DJANGO_GRAPHQL_GRAPHIQL` | The in-browser query editor. On in the development settings; an unauthenticated schema browser if left on in production | `false` |
+| `DJANGO_GRPC_ENABLED` | Register the gRPC services | `true` |
+| `DJANGO_GRPC_PORT` | Port `manage.py grpcrunaioserver` listens on | `50051` |
+| `DJANGO_SHOP_ENABLED` | Install the shop: its tables, routes and admin | `false` |
+| `DJANGO_SHOP_CURRENCY` | ISO 4217 code every price is quoted in | `USD` |
+| `DJANGO_SHOP_REVIEW_MODERATION` | Hold a review for a moderator before it is readable | `true` |
+| `DJANGO_SHOP_MAX_ITEM_QUANTITY` | Most of one product a single basket line may hold | `99` |
+| `DJANGO_SHOP_PAGE_SIZE` | Rows a listing returns when the caller does not say | `24` |
+| `DJANGO_SHOP_MAX_PAGE_SIZE` | Ceiling on `limit`, so one request cannot ask for the catalogue | `100` |
 | `DJANGO_DB_ENGINE` | Django database backend | SQLite |
 | `DJANGO_DB_NAME` | Database name or path | `db.sqlite3` |
 | `DJANGO_DB_USER` | Database user | Empty |
@@ -366,7 +513,9 @@ make package     # build and validate wheel and source distribution
 make migrations  # create migrations
 make migrate     # apply migrations
 make superuser   # create an admin user
-make run          # start the development server
+make run         # start the development server (WSGI: no WebSocket)
+make serve       # start an ASGI server, which does serve the WebSocket
+make example     # build the example project and tour every app in it
 ```
 
 ## Package maintenance and publishing

@@ -20,7 +20,7 @@ def _signup(client: Client, identifier: str = "zoe", email: str = "zoe@example.c
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    return response.json()
+    return response.json()["data"]
 
 
 def test_signup_returns_a_usable_credential(db: None) -> None:
@@ -41,7 +41,7 @@ def test_signup_refuses_a_weak_password(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert "detail" in response.json()
+    assert response.json()["description"]
 
 
 def test_signup_refuses_a_taken_username(db: None) -> None:
@@ -69,7 +69,7 @@ def test_login_accepts_the_username_or_the_email(db: None) -> None:
         )
 
         assert response.status_code == 200, identifier
-        assert response.json()["credentials"]["access_token"]
+        assert response.json()["data"]["credentials"]["access_token"]
 
 
 def test_login_rejects_a_wrong_password(db: None) -> None:
@@ -94,7 +94,7 @@ def test_an_unknown_account_answers_like_a_wrong_password(db: None) -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "Those credentials are not valid."
+    assert response.json()["description"] == "Those credentials are not valid."
 
 
 def test_a_disabled_account_cannot_sign_in(db: None) -> None:
@@ -160,7 +160,7 @@ def test_reset_replaces_the_password_and_kills_live_tokens(db: None) -> None:
         content_type="application/json",
     )
     assert forgot.status_code == 200
-    ticket = forgot.json()["ticket"]
+    ticket = forgot.json()["data"]["ticket"]
     code = delivery.outbox[-1].body.rsplit(": ", 1)[1]
 
     new_password = "another-g00d-secret"
@@ -189,12 +189,12 @@ def test_forgot_answers_the_same_for_an_unknown_address(db: None) -> None:
         "/api/v1/auth/password/forgot",
         {"email": "zoe@example.com"},
         content_type="application/json",
-    ).json()
+    ).json()["data"]
     unknown = client.post(
         "/api/v1/auth/password/forgot",
         {"email": "ghost@example.com"},
         content_type="application/json",
-    ).json()
+    ).json()["data"]
 
     assert known.keys() == unknown.keys()
     assert known["detail"] == unknown["detail"]
@@ -207,7 +207,7 @@ def test_a_decoy_reset_ticket_cannot_set_a_password(db: None) -> None:
         "/api/v1/auth/password/forgot",
         {"email": "ghost@example.com"},
         content_type="application/json",
-    ).json()["ticket"]
+    ).json()["data"]["ticket"]
 
     for code in (f"{index:06d}" for index in range(5)):
         response = client.post(
@@ -237,7 +237,7 @@ def test_change_requires_the_current_password(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert "current password" in response.json()["detail"]
+    assert "current password" in response.json()["description"]
 
 
 def test_change_updates_the_password_and_revokes_tokens(db: None) -> None:
@@ -275,7 +275,7 @@ def test_signup_refuses_a_blank_identifier(db: None) -> None:
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Enter a username."
+    assert response.json()["description"] == "Enter a username."
 
 
 def test_signup_refuses_a_malformed_email(db: None) -> None:
@@ -323,7 +323,7 @@ def test_forgot_treats_an_ambiguous_email_like_an_unknown_one(db: None) -> None:
         )
 
     assert response.status_code == 200
-    assert response.json()["ticket"]
+    assert response.json()["data"]["ticket"]
     assert delivery.outbox == [], "no code may be sent when the account is ambiguous"
 
 
@@ -345,7 +345,7 @@ def test_reset_enforces_the_password_policy(db: None) -> None:
         {"email": "zoe@example.com"},
         content_type="application/json",
     )
-    ticket = forgot.json()["ticket"]
+    ticket = forgot.json()["data"]["ticket"]
     code = delivery.outbox[-1].body.rsplit(": ", 1)[1]
 
     response = client.post(
@@ -364,7 +364,7 @@ def test_reset_rejects_a_wrong_code(db: None) -> None:
         "/api/v1/auth/password/forgot",
         {"email": "zoe@example.com"},
         content_type="application/json",
-    ).json()["ticket"]
+    ).json()["data"]["ticket"]
 
     response = client.post(
         "/api/v1/auth/password/reset",

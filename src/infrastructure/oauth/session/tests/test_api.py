@@ -7,6 +7,7 @@ mode -- both the settings value and the router mounted at ``/auth/token``.
 from typing import Any
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.test import Client
 
 from infrastructure.oauth.session.models import OAuthSession, SessionAccessToken, SessionRevocation
@@ -33,7 +34,7 @@ def _login(client: Client, identifier: str = "zoe") -> dict[str, Any]:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    credentials: dict[str, Any] = response.json()["credentials"]
+    credentials: dict[str, Any] = response.json()["data"]["credentials"]
     return credentials
 
 
@@ -46,7 +47,7 @@ def test_refreshing_mints_a_new_access_token_for_the_same_session(db: None) -> N
     )
 
     assert response.status_code == 200, response.content
-    fresh = response.json()
+    fresh = response.json()["data"]
     assert fresh["access_token"] != original["access_token"]
     assert fresh["session_id"] == original["session_id"]
     assert SessionAccessToken.objects.count() == 2
@@ -59,7 +60,7 @@ def test_the_session_key_is_handed_straight_back(db: None) -> None:
 
     fresh = client.post(
         REFRESH, {"refresh_token": original["refresh_token"]}, content_type="application/json"
-    ).json()
+    ).json()["data"]
 
     assert fresh["refresh_token"] == original["refresh_token"]
 
@@ -70,7 +71,7 @@ def test_both_the_old_and_new_access_tokens_still_work(db: None) -> None:
     original = _login(client)
     fresh = client.post(
         REFRESH, {"refresh_token": original["refresh_token"]}, content_type="application/json"
-    ).json()
+    ).json()["data"]
 
     for token in (original["access_token"], fresh["access_token"]):
         assert client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {token}").status_code == 200
@@ -112,7 +113,7 @@ def test_refreshing_a_revoked_session_is_refused(db: None) -> None:
     )
 
     assert response.status_code == 401
-    assert "Sign in again" in response.json()["detail"]
+    assert "Sign in again" in response.json()["description"]
 
 
 def test_refreshing_needs_a_token(db: None) -> None:
@@ -133,7 +134,9 @@ def test_sessions_reports_the_active_mode(db: None) -> None:
     client = Client()
     credentials = _login(client)
 
-    body = client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}").json()
+    body = client.get(SESSIONS, HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}").json()[
+        "data"
+    ]
 
     assert body["mode"] == "session"
     assert [entry["session_id"] for entry in body["sessions"]] == [credentials["session_id"]]
@@ -169,4 +172,30 @@ def test_a_signed_key_for_a_session_that_no_longer_exists_is_refused(db: None) -
     )
 
     assert response.status_code == 401
-    assert "not valid" in response.json()["detail"]
+    assert "not valid" in response.json()["description"]
+
+
+def test_ending_a_malformed_session_id_is_a_not_found(db: None) -> None:
+    """A path segment that is not a UUID is no session, not a server error."""
+    client = Client()
+    credentials = _login(client)
+
+    response = client.delete(
+        f"{SESSIONS}/not-a-uuid",
+        HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}",
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_browser_session_can_be_exchanged_for_this_mode_s_credential(db: None) -> None:
+    """The exchange is mode-independent, so it has to issue into this mode's tables."""
+    user = get_user_model()._default_manager.create_user(username="zoe")
+    client = Client()
+    client.force_login(user)
+
+    response = client.post("/api/v1/auth/token/exchange")
+
+    assert response.status_code == 200, response.content
+    assert response.json()["data"]["token_type"] == "bearer"
+    assert OAuthSession.objects.filter(user=user).count() == 1

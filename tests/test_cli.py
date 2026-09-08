@@ -15,7 +15,7 @@ def test_create_project_renders_complete_starter(tmp_path: Path) -> None:
     assert (target / ".env.example").is_file()
     assert (target / ".github/workflows/ci.yml").is_file()
     assert (target / "src/apps/__init__.py").is_file()
-    assert (target / "src/infrastructure/common/api.py").is_file()
+    assert (target / "src/infrastructure/common/rest/api.py").is_file()
     assert 'name = "billing-api"' in (target / "pyproject.toml").read_text()
     assert 'title="Billing Api API"' in (target / "src/config/api.py").read_text()
 
@@ -72,6 +72,42 @@ def test_generated_project_runs_its_own_tests(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_new_project_carries_no_optional_app(tmp_path: Path) -> None:
+    """Nothing optional is installed by being shipped, the CMS included.
+
+    A generated project runs the content app's migrations, publishes its routes
+    and shows its admin only once somebody names it -- the same contract every
+    login method and provider has.
+    """
+    target = create_project("bare", tmp_path / "bare")
+
+    result = subprocess.run(
+        [sys.executable, "manage.py", "shell", "-c", INSTALLED_REPORT],
+        cwd=target,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**_pristine_environment(), "DJANGO_SETTINGS_MODULE": "config.settings.development"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    reported = dict(
+        line.split("=", 1) for line in result.stdout.splitlines() if "=" in line.split(" ")[0]
+    )
+    assert reported["cms"] == "off"
+    assert reported["cms_routes"] == "0"
+    assert reported["methods"] == ""
+
+
+INSTALLED_REPORT = """
+from django.conf import settings
+
+print("cms=" + ("on" if settings.CMS_ENABLED else "off"))
+print("cms_routes=" + str(len(settings.CMS_ROUTERS)))
+print("methods=" + ",".join(settings.AUTH_METHODS))
+"""
 
 
 @pytest.mark.parametrize("name", ["", "123-api", "spaces are invalid", "bad/name"])

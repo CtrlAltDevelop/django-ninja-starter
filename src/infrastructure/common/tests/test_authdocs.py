@@ -38,6 +38,26 @@ def test_every_app_has_a_page() -> None:
     assert missing == []
 
 
+def test_every_app_this_project_ships_is_one_of_them() -> None:
+    """The other half of the promise: no app is documented *by omission*.
+
+    `documented_apps` reports the apps the generator knows about. This asserts
+    that set is everything this repository actually ships -- so adding an app
+    without a page fails here rather than being noticed a year later by somebody
+    looking for the page that was never written.
+    """
+    from django.apps import apps as django_apps
+
+    shipped = {
+        config.label
+        for config in django_apps.get_app_configs()
+        if config.name.startswith("infrastructure.")
+    }
+    documented = {app.label for app in documented_apps(DOCS)}
+
+    assert shipped - documented == set()
+
+
 @pytest.mark.parametrize("section", SECTIONS)
 def test_every_page_carries_every_generated_section(section: str) -> None:
     """A page missing a block would silently document three things out of four."""

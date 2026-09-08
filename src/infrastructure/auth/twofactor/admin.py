@@ -1,13 +1,14 @@
 """Admin for second-factor enrolments and recovery codes."""
 
 from django.contrib import admin
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
 from infrastructure.auth.twofactor.models import RecoveryCode, SecondFactor
 from infrastructure.common.admin import ReadOnlyAdmin
 
 
 @admin.register(SecondFactor)
-class SecondFactorAdmin(admin.ModelAdmin):
+class SecondFactorAdmin(UnfoldModelAdmin):
     """Enrolled factors.
 
     The shared secret is never shown or editable -- it is stored encrypted and an

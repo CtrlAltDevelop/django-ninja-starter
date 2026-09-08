@@ -81,9 +81,9 @@ widens or narrows who can get in.
 
 Send the browser to `/api/v1/oauth/microsoft/start`. On success the callback
 redirects to `next_url` and the account is signed in with whatever credential the
-active [token mode](../credentials.md) issues. On failure it answers `400` with a
-`detail` explaining what went wrong, and the reason is also recorded on the
-`SocialLoginAttempt` row.
+active [token mode](../credentials.md) issues. On failure it answers `400` with the title
+`OAUTH_FAILED` and a `description` explaining what went wrong, and the reason is
+also recorded on the `SocialLoginAttempt` row.
 
 Link a provider to an account that already exists by calling `/start` while
 authenticated.

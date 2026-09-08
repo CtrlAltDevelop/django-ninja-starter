@@ -1,13 +1,16 @@
 name: CI
 
 on:
-  push:
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  # Every pull request runs the suite, and a pull request into `main` runs this
+  # and nothing else: the branch has already been through the whole pipeline on
+  # its way into `develop`, and repeating the packaging, the wheel smoke test
+  # and the example tour to merge a reviewed branch buys minutes, not safety.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -17,8 +20,22 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -e '.[dev]'
-      - run: make check
       - run: make test
+
+  # Everything else a merge could break: the linters and the type checker, the
+  # wheel, and the published generator building and touring a real project.
+  # Skipped for a pull request into `main`.
+  verify:
+    if: github.base_ref != 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - run: make check
       - run: make package
       - name: Smoke-test the built wheel
         run: |
@@ -29,5 +46,18 @@ jobs:
           /tmp/django-ninja-starter-wheel/bin/pip install -e 'example-api[dev]'
           cd example-api
           /tmp/django-ninja-starter-wheel/bin/python manage.py startapi example --api-version v2
+          # `startapi` scaffolds a gRPC service and says so; its stubs do not
+          # exist until this runs, and `make check` type-checks the import of
+          # them. Doing it here is the workflow the command itself prints.
+          /tmp/django-ninja-starter-wheel/bin/python manage.py protos
           PATH="/tmp/django-ninja-starter-wheel/bin:$PATH" make check
           PATH="/tmp/django-ninja-starter-wheel/bin:$PATH" make test
+      - name: Build and tour the example project from that wheel
+        # The wheel's own django-ninja-starter is first on the path here, so
+        # this is the published generator building the example, not the
+        # checkout's copy of it.
+        run: |
+          /tmp/django-ninja-starter-wheel/bin/python examples/build.py \
+            --into /tmp/example-tour --rebuild
+          /tmp/django-ninja-starter-wheel/bin/python examples/walkthrough.py \
+            --project /tmp/example-tour

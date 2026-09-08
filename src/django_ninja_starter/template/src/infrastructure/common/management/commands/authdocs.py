@@ -34,11 +34,15 @@ from django.conf import settings
 from django.contrib import admin
 from django.core.management.base import BaseCommand, CommandError
 
-from infrastructure.common.admin import ReadOnlyAdmin, RevocableAdmin
+from infrastructure.common.admin import RevocableAdmin
 from infrastructure.common.appsettings import AppSettings
+from infrastructure.common.registry import load_api_registry
 
 SECTIONS = ("routes", "models", "admin", "settings")
-PROJECT_LABELS = frozenset({"accounts"})
+# Apps that are this project's own rather than one of the auth/oauth families,
+# and still get a page: the foundation every project carries, the accounts it
+# resolves to, and the optional feature apps.
+PROJECT_LABELS = frozenset({"accounts", "common", "cms", "notifications", "shop"})
 NONE = "_None._"
 
 
@@ -57,19 +61,35 @@ def _marker(section: str) -> tuple[str, str]:
 
 
 def _router_owners() -> dict[str, str]:
-    """Map an app label to the URL prefix its router is mounted at."""
+    """Map an app label to the URL prefix its router is mounted at.
+
+    Every way this project mounts a router is read, not just the auth ones: the
+    settings lists, and the declarative registry that feature APIs are added
+    through. An app whose routes are documented from one source and mounted from
+    another is exactly the drift these pages exist to prevent.
+    """
     owners: dict[str, str] = {}
-    routes = (
-        *settings.ACCOUNT_ROUTERS,
-        *settings.OAUTH_PROVIDER_ROUTERS,
-        *settings.AUTH_METHOD_ROUTERS,
-        *settings.AUTH_TOKEN_ROUTERS,
-    )
+    routes: list[dict[str, Any]] = []
+    # Every settings list this project mounts routers from, found by the naming
+    # convention rather than by name. Listing them individually is how the next
+    # optional app gets a page that says it publishes no routes.
+    for name in dir(settings):
+        if name.endswith("_ROUTERS"):
+            routes.extend(dict(route) for route in getattr(settings, name))
+    for configuration in load_api_registry().values():
+        routes.extend(dict(route) for route in configuration["routes"])
+
     for route in routes:
-        package = str(route["router"]).rsplit(".api.router", 1)[0]
-        for config in apps.get_app_configs():
-            if config.name == package:
-                owners[config.label] = str(route["prefix"])
+        path = str(route["router"])
+        # Longest match wins, so `infrastructure.common` beats `infrastructure`
+        # and `apps.cms` is found whatever its router module is called.
+        owner = max(
+            (config for config in apps.get_app_configs() if path.startswith(f"{config.name}.")),
+            key=lambda config: len(config.name),
+            default=None,
+        )
+        if owner is not None:
+            owners[owner.label] = str(route["prefix"])
     return owners
 
 
@@ -185,6 +205,23 @@ def _models_table(label: str) -> str:
     return "\n".join(blocks).rstrip()
 
 
+def _refuses_editing(model_admin: Any) -> bool:
+    """Whether this admin is read-only, asked of the admin rather than of its base class.
+
+    An app meant to be copied into another project cannot inherit this project's
+    ``ReadOnlyAdmin`` -- that base imports Unfold directly -- so a check by
+    ``isinstance`` would quietly report such an app's audit table as editable.
+
+    It is a declared attribute rather than a call to ``has_add_permission``,
+    because those methods answer for a *caller* and are free to consult the
+    database to do it: a singleton admin refuses a second row by counting the
+    rows. Documentation is generated without a database, and a table that read
+    differently depending on whether one was open would be worse than one that
+    is occasionally out of date.
+    """
+    return bool(getattr(model_admin, "read_only_admin", False))
+
+
 def _admin_notes(label: str) -> str:
     config = apps.get_app_config(label)
     models = [model for model in config.get_models() if model in admin.site._registry]
@@ -198,7 +235,7 @@ def _admin_notes(label: str) -> str:
         model_admin = admin.site._registry[model]
         if isinstance(model_admin, RevocableAdmin):
             editable = "No — revocable only"
-        elif isinstance(model_admin, ReadOnlyAdmin):
+        elif _refuses_editing(model_admin):
             editable = "No — read-only"
         else:
             editable = "Yes"
@@ -208,9 +245,29 @@ def _admin_notes(label: str) -> str:
     return "\n".join(lines)
 
 
-def _settings_table(spec: AppSettings | None) -> str:
+def _settings_table(app: "DocumentedApp") -> str:
+    """The app's settings contract, however it chose to declare one.
+
+    An app that is part of this project's infrastructure declares an
+    :class:`AppSettings` and gets its requirements validated by a system check
+    as well as documented here. An app meant to be copied elsewhere cannot
+    import that class without dragging the project with it, so it may instead
+    carry ``settings_docs``: rows of plain strings, which document but do not
+    validate. Both end up in the same table.
+    """
+    spec = app.spec
     if spec is None or not spec.requirements:
-        return "_This app requires no settings of its own._"
+        rows = getattr(apps.get_app_config(app.label), "settings_docs", ())
+        if not rows:
+            return "_This app requires no settings of its own._"
+        lines = [
+            "| Environment variable | Required | Purpose |",
+            "| --- | --- | --- |",
+        ]
+        lines.extend(
+            f"| `{variable}` | {level} | {purpose}. |" for variable, level, purpose in rows
+        )
+        return "\n".join(lines)
     lines = [
         "| Environment variable | Required | Purpose |",
         "| --- | --- | --- |",
@@ -222,9 +279,15 @@ def _settings_table(spec: AppSettings | None) -> str:
             level = "Recommended"
         else:
             level = "Optional"
+        # A one-sided bound is written as one, not as a range with a `None` in
+        # it: "Range 0–None" is worse than saying nothing about the top.
         bounds = ""
-        if requirement.minimum is not None or requirement.maximum is not None:
+        if requirement.minimum is not None and requirement.maximum is not None:
             bounds = f" Range {requirement.minimum}–{requirement.maximum}."
+        elif requirement.minimum is not None:
+            bounds = f" {requirement.minimum} or more."
+        elif requirement.maximum is not None:
+            bounds = f" {requirement.maximum} or less."
         lines.append(f"| `{requirement.env}` | {level} | {requirement.purpose}.{bounds} |")
     return "\n".join(lines)
 
@@ -254,7 +317,7 @@ def _render(app: DocumentedApp, text: str) -> str:
         "routes": _routes_table(app.prefix),
         "models": _models_table(app.label),
         "admin": _admin_notes(app.label),
-        "settings": _settings_table(app.spec),
+        "settings": _settings_table(app),
     }
     for section, content in generated.items():
         opening, closing = _marker(section)

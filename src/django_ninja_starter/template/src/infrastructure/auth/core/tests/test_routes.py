@@ -53,6 +53,8 @@ TWO_FACTOR_ROUTES = {
     ("DELETE", "/auth/2fa/{method}"),
 }
 TOKEN_ROUTES = {
+    ("POST", "/auth/token/exchange"),
+    ("POST", "/auth/token/from-session"),
     ("POST", "/auth/token/refresh"),
     ("POST", "/auth/token/revoke"),
     ("GET", "/auth/token/sessions"),
@@ -138,7 +140,7 @@ def test_the_token_router_follows_the_active_mode() -> None:
         assert routers == []
         return
     assert [route["prefix"] for route in routers] == ["/auth/token"]
-    assert routers[0]["router"] == (f"infrastructure.oauth.{settings.AUTH_TOKEN_MODE}.api.router")
+    assert routers[0]["router"] == (f"infrastructure.oauth.{settings.AUTH_TOKEN_MODE}.rest.router")
 
 
 def test_enabled_methods_install_their_apps() -> None:

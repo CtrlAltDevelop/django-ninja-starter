@@ -30,7 +30,7 @@ def test_the_token_is_only_ever_in_the_email(db: None) -> None:
         LOGIN_START, {"email": "zoe@example.com"}, content_type="application/json"
     )
 
-    body = response.json()
+    body = response.json()["data"]
     assert set(body) == {"detail", "destination", "expires_in"}
     assert _emailed_token() not in response.content.decode()
 
@@ -48,7 +48,7 @@ def test_following_a_signup_link_creates_the_account(db: None) -> None:
     response = client.post(VERIFY, {"token": token}, content_type="application/json")
 
     assert response.status_code == 200
-    assert response.json()["credentials"]["access_token"]
+    assert response.json()["data"]["credentials"]["access_token"]
     assert get_user_model()._default_manager.filter(email="zoe@example.com").exists()
 
 
@@ -116,7 +116,7 @@ def _credentials(client: Client) -> dict:
     token = _start(client, LOGIN_START)
     response = client.post(VERIFY, {"token": token}, content_type="application/json")
     assert response.status_code == 200, response.content
-    return response.json()["credentials"]
+    return response.json()["data"]["credentials"]
 
 
 def test_signup_start_reports_where_the_link_went(db: None) -> None:
@@ -125,7 +125,7 @@ def test_signup_start_reports_where_the_link_went(db: None) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["destination"] == "z***@example.com"
+    assert response.json()["data"]["destination"] == "z***@example.com"
     assert delivery.outbox[-1].destination == "zoe@example.com"
 
 

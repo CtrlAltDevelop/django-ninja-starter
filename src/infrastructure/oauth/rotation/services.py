@@ -20,14 +20,17 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
 from infrastructure.oauth.core import jwt_tokens
 from infrastructure.oauth.core.credentials import (
     IssuedCredentials,
+    by_public_id,
     client_ip,
     sign_pair,
     token_model,
     user_agent,
 )
+from infrastructure.oauth.core.services import SessionList, SessionView, TokenModeService
 from infrastructure.oauth.core.tokens import hash_token
 
 MODE = "rotation"
@@ -75,7 +78,7 @@ def rotate(request: HttpRequest, refresh_token: str) -> IssuedCredentials:
     try:
         handle = jwt_tokens.decode(refresh_token, token_type=jwt_tokens.REFRESH).handle
     except jwt_tokens.JwtError as error:
-        raise ApiError(str(error), status=401) from error
+        raise ApiError(str(error), status=401, title=ResponseTitle.TOKEN_INVALID) from error
     refresh_model = token_model(MODE, "RotatingRefreshToken")
     access_model = token_model(MODE, "RotatingAccessToken")
 
@@ -88,13 +91,23 @@ def rotate(request: HttpRequest, refresh_token: str) -> IssuedCredentials:
                 .first()
             )
             if presented is None:
-                raise ApiError("That refresh token is not valid.", status=401)
+                raise ApiError(
+                    "That refresh token is not valid.",
+                    status=401,
+                    title=ResponseTitle.TOKEN_INVALID,
+                )
             if presented.used_at is not None:
                 raise _Reused(presented)
             if presented.family.revoked_at is not None:
-                raise ApiError("This session has ended. Sign in again.", status=401)
+                raise ApiError(
+                    "This session has ended. Sign in again.",
+                    status=401,
+                    title=ResponseTitle.SESSION_ENDED,
+                )
             if not presented.is_active:
-                raise ApiError("That refresh token has expired.", status=401)
+                raise ApiError(
+                    "That refresh token has expired.", status=401, title=ResponseTitle.TOKEN_EXPIRED
+                )
 
             user = presented.user
             family = presented.family
@@ -139,7 +152,11 @@ def rotate(request: HttpRequest, refresh_token: str) -> IssuedCredentials:
             )
     except _Reused as reuse:
         _record_reuse(request, reuse.token)
-        raise ApiError("This session has been ended for your security.", status=401) from reuse
+        raise ApiError(
+            "This session has been ended for your security.",
+            status=401,
+            title=ResponseTitle.TOKEN_REUSED,
+        ) from reuse
 
 
 def live_families(user: Any) -> Any:
@@ -160,8 +177,53 @@ def live_families(user: Any) -> Any:
 def revoke_family(user: Any, family_id: str, reason: str = "logout") -> bool:
     """End one of the account's own sessions. Returns whether one was found."""
     family_model = token_model(MODE, "TokenFamily")
-    family = family_model.objects.filter(pk=family_id, user=user, revoked_at__isnull=True).first()
+    family = by_public_id(
+        family_model.objects.filter(user=user, revoked_at__isnull=True), family_id
+    )
     if family is None:
         return False
     family.revoke(reason)
     return True
+
+
+class RotationTokenService(TokenModeService):
+    """The rotation mode, in the shape all three modes answer in."""
+
+    mode = MODE
+
+    def refresh(self, request: HttpRequest, *, refresh_token: str = "") -> IssuedCredentials:
+        """Spend the presented refresh token and return its successor.
+
+        Unlike the sliding mode there is a second token here, so an empty one is
+        a refused request rather than an invitation to read the header.
+        """
+        if not refresh_token:
+            raise ApiError(
+                "A refresh token is required.", status=400, title=ResponseTitle.TOKEN_REQUIRED
+            )
+        return rotate(request, refresh_token)
+
+    def sessions(self, user: Any) -> SessionList:
+        return SessionList(
+            mode=MODE,
+            sessions=[
+                SessionView(
+                    session_id=str(family.id),
+                    created_at=family.created_at.isoformat(),
+                    last_used_at=(
+                        family.last_rotated_at.isoformat() if family.last_rotated_at else ""
+                    ),
+                    expires_at=family.expires_at.isoformat(),
+                    ip_address=family.issued_ip or "",
+                    user_agent=family.user_agent,
+                    auth_method=str(family.metadata.get("auth_method", "")),
+                )
+                for family in live_families(user)
+            ],
+        )
+
+    def revoke_session(self, user: Any, session_id: str) -> bool:
+        return revoke_family(user, session_id)
+
+
+token_service = RotationTokenService()

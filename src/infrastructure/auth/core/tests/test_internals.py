@@ -154,7 +154,7 @@ def test_exhausting_the_code_attempts_answers_429(db: None) -> None:
         {"email": "zoe@example.com"},
         content_type="application/json",
     )
-    ticket = start.json()["ticket"]
+    ticket = start.json()["data"]["ticket"]
 
     statuses = [
         client.post(

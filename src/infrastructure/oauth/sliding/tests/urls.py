@@ -8,14 +8,18 @@ clients actually use.
 """
 
 from django.urls import path
-from ninja import NinjaAPI
 
 from infrastructure.auth.core.errors import register_auth_exception_handlers
-from infrastructure.auth.password.api import router as password_router
+from infrastructure.auth.password.rest import router as password_router
 from infrastructure.common.errors import register_error_handlers
-from infrastructure.oauth.sliding.api import router as token_router
+from infrastructure.common.responses import EnvelopeAPI, EnvelopeRenderer
+from infrastructure.oauth.sliding.rest import router as token_router
 
-api = NinjaAPI(version="1.0.0", urls_namespace="oauth-sliding-tests")
+api = EnvelopeAPI(
+    version="1.0.0",
+    urls_namespace="oauth-sliding-tests",
+    renderer=EnvelopeRenderer(),
+)
 api.add_router("/auth/password", password_router)
 api.add_router("/auth/token", token_router)
 register_error_handlers(api)

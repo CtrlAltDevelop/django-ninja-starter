@@ -1,6 +1,7 @@
 """Admin for token families, their rotation history, and reuse reports."""
 
 from django.contrib import admin
+from unfold.admin import TabularInline
 
 from infrastructure.common.admin import ReadOnlyAdmin, RevocableAdmin
 from infrastructure.oauth.rotation.models import (
@@ -11,7 +12,7 @@ from infrastructure.oauth.rotation.models import (
 )
 
 
-class RotatingRefreshTokenInline(admin.TabularInline):
+class RotatingRefreshTokenInline(TabularInline):
     """A family's rotation chain, in the order it happened."""
 
     model = RotatingRefreshToken

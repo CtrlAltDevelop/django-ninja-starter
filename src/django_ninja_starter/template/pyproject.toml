@@ -13,6 +13,12 @@ requires-python = ">=3.12"
 # here rather than in an extra because any token mode installs oauth_core, whose
 # models encrypt at rest.
 #
+# The GraphQL and gRPC libraries are here for the same reason: every app in this
+# project publishes all three transports off one service, so they are not a
+# feature a project turns on -- they are how the project is put together. What a
+# deployment *serves* is still a switch (DJANGO_GRAPHQL_ENABLED, and whether it
+# runs the gRPC server at all).
+#
 # Everything a *feature* needs beyond that is an extra, so a project that only
 # wants password login does not ship an HTTP client and a Redis driver it never
 # opens. Each is imported only by the module its feature loads, so leaving an
@@ -21,8 +27,11 @@ dependencies = [
   "cryptography>=45,<48",
   "Django>=5.2,<7.0",
   "django-ninja>=1.4,<2.0",
+  "django-socio-grpc>=0.25,<1.0",
+  "django-unfold>=0.104,<1.0",
   "PyJWT>=2.10,<3.0",
   "python-dotenv>=1.1,<2.0",
+  "strawberry-graphql-django>=0.88,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -32,11 +41,18 @@ oauth = ["httpx>=0.28,<1.0"]
 redis = ["redis>=5.0,<7.0"]
 # Authenticator-app second factors.
 totp = ["pyotp>=2.9,<3.0"]
-all = ["{{ project_name }}[oauth,redis,totp]"]
+# An ASGI server and a WebSocket protocol implementation, for the notification
+# socket. `runserver` is WSGI and will not serve it, and uvicorn on its own
+# speaks no WebSocket -- it needs one of these alongside it.
+asgi = ["uvicorn>=0.52,<1.0", "websockets>=15,<18"]
+all = ["{{ project_name }}[oauth,redis,totp,asgi]"]
 dev = [
   "{{ project_name }}[all]",
   "fakeredis>=2.26,<3.0",
   "mypy>=1.15",
+  # Type stubs for the generated protobuf messages, so a misspelled field is a
+  # type error rather than an AttributeError raised while answering a call.
+  "mypy-protobuf>=3.6",
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "pytest-django>=4.11",
@@ -56,6 +72,9 @@ addopts = "--strict-markers --strict-config"
 target-version = "py312"
 line-length = 100
 src = ["src"]
+# Written by protoc, byte for byte, every time `manage.py protos` runs. The
+# .proto file, not the stub, is the thing to review.
+extend-exclude = ["*_pb2.py", "*_pb2_grpc.py", "*_pb2.pyi", "*_pb2_grpc.pyi"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "DJ"]
@@ -78,11 +97,20 @@ disallow_untyped_defs = true
 ignore_missing_imports = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+# protoc writes these, and its `.pyi` stubs are still read for every import --
+# they are just not held to this project's own strictness settings.
+exclude = "_pb2(_grpc)?\\.pyi?$"
+
+[[tool.mypy.overrides]]
+module = ["django_socio_grpc.*", "grpc_tools.*"]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 branch = true
 source = ["src"]
 omit = [
+  "src/**/grpc/*_pb2.py",
+  "src/**/grpc/*_pb2_grpc.py",
   "src/config/asgi.py",
   "src/config/wsgi.py",
   "src/config/settings/development.py",

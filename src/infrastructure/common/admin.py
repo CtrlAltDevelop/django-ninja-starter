@@ -18,12 +18,18 @@ from typing import Any
 from django.contrib import admin, messages
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest
+from unfold.admin import ModelAdmin
 
 ADMIN_REASON = "admin"
 
 
-class ReadOnlyAdmin(admin.ModelAdmin):
+class ReadOnlyAdmin(ModelAdmin):
     """A table the admin may look at and nothing more."""
+
+    read_only_admin = True
+    """Declared as well as enforced, so `authdocs` can say so without a database.
+    Any admin that refuses editing should set it, including one in an app that
+    cannot inherit this base."""
 
     def get_readonly_fields(self, request: HttpRequest, obj: Model | None = None) -> list[str]:
         return [field.name for field in self.model._meta.fields]

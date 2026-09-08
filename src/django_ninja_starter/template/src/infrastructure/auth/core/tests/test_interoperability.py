@@ -53,7 +53,7 @@ def _post(client: Client, url: str, body: dict[str, Any]) -> Any:
 
 def _credentials(response: Any) -> dict[str, Any]:
     assert response.status_code == 200, response.content
-    body = response.json()
+    body = response.json()["data"]
     assert body["requires_second_factor"] is False, body
     credentials: dict[str, Any] = body["credentials"]
     assert credentials["access_token"], body
@@ -83,7 +83,7 @@ def _via_email_code(client: Client, suffix: str) -> dict[str, Any]:
         _post(
             client,
             "/api/v1/auth/email-code/signup/verify",
-            {"ticket": start.json()["ticket"], "code": _code()},
+            {"ticket": start.json()["data"]["ticket"], "code": _code()},
         )
     )
 
@@ -95,7 +95,7 @@ def _via_sms_code(client: Client, suffix: str) -> dict[str, Any]:
         _post(
             client,
             "/api/v1/auth/sms-code/signup/verify",
-            {"ticket": start.json()["ticket"], "code": _code()},
+            {"ticket": start.json()["data"]["ticket"], "code": _code()},
         )
     )
 
@@ -122,13 +122,13 @@ def _via_second_factor(client: Client, suffix: str) -> dict[str, Any]:
     login = _post(
         client, "/api/v1/auth/password/login", {"identifier": f"zoe{suffix}", "password": PASSWORD}
     )
-    assert login.json()["requires_second_factor"] is True, login.content
+    assert login.json()["data"]["requires_second_factor"] is True, login.content
     return _credentials(
         _post(
             client,
             "/api/v1/auth/2fa/verify",
             {
-                "login_ticket": login.json()["login_ticket"],
+                "login_ticket": login.json()["data"]["login_ticket"],
                 "code": codes[0],
                 "method": SecondFactorMethod.RECOVERY,
             },
@@ -220,7 +220,7 @@ def test_every_methods_refresh_token_works_at_the_shared_token_endpoint(
     )
 
     assert refreshed.status_code == 200, refreshed.content
-    body = refreshed.json()
+    body = refreshed.json()["data"]
     assert body["access_token"] != credentials["access_token"]
     assert body["session_id"] == credentials["session_id"]
 
@@ -287,10 +287,10 @@ def test_a_second_factor_enrolled_through_one_method_gates_all_of_them(db: None)
     verify = _post(
         client,
         "/api/v1/auth/email-code/login/verify",
-        {"ticket": response.json()["ticket"], "code": _code()},
+        {"ticket": response.json()["data"]["ticket"], "code": _code()},
     )
 
     assert verify.status_code == 200, verify.content
-    assert verify.json()["requires_second_factor"] is True
-    assert verify.json()["credentials"] is None
+    assert verify.json()["data"]["requires_second_factor"] is True
+    assert verify.json()["data"]["credentials"] is None
     assert SecondFactor.objects.filter(user=user, confirmed_at__isnull=False).count() == 1

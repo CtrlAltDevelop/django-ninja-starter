@@ -76,7 +76,7 @@ def password():  # type: ignore[no-untyped-def]
         {"identifier": "zoe", "password": "corr3ct-horse-battery", "email": "zoe@example.com"},
     )
     assert response.status_code == 200, _why(response)
-    return client, response.json()
+    return client, response.json()["data"]
 
 
 def email_code():  # type: ignore[no-untyped-def]
@@ -86,10 +86,10 @@ def email_code():  # type: ignore[no-untyped-def]
     response = _post(
         client,
         "/api/v1/auth/email-code/signup/verify",
-        {"ticket": start.json()["ticket"], "code": _outbox_code()},
+        {"ticket": start.json()["data"]["ticket"], "code": _outbox_code()},
     )
     assert response.status_code == 200, _why(response)
-    return client, response.json()
+    return client, response.json()["data"]
 
 
 def sms_code():  # type: ignore[no-untyped-def]
@@ -99,10 +99,10 @@ def sms_code():  # type: ignore[no-untyped-def]
     response = _post(
         client,
         "/api/v1/auth/sms-code/signup/verify",
-        {"ticket": start.json()["ticket"], "code": _outbox_code()},
+        {"ticket": start.json()["data"]["ticket"], "code": _outbox_code()},
     )
     assert response.status_code == 200, _why(response)
-    return client, response.json()
+    return client, response.json()["data"]
 
 
 def magic_link():  # type: ignore[no-untyped-def]
@@ -114,7 +114,7 @@ def magic_link():  # type: ignore[no-untyped-def]
     token = delivery.outbox[-1].body.split("token=", 1)[1].split("\n", 1)[0].strip()
     response = _post(client, "/api/v1/auth/magic-link/verify", {"token": token})
     assert response.status_code == 200, _why(response)
-    return client, response.json()
+    return client, response.json()["data"]
 
 
 SCENARIOS = {
@@ -145,7 +145,7 @@ def main() -> int:
             HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}",
         )
         assert listed.status_code == 200, _why(listed)
-        assert listed.json()["mode"] == settings.AUTH_TOKEN_MODE
+        assert listed.json()["data"]["mode"] == settings.AUTH_TOKEN_MODE
 
     print("ok")
     return 0

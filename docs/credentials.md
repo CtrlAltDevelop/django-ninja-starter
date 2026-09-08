@@ -9,6 +9,8 @@ method cannot accidentally skip the second factor or invent its own token format
 
 ## The shape
 
+Inside the `data` of [the response envelope](responses.md), as everything is:
+
 ```json
 {
   "token_type": "bearer",

@@ -1,13 +1,14 @@
 """Admin for the records every login method shares."""
 
 from django.contrib import admin
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
 from infrastructure.auth.core.models import AuthEvent, PhoneNumber
 from infrastructure.common.admin import ReadOnlyAdmin
 
 
 @admin.register(PhoneNumber)
-class PhoneNumberAdmin(admin.ModelAdmin):
+class PhoneNumberAdmin(UnfoldModelAdmin):
     """Numbers an account has proven it controls.
 
     ``is_verified`` is editable on purpose: support occasionally has to confirm a

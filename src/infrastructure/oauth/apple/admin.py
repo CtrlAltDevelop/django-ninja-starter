@@ -1,12 +1,13 @@
 """Admin for linked Apple accounts."""
 
 from django.contrib import admin
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
 from infrastructure.oauth.apple.models import AppleAccount
 
 
 @admin.register(AppleAccount)
-class AppleAccountAdmin(admin.ModelAdmin):
+class AppleAccountAdmin(UnfoldModelAdmin):
     """Accounts linked through Apple.
 
     Provider tokens are stored encrypted and excluded here: the admin's job is to

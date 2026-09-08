@@ -50,7 +50,7 @@ def test_unconfigured_provider_returns_service_unavailable(
     response = Client().get("/api/v1/oauth/google/start")
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "google OAuth is not configured"
+    assert response.json()["description"] == "google OAuth is not configured"
 
 
 def test_callback_creates_account_logs_in_and_rejects_replay(
@@ -98,7 +98,7 @@ def test_callback_creates_account_logs_in_and_rejects_replay(
         {"state": state, "code": "authorization-code"},
     )
     assert replay.status_code == 400
-    assert "already used" in replay.json()["detail"]
+    assert "already used" in replay.json()["description"]
 
 
 def test_social_login_does_not_link_an_existing_user_by_email(
@@ -182,7 +182,7 @@ def test_callback_is_rejected_when_another_browser_presents_the_state(
     )
 
     assert response.status_code == 400
-    assert "browser" in response.json()["detail"]
+    assert "browser" in response.json()["description"]
     assert "_auth_user_id" not in victim.session
     assert SocialLoginAttempt.objects.get().error
 
@@ -232,7 +232,7 @@ def test_unreadable_verifier_fails_the_callback_cleanly(monkeypatch: pytest.Monk
     response = client.get("/api/v1/oauth/google/callback", {"state": state, "code": "code"})
 
     assert response.status_code == 400
-    assert "decrypted" in response.json()["detail"]
+    assert "decrypted" in response.json()["description"]
 
 
 def test_a_profile_without_a_subject_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,7 +252,7 @@ def test_a_profile_without_a_subject_is_rejected(monkeypatch: pytest.MonkeyPatch
     response = client.get("/api/v1/oauth/google/callback", {"state": state, "code": "code"})
 
     assert response.status_code == 400
-    assert "subject" in response.json()["detail"]
+    assert "subject" in response.json()["description"]
     assert not GoogleAccount.objects.exists()
 
 
@@ -312,3 +312,92 @@ def test_stored_provider_tokens_are_dropped_when_storage_is_disabled(
     account = GoogleAccount.objects.get(subject="google-subject")
     assert account.access_token_encrypted == ""
     assert account.refresh_token_encrypted == ""
+
+
+def test_a_disabled_account_cannot_sign_in_through_a_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deactivating an account has to close the social door too, not just the local ones."""
+    _configure_google(monkeypatch)
+    user = get_user_model()._default_manager.create_user(username="banned")
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    GoogleAccount.objects.create(user=user, subject="google-subject")
+
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="provider-access"),
+            SocialProfile(subject="google-subject", email="banned@example.com"),
+        ),
+    )
+
+    response = client.get("/api/v1/oauth/google/callback", {"code": "code", "state": state})
+
+    assert response.status_code == 400
+    assert response.json()["description"] == "This account is disabled"
+    assert "_auth_user_id" not in client.session
+
+
+def test_a_social_login_can_be_exchanged_for_a_working_api_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The callback leaves a cookie; an API client needs the bearer pair behind it."""
+    _configure_google(monkeypatch)
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="provider-access"),
+            SocialProfile(subject="google-subject", email="zoe@example.com", email_verified=True),
+        ),
+    )
+    client.get("/api/v1/oauth/google/callback", {"code": "code", "state": state})
+    assert client.get("/api/v1/users/me").status_code == 401, "the cookie alone is not a credential"
+
+    exchanged = client.post("/api/v1/auth/token/exchange")
+
+    assert exchanged.status_code == 200, exchanged.content
+    credentials = exchanged.json()["data"]
+    assert credentials["token_type"] == "bearer"
+    me = Client().get(
+        "/api/v1/users/me",
+        HTTP_AUTHORIZATION=f"Bearer {credentials['access_token']}",
+    )
+    assert me.status_code == 200, me.content
+    # Not the provider's address: a unique `email` column gets a placeholder, so
+    # that a provider claiming somebody else's address cannot annex their account.
+    assert me.json()["data"]["id"] == str(GoogleAccount.objects.get().user_id)
+
+
+def test_the_exchanged_session_does_not_outlive_the_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One sign-in must not leave two independent credentials behind."""
+    _configure_google(monkeypatch)
+    client = Client()
+    start = client.get("/api/v1/oauth/google/start")
+    state = parse_qs(urlparse(start.headers["Location"]).query)["state"][0]
+    monkeypatch.setattr(
+        provider,
+        "complete",
+        lambda **kwargs: (
+            ProviderTokens(access_token="provider-access"),
+            SocialProfile(subject="google-subject", email="zoe@example.com"),
+        ),
+    )
+    client.get("/api/v1/oauth/google/callback", {"code": "code", "state": state})
+    assert client.post("/api/v1/auth/token/exchange").status_code == 200
+
+    assert client.post("/api/v1/auth/token/exchange").status_code == 401
+
+
+def test_exchanging_without_a_session_is_refused(db: None) -> None:
+    assert Client().post("/api/v1/auth/token/exchange").status_code == 401

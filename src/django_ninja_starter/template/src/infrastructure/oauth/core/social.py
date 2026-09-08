@@ -1,4 +1,13 @@
-"""Shared, provider-neutral social OAuth authorization-code orchestration."""
+"""Shared, provider-neutral social OAuth authorization-code orchestration.
+
+:class:`SocialLoginService` is the flow itself: mint an attempt, hand back the
+provider URL, and settle the callback into a linked account. It returns values,
+not responses, which is what lets a non-browser client drive the same flow.
+
+The two functions at the foot of the file are the browser rendering of it --
+a redirect, and a cookie that ties the pending attempt to the browser that
+started it. Those are the parts that are genuinely HTTP.
+"""
 
 import base64
 import hashlib
@@ -11,12 +20,13 @@ from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.module_loading import import_string
 
 from infrastructure.accounts.profiles import confirm_email, enrich_profile
+from infrastructure.common.responses import ResponseTitle, envelope_response
 from infrastructure.oauth.core.crypto import decrypt_secret, encrypt_secret
 from infrastructure.oauth.core.models import AbstractSocialAccount, SocialLoginAttempt
 from infrastructure.oauth.core.tokens import hash_token
@@ -110,14 +120,15 @@ def _write_binding_cookie(
     )
 
 
-def _verify_binding(
-    request: HttpRequest,
-    provider: SocialProvider,
-    attempt: SocialLoginAttempt,
-) -> None:
+def _verify_binding(presented: str, attempt: SocialLoginAttempt) -> None:
+    """Refuse a callback that cannot prove it belongs to the attempt.
+
+    The binding is a secret handed to whoever started the flow. A browser
+    carries it in a cookie; any other client carries it itself. Either way, what
+    is checked is the same value against the same digest.
+    """
     if not attempt.binding_hash:
         return
-    presented = request.COOKIES.get(_binding_cookie_name(provider), "")
     if not presented or not secrets.compare_digest(hash_token(presented), attempt.binding_hash):
         raise OAuthProviderError("OAuth state did not originate in this browser")
 
@@ -142,45 +153,137 @@ def _safe_next_url(request: HttpRequest) -> str:
     return "/"
 
 
-def begin_social_login(request: HttpRequest, provider: SocialProvider) -> HttpResponse:
-    if not provider.is_configured():
-        return JsonResponse({"detail": f"{provider.key} OAuth is not configured"}, status=503)
+@dataclass(frozen=True, slots=True)
+class Started:
+    """A pending attempt: where to send the person, and what proves it was them."""
 
-    state = secrets.token_urlsafe(48)
-    nonce = secrets.token_urlsafe(48) if provider.uses_nonce else ""
-    verifier = secrets.token_urlsafe(64) if provider.uses_pkce else ""
-    challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-        if verifier
-        else ""
-    )
-    binding = secrets.token_urlsafe(32)
-    redirect_uri = _callback_uri(request, provider)
-    user = request.user if request.user.is_authenticated else None
-    scopes = list(settings.OAUTH_PROVIDER_CONFIG[provider.key]["scopes"])
-    SocialLoginAttempt.objects.create(
-        provider=provider.key,
-        state_hash=hash_token(state),
-        binding_hash=hash_token(binding),
-        nonce_hash=hash_token(nonce) if nonce else "",
-        code_verifier_encrypted=encrypt_secret(verifier),
-        user=user,
-        redirect_uri=redirect_uri,
-        next_url=_safe_next_url(request),
-        requested_scopes=scopes,
-        expires_at=timezone.now() + timedelta(seconds=settings.OAUTH_STATE_TTL_SECONDS),
-        ip_address=_client_ip(request),
-        user_agent=request.META.get("HTTP_USER_AGENT", ""),
-    )
-    response = HttpResponseRedirect(
-        provider.authorization_url(
-            state=state,
-            nonce=nonce,
-            code_challenge=challenge,
-            redirect_uri=redirect_uri,
+    authorization_url: str
+    binding: str
+    expires_in: int
+
+
+@dataclass(frozen=True, slots=True)
+class Completed:
+    """A settled callback: the account it resolved to, and where to go next."""
+
+    user: Any
+    next_url: str
+    method: str
+
+
+class SocialLoginService:
+    """One provider-neutral social login, from the first redirect to the account."""
+
+    def begin(self, request: HttpRequest, provider: SocialProvider) -> Started:
+        """Record a pending attempt and return the URL the person should visit."""
+        if not provider.is_configured():
+            raise OAuthProviderError(f"{provider.key} OAuth is not configured")
+
+        state = secrets.token_urlsafe(48)
+        nonce = secrets.token_urlsafe(48) if provider.uses_nonce else ""
+        verifier = secrets.token_urlsafe(64) if provider.uses_pkce else ""
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+            .rstrip(b"=")
+            .decode()
+            if verifier
+            else ""
         )
-    )
-    _write_binding_cookie(response, request, provider, binding, settings.OAUTH_STATE_TTL_SECONDS)
+        binding = secrets.token_urlsafe(32)
+        redirect_uri = _callback_uri(request, provider)
+        user = request.user if request.user.is_authenticated else None
+        scopes = list(settings.OAUTH_PROVIDER_CONFIG[provider.key]["scopes"])
+        SocialLoginAttempt.objects.create(
+            provider=provider.key,
+            state_hash=hash_token(state),
+            binding_hash=hash_token(binding),
+            nonce_hash=hash_token(nonce) if nonce else "",
+            code_verifier_encrypted=encrypt_secret(verifier),
+            user=user,
+            redirect_uri=redirect_uri,
+            next_url=_safe_next_url(request),
+            requested_scopes=scopes,
+            expires_at=timezone.now() + timedelta(seconds=settings.OAUTH_STATE_TTL_SECONDS),
+            ip_address=_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        )
+        return Started(
+            authorization_url=provider.authorization_url(
+                state=state,
+                nonce=nonce,
+                code_challenge=challenge,
+                redirect_uri=redirect_uri,
+            ),
+            binding=binding,
+            expires_in=settings.OAUTH_STATE_TTL_SECONDS,
+        )
+
+    def complete(
+        self,
+        provider: SocialProvider,
+        callback_data: dict[str, str],
+        *,
+        binding: str = "",
+    ) -> Completed:
+        """Settle a callback into a linked account, or say why it cannot be.
+
+        Raises :class:`OAuthProviderError` for anything the provider or the
+        caller got wrong; the attempt row records the reason before it does.
+        """
+        state = callback_data.get("state", "")
+        if not state:
+            raise OAuthProviderError("Missing OAuth state")
+        attempt = _consume_attempt(provider, state)
+        try:
+            _verify_binding(binding, attempt)
+            if callback_data.get("error"):
+                raise OAuthProviderError(
+                    callback_data.get("error_description") or callback_data["error"]
+                )
+            code = callback_data.get("code", "")
+            if not code:
+                raise OAuthProviderError("Missing authorization code")
+            try:
+                code_verifier = decrypt_secret(attempt.code_verifier_encrypted)
+            except ValueError as error:
+                raise OAuthProviderError("OAuth verifier could not be decrypted") from error
+            tokens, profile = provider.complete(
+                code=code,
+                redirect_uri=attempt.redirect_uri,
+                code_verifier=code_verifier,
+                nonce_hash=attempt.nonce_hash,
+                callback_data=callback_data,
+            )
+            account = _resolve_account(provider, attempt, profile, tokens)
+        except OAuthProviderError as error:
+            attempt.error = str(error)[:255]
+            attempt.save(update_fields=["error"])
+            raise
+        return Completed(
+            user=account.user,
+            next_url=attempt.next_url,
+            # Named so that a later /auth/token/exchange can record which
+            # provider this credential came from, rather than a generic "social".
+            method=f"oauth_{provider.key}",
+        )
+
+
+social_login_service = SocialLoginService()
+
+
+def begin_social_login(request: HttpRequest, provider: SocialProvider) -> HttpResponse:
+    """The browser rendering of :meth:`SocialLoginService.begin`."""
+    try:
+        started = social_login_service.begin(request, provider)
+    except OAuthProviderError as error:
+        return envelope_response(
+            status=503,
+            errors=[str(error)],
+            title=ResponseTitle.OAUTH_NOT_CONFIGURED,
+            description=str(error),
+        )
+    response = HttpResponseRedirect(started.authorization_url)
+    _write_binding_cookie(response, request, provider, started.binding, started.expires_in)
     return response
 
 
@@ -267,6 +370,13 @@ def _resolve_account(
             else:
                 raise OAuthProviderError("This provider account is linked to another user")
 
+    if not account.user.is_active:
+        # Every first-party login path refuses a disabled account in
+        # `complete_login`. A social callback has to say the same thing, or
+        # deactivating someone leaves them one provider redirect away from a
+        # perfectly good session.
+        raise OAuthProviderError("This account is disabled")
+
     account.email = _fitted(account, "email", profile.email)
     account.email_verified = profile.email_verified
     account.display_name = _fitted(account, "display_name", profile.display_name)
@@ -314,39 +424,25 @@ def finish_social_login(
     provider: SocialProvider,
     callback_data: dict[str, str],
 ) -> HttpResponse:
-    state = callback_data.get("state", "")
-    if not state:
-        return JsonResponse({"detail": "Missing OAuth state"}, status=400)
-    attempt: SocialLoginAttempt | None = None
+    """The browser rendering of :meth:`SocialLoginService.complete`.
+
+    What the browser is left with is a session cookie, not a token: the person
+    is mid-redirect and has nowhere to put an Authorization header. Trading it
+    for the credential the API accepts is `/auth/token/exchange`'s job.
+    """
+    binding = request.COOKIES.get(_binding_cookie_name(provider), "")
     try:
-        attempt = _consume_attempt(provider, state)
-        _verify_binding(request, provider, attempt)
-        if callback_data.get("error"):
-            raise OAuthProviderError(
-                callback_data.get("error_description") or callback_data["error"]
-            )
-        code = callback_data.get("code", "")
-        if not code:
-            raise OAuthProviderError("Missing authorization code")
-        try:
-            code_verifier = decrypt_secret(attempt.code_verifier_encrypted)
-        except ValueError as error:
-            raise OAuthProviderError("OAuth verifier could not be decrypted") from error
-        tokens, profile = provider.complete(
-            code=code,
-            redirect_uri=attempt.redirect_uri,
-            code_verifier=code_verifier,
-            nonce_hash=attempt.nonce_hash,
-            callback_data=callback_data,
-        )
-        account = _resolve_account(provider, attempt, profile, tokens)
-        login(request, account.user, backend="django.contrib.auth.backends.ModelBackend")
+        completed = social_login_service.complete(provider, callback_data, binding=binding)
     except OAuthProviderError as error:
-        if attempt is not None:
-            attempt.error = str(error)[:255]
-            attempt.save(update_fields=["error"])
-        response: HttpResponse = JsonResponse({"detail": str(error)}, status=400)
+        response: HttpResponse = envelope_response(
+            status=400,
+            errors=[str(error)],
+            title=ResponseTitle.OAUTH_FAILED,
+            description=str(error),
+        )
     else:
-        response = HttpResponseRedirect(attempt.next_url)
+        login(request, completed.user, backend="django.contrib.auth.backends.ModelBackend")
+        request.session["social_auth_method"] = completed.method
+        response = HttpResponseRedirect(completed.next_url)
     _write_binding_cookie(response, request, provider, "", 0)
     return response

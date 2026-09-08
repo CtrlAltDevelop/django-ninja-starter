@@ -14,3 +14,6 @@ build/
 dist/
 *.egg-info/
 staticfiles/
+
+# The example project, rebuilt on demand by examples/build.py.
+examples/.build/

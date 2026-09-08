@@ -1,12 +1,13 @@
 """Admin for linked Google accounts."""
 
 from django.contrib import admin
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
 from infrastructure.oauth.google.models import GoogleAccount
 
 
 @admin.register(GoogleAccount)
-class GoogleAccountAdmin(admin.ModelAdmin):
+class GoogleAccountAdmin(UnfoldModelAdmin):
     """Accounts linked through Google.
 
     Provider tokens are stored encrypted and excluded here: the admin's job is to

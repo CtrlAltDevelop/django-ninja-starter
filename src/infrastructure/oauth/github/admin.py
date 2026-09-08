@@ -1,12 +1,13 @@
 """Admin for linked GitHub accounts."""
 
 from django.contrib import admin
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
 from infrastructure.oauth.github.models import GitHubAccount
 
 
 @admin.register(GitHubAccount)
-class GitHubAccountAdmin(admin.ModelAdmin):
+class GitHubAccountAdmin(UnfoldModelAdmin):
     """Accounts linked through GitHub.
 
     Provider tokens are stored encrypted and excluded here: the admin's job is to

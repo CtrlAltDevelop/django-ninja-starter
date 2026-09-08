@@ -187,6 +187,25 @@ Providers that answer with a cross-site `form_post` -- Apple -- need
 `SameSite=None` on that cookie, which browsers only honour when it is `Secure`.
 Those providers are required to use HTTPS callbacks anyway, and the checks say so.
 
+### Getting a bearer token out of it
+
+The callback finishes in the browser, so what the user is left holding is a
+Django session cookie. Under any token mode but `none` the API does not accept
+that -- it reads `Authorization` and nothing else -- so the page the callback
+redirected to makes one more call:
+
+```bash
+curl -X POST /api/v1/auth/token/exchange --cookie 'sessionid=...'
+```
+
+It answers with the same credential pair every other login method issues, into
+the same tables, with the same revocation story. The session is consumed by the
+exchange: leaving it live would mean one sign-in carrying two independent
+credentials, only one of which logout can reach.
+
+Under `DJANGO_AUTH_TOKEN_MODE=none` there is nothing to exchange -- the cookie is
+the credential -- and the endpoint answers `409`.
+
 ### Linking to an existing account
 
 Call `/start` while already signed in and the provider identity is linked to that

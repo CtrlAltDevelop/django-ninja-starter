@@ -1,18 +1,41 @@
 # Documentation
 
-One page per app. Each covers the same five things: its **routes**, its
-**models**, its **admin**, its **setup**, and how to **use** it.
+One page per app — every app this project ships, whether it is always installed,
+optional, or an example you copy. Each covers the same five things: its
+**routes**, its **models**, its **admin**, its **setup**, and how to **use** it.
 
 The routes, models, admin and setup tables are generated from the apps
 themselves — see [keeping these pages honest](#keeping-these-pages-honest).
 
+| | |
+| --- | --- |
+| Always installed | [`common`](common.md), [`accounts`](accounts.md) |
+| Login methods | [`auth_password`](auth/password.md), [`auth_email_code`](auth/email-code.md), [`auth_sms_code`](auth/sms-code.md), [`auth_magic_link`](auth/magic-link.md) |
+| Second factors | [`auth_twofactor`](auth/twofactor.md) |
+| Social providers | [`oauth_google`](oauth/google.md), [`oauth_apple`](oauth/apple.md), [`oauth_microsoft`](oauth/microsoft.md), [`oauth_github`](oauth/github.md) |
+| Token modes | [`oauth_sliding`](oauth/sliding.md), [`oauth_session`](oauth/session.md), [`oauth_rotation`](oauth/rotation.md) |
+| Shared by those | [`auth_core`](auth/core.md), [`oauth_core`](oauth/core.md) |
+| Feature apps | [`cms`](cms.md), [`notifications`](notifications.md), [`shop`](shop.md), [`notes`](notes.md) |
+| Cross-cutting | [The response envelope](responses.md), [Signing in](signing-in.md), [Credentials](credentials.md), [The admin](admin.md) |
+
 ## Start here
 
+- **[Signing in with any one method](signing-in.md)** — the path a client walks
+  whichever method you enabled, and the parts that never change. Start here if
+  you are wiring a client.
+- **[The response envelope](responses.md)** — the six keys every JSON body has,
+  and the `title` enum a client keys its translations off. Every other page
+  shows the payload that goes inside it.
 - **[Accounts](accounts.md)** — the user model every login resolves to, and the
   profile attached to it. Always installed.
 - **[Credentials and token modes](credentials.md)** — what every login hands back,
   and how to choose between the three token modes. Read this first; every method
   below ends by minting one of these.
+- **[The example project](../examples/README.md)** — every app on this page turned
+  on in one generated project, and a printed transcript of the calls against each
+  one: all four login methods including the forgotten-password round trip, all
+  four second factors, the social redirects, the CMS in two languages, and
+  notifications over HTTP and over a socket.
 
 ## Login methods
 
@@ -53,15 +76,41 @@ same endpoints at `/auth/token`, so clients do not change with the mode.
 | [`oauth_session`](oauth/session.md) | `session` | Mint another access token for the session |
 | [`oauth_rotation`](oauth/rotation.md) | `rotation` | Spend the refresh token for a successor |
 
+## Always installed
+
+- [`common`](common.md) — the foundation: health endpoints, the response
+  envelope, the API registry and `startapi`, settings contracts, and the admin's
+  navigation and dashboard.
+- [`accounts`](accounts.md) — the user model every login resolves to, and the
+  profile attached to it.
+
 ## Shared apps
 
 Installed automatically.
 
-- [`accounts`](accounts.md) — the user model and its profile, plus `/users/me`.
 - [`auth_core`](auth/core.md) — shared identity records, the challenge store,
   delivery backends, rate limits, and the audit trail.
 - [`oauth_core`](oauth/core.md) — clients, scopes, consents, social accounts, and
   the signing layer.
+
+## Feature apps
+
+Optional in the same way every login method is: naming one is what installs it.
+They live in `src/apps` rather than in `src/infrastructure`, because they are
+features a project chooses rather than the plumbing under them.
+
+| App | Enabled by | What it is |
+| --- | --- | --- |
+| [`cms`](cms.md) | `DJANGO_CMS_ENABLED=true` | Pages, sections and typed multilingual fields, shared sections, menus, publishing with preview links, and an admin screen built for editors rather than for developers |
+| [`notifications`](notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | Stored notifications, a read API, and a WebSocket that pushes new ones — public before it is authenticated, private after |
+| [`shop`](shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare what their products are, several sellers per product, timed campaigns, search and merchandising lists, reviews and likes, a basket per account, and an order cycle that reserves stock and issues an invoice |
+| [`notes`](notes.md) | `manage.py startapi` | Not shipped installed: the worked example of a feature app, one model served at two API versions, built into the example project |
+
+## The admin
+
+- [**The admin**](admin.md) — themed with Unfold, with a dashboard of real
+  numbers, a sidebar built from the apps that are installed, and lists that say
+  more per row. Every registered model is themed, including Django's own.
 
 ## Configuring an app
 

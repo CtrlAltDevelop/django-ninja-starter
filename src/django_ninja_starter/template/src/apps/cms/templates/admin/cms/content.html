@@ -1,0 +1,156 @@
+{% extends base_template %}
+
+{% comment %}
+The content screen, used for a page and for a shared section alike. It is not a
+Django change form and deliberately does not look like one: content is a stack
+of sections in the order a reader meets them, so this renders them in that
+order, in cards, one language at a time.
+
+`base_template` is the theme's layout where the project has one and the plain
+admin's where it does not -- see apps/cms/theme.py. Nothing here uses a template
+tag from the theme, so the page renders either way; without the theme's
+stylesheet the classes below are simply inert.
+{% endcomment %}
+
+{% load i18n static %}
+
+{% block title %}{{ title }} | {{ site_title }}{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    {# The date and time widgets are the admin's own, and the admin's own JS #}
+    {# expects two things a change form provides and a custom page does not:  #}
+    {# the translation catalogue, and core.js. Without them calendar.js       #}
+    {# throws on load and the picker never appears -- with a 200 in the log   #}
+    {# and the field looking like an ordinary text box.                       #}
+    <script src="{% url 'admin:jsi18n' %}"></script>
+    <script src="{% static 'admin/js/core.js' %}"></script>
+    {{ form.media }}
+{% endblock %}
+
+{% block content %}
+    {# `multipart/form-data` only when something on this screen can carry a  #}
+    {# file: a form posted without it drops its uploads silently -- the page #}
+    {# saves, says so, and the picture is not there.                         #}
+    <form method="post" novalidate id="cms-content-form"{% if form.has_uploads %} enctype="multipart/form-data"{% endif %}>
+        {% csrf_token %}
+
+        <div class="flex flex-col gap-4 mb-8 lg:flex-row lg:items-center">
+            <div class="flex flex-col grow">
+                <h1 class="font-semibold text-xl text-font-important-light dark:text-font-important-dark">
+                    {{ title }}
+                </h1>
+                <span class="flex flex-row flex-wrap gap-2 items-center text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                    {% if state %}
+                        {# The one fact an editor needs before they start typing: #}
+                        {# whether anybody is reading what they are about to change. #}
+                        <span class="font-medium px-2 py-0.5 rounded-default text-xs {% if state == 'Published' %}bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400{% elif state == 'Scheduled' %}bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400{% else %}bg-base-100 text-font-default-light dark:bg-base-800 dark:text-font-default-dark{% endif %}">
+                            {{ state|lower }}
+                        </span>
+                    {% endif %}
+                    <span>{{ subtitle }}</span>
+                    <span>&middot;</span>
+                    <span>
+                        {% blocktrans %}editing in{% endblocktrans %} <strong>{{ language }}</strong>
+                        {% if language == default_language %}({% trans "default" %}){% endif %}
+                    </span>
+                    {% if preview %}
+                        <a href="{{ preview }}" target="_blank" rel="noopener" class="underline">
+                            {% trans "preview" %}
+                        </a>
+                    {% endif %}
+                    {% if structure_url %}
+                        <a href="{{ structure_url }}" class="underline">{% trans "structure" %}</a>
+                    {% endif %}
+                </span>
+            </div>
+
+            {# The language switch. A tab per configured language, so which one #}
+            {# is being written is never a guess -- the commonest way to ruin a #}
+            {# translation is to type it into the wrong one.                    #}
+            <nav class="flex flex-row flex-wrap gap-1 border border-base-200 p-1 rounded-default dark:border-base-800">
+                {% for code in languages %}
+                    <a href="{{ content_url }}?language={{ code }}"
+                       class="font-medium px-3 py-1.5 rounded-default text-sm transition-all {% if code == language %}bg-primary-600 text-white dark:bg-primary-500{% else %}text-font-default-light hover:bg-base-100 dark:text-font-default-dark dark:hover:bg-base-800{% endif %}">
+                        {{ code }}
+                    </a>
+                {% endfor %}
+            </nav>
+        </div>
+
+        {% if form.errors %}
+            <div class="bg-red-50 border border-red-200 mb-4 px-4 py-3 rounded-default text-red-700 text-sm dark:bg-red-500/20 dark:border-red-500/20 dark:text-red-400">
+                {% trans "Some values could not be saved. Each one is marked below." %}
+            </div>
+        {% endif %}
+        {{ form.non_field_errors }}
+
+        <div class="flex flex-col gap-4">
+            {% for group in groups %}
+                <div class="bg-white border border-base-200 flex flex-col overflow-hidden rounded-default shadow-xs dark:bg-base-900 dark:border-base-800">
+                    <div class="border-b border-base-200 flex flex-row gap-3 items-center px-6 py-4 dark:border-base-800">
+                        <h2 class="font-semibold text-[15px] text-font-important-light dark:text-font-important-dark">
+                            {{ group.section.name }}
+                        </h2>
+                        {% if group.shared %}
+                            {# Badged, because editing this changes every page it #}
+                            {# is placed on, and nothing else on screen says so.  #}
+                            <span class="bg-orange-100 font-medium px-2 py-1 rounded-default text-orange-700 text-xs dark:bg-orange-500/20 dark:text-orange-400">
+                                {% trans "shared" %}
+                            </span>
+                            <a href="{% url 'admin:cms_section_content' group.section.pk %}?language={{ language }}"
+                               class="text-font-subtle-light text-xs underline dark:text-font-subtle-dark">
+                                {% trans "edit on its own" %}
+                            </a>
+                        {% endif %}
+                        {% if not group.section.is_active %}
+                            <span class="text-font-subtle-light text-xs dark:text-font-subtle-dark">
+                                {% trans "hidden from the API" %}
+                            </span>
+                        {% endif %}
+                        <code class="ml-auto text-font-subtle-light text-xs dark:text-font-subtle-dark">{{ group.section.slug }}</code>
+                    </div>
+
+                    <div class="flex flex-col gap-6 p-6">
+                        {% include "admin/cms/_rows.html" with rows=group.rows %}
+
+                        {% for child in group.children %}
+                            <div class="border-l-2 border-base-200 flex flex-col gap-6 pl-4 dark:border-base-800">
+                                <h3 class="font-semibold text-font-important-light text-sm dark:text-font-important-dark">
+                                    {{ child.section.name }}
+                                    <span class="font-normal text-font-subtle-light dark:text-font-subtle-dark">
+                                        <code>{{ child.section.slug }}</code>
+                                    </span>
+                                </h3>
+                                {% include "admin/cms/_rows.html" with rows=child.rows %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% empty %}
+                <div class="bg-white border border-base-200 flex flex-col gap-2 items-start p-6 rounded-default text-font-subtle-light text-sm dark:bg-base-900 dark:border-base-800 dark:text-font-subtle-dark">
+                    <span>{% trans "Nothing to fill in yet. Sections and their fields are structure, added by a superuser." %}</span>
+                    {% if structure_url %}
+                        <a href="{{ structure_url }}" class="underline">{% trans "Add sections" %}</a>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+
+        {# Sticky, because a long page must not mean scrolling to the bottom to #}
+        {# save the paragraph at the top.                                       #}
+        <div class="bg-white border-t border-base-200 bottom-0 flex flex-row gap-4 items-center mt-4 -mx-4 px-4 py-3 sticky dark:bg-base-900 dark:border-base-800">
+            <span class="grow text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                {% trans "An empty box removes this language; readers fall back to" %} {{ default_language }}.
+            </span>
+            <a href="{{ back_url }}"
+               class="border border-base-200 font-medium px-3 py-2 rounded-default text-font-default-light text-sm transition-all hover:bg-base-100 dark:border-base-800 dark:text-font-default-dark dark:hover:bg-base-800">
+                {% trans "Back" %}
+            </a>
+            <button type="submit"
+                    class="bg-primary-600 font-medium px-3 py-2 rounded-default text-white text-sm transition-all hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-600">
+                {% blocktrans %}Save {{ language }}{% endblocktrans %}
+            </button>
+        </div>
+    </form>
+{% endblock %}

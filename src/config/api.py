@@ -1,11 +1,12 @@
 """Build every registered version of the project's Django Ninja API."""
 
 from django.conf import settings
-from django.utils.module_loading import import_string
-from ninja import NinjaAPI, Swagger
+from ninja import NinjaAPI
 
+from infrastructure.common.docs import VersionedSwagger, api_tags
 from infrastructure.common.errors import register_error_handlers
 from infrastructure.common.registry import api_version_number, load_api_registry
+from infrastructure.common.responses import EnvelopeAPI, EnvelopeRenderer
 
 
 def build_apis() -> dict[str, NinjaAPI]:
@@ -19,34 +20,46 @@ def build_apis() -> dict[str, NinjaAPI]:
     apis: dict[str, NinjaAPI] = {}
 
     for version, configuration in registry.items():
-        api = NinjaAPI(
+        # Every router this version publishes, in the order the documentation
+        # teaches them: the project's own feature APIs first, then the account
+        # they belong to, then the ways in, then the content and notification
+        # apps, then the shop. Swagger reads the order off the tag list
+        # built from it.
+        routes = [
+            *configuration["routes"],
+            *settings.ACCOUNT_ROUTERS,
+            *settings.AUTH_METHOD_ROUTERS,
+            *settings.AUTH_TOKEN_ROUTERS,
+            *settings.OAUTH_PROVIDER_ROUTERS,
+            *settings.CMS_ROUTERS,
+            *settings.NOTIFICATIONS_ROUTERS,
+            *settings.SHOP_ROUTERS,
+        ]
+        api = EnvelopeAPI(
             title="Django Ninja Starter API",
             version=api_version_number(version),
             urls_namespace=f"api-{version.replace('.', '-')}",
-            docs=Swagger(
+            docs=VersionedSwagger(
                 settings={
                     "persistAuthorization": True,
+                    # The selector, and the layout that renders it. Without
+                    # StandaloneLayout nothing reads `urls` and the page loads
+                    # empty.
+                    "layout": "StandaloneLayout",
                     "urls": swagger_urls,
                     "urls.primaryName": version,
                 }
             ),
             docs_url="/docs",
+            renderer=EnvelopeRenderer(),
+            # What the reader sees before a single operation: one described
+            # group per attached router, in the order above.
+            openapi_extra={"tags": api_tags(routes)},
         )
-        for route in configuration["routes"]:
+        for route in routes:
             api.add_router(
                 route["prefix"],
                 route["router"],
-                tags=[route["tag"]],
-            )
-        for route in (
-            *settings.ACCOUNT_ROUTERS,
-            *settings.OAUTH_PROVIDER_ROUTERS,
-            *settings.AUTH_METHOD_ROUTERS,
-            *settings.AUTH_TOKEN_ROUTERS,
-        ):
-            api.add_router(
-                route["prefix"],
-                import_string(route["router"]),
                 tags=[route["tag"]],
             )
         register_error_handlers(api)

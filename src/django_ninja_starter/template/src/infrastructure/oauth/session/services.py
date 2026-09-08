@@ -16,14 +16,17 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
 from infrastructure.oauth.core import jwt_tokens
 from infrastructure.oauth.core.credentials import (
     IssuedCredentials,
+    by_public_id,
     client_ip,
     sign_pair,
     token_model,
     user_agent,
 )
+from infrastructure.oauth.core.services import SessionList, SessionView, TokenModeService
 from infrastructure.oauth.core.tokens import hash_token
 
 MODE = "session"
@@ -34,7 +37,7 @@ def refresh_access(request: HttpRequest, session_token: str) -> IssuedCredential
     try:
         handle = jwt_tokens.decode(session_token, token_type=jwt_tokens.REFRESH).handle
     except jwt_tokens.JwtError as error:
-        raise ApiError(str(error), status=401) from error
+        raise ApiError(str(error), status=401, title=ResponseTitle.TOKEN_INVALID) from error
     session_model = token_model(MODE, "OAuthSession")
     access_model = token_model(MODE, "SessionAccessToken")
 
@@ -46,9 +49,15 @@ def refresh_access(request: HttpRequest, session_token: str) -> IssuedCredential
             .first()
         )
         if session is None:
-            raise ApiError("That session key is not valid.", status=401)
+            raise ApiError(
+                "That session key is not valid.", status=401, title=ResponseTitle.TOKEN_INVALID
+            )
         if not session.is_active:
-            raise ApiError("This session has ended. Sign in again.", status=401)
+            raise ApiError(
+                "This session has ended. Sign in again.",
+                status=401,
+                title=ResponseTitle.SESSION_ENDED,
+            )
 
         now = timezone.now()
         access_lifetime = timedelta(seconds=settings.AUTH_ACCESS_TOKEN_TTL_SECONDS)
@@ -90,9 +99,9 @@ def revoke_session(user: Any, session_id: str, reason: str = "logout") -> bool:
     """End one of the account's own sessions. Returns whether one was found."""
     session_model = token_model(MODE, "OAuthSession")
     revocation_model = token_model(MODE, "SessionRevocation")
-    session = session_model.objects.filter(
-        pk=session_id, user=user, revoked_at__isnull=True
-    ).first()
+    session = by_public_id(
+        session_model.objects.filter(user=user, revoked_at__isnull=True), session_id
+    )
     if session is None:
         return False
     live_tokens = session.access_tokens.filter(revoked_at__isnull=True).count()
@@ -104,3 +113,44 @@ def revoke_session(user: Any, session_id: str, reason: str = "logout") -> bool:
         access_tokens_revoked=live_tokens,
     )
     return True
+
+
+class OAuthSessionService(TokenModeService):
+    """The session mode, in the shape all three modes answer in."""
+
+    mode = MODE
+
+    def refresh(self, request: HttpRequest, *, refresh_token: str = "") -> IssuedCredentials:
+        """Trade the session key for a fresh access token.
+
+        Unlike the sliding mode there is a second token here, so an empty one is
+        a refused request rather than an invitation to read the header.
+        """
+        if not refresh_token:
+            raise ApiError(
+                "A refresh token is required.", status=400, title=ResponseTitle.TOKEN_REQUIRED
+            )
+        return refresh_access(request, refresh_token)
+
+    def sessions(self, user: Any) -> SessionList:
+        return SessionList(
+            mode=MODE,
+            sessions=[
+                SessionView(
+                    session_id=str(session.id),
+                    created_at=session.created_at.isoformat(),
+                    last_used_at=session.last_seen_at.isoformat(),
+                    expires_at=session.expires_at.isoformat(),
+                    ip_address=session.ip_address or "",
+                    user_agent=session.user_agent,
+                    auth_method=str(session.metadata.get("auth_method", "")),
+                )
+                for session in live_sessions(user)
+            ],
+        )
+
+    def revoke_session(self, user: Any, session_id: str) -> bool:
+        return revoke_session(user, session_id)
+
+
+token_service = OAuthSessionService()

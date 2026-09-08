@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package config.auth_twofactor;
+
+import "google/protobuf/empty.proto";
+
+service TwoFactorController {
+    rpc Challenge(ChallengeRequest) returns (SentCode) {}
+    rpc EmailConfirm(EmailConfirmRequest) returns (Message) {}
+    rpc EmailEnroll(google.protobuf.Empty) returns (SentCode) {}
+    rpc Methods(google.protobuf.Empty) returns (FactorList) {}
+    rpc RecoveryGenerate(google.protobuf.Empty) returns (RecoveryCodes) {}
+    rpc Remove(RemoveRequest) returns (Message) {}
+    rpc SmsConfirm(SmsConfirmRequest) returns (Message) {}
+    rpc SmsEnroll(SmsEnrollRequest) returns (SentCode) {}
+    rpc TotpConfirm(TotpConfirmRequest) returns (Message) {}
+    rpc TotpEnroll(google.protobuf.Empty) returns (TotpEnrolment) {}
+    rpc Verify(VerifyRequest) returns (LoginResult) {}
+}
+
+message ChallengeRequest {
+    string login_ticket = 1;
+    string method = 2;
+}
+
+message Credentials {
+    string token_type = 1;
+    string access_token = 2;
+    string refresh_token = 3;
+    int32 expires_in = 4;
+    string session_id = 5;
+}
+
+message EmailConfirmRequest {
+    string ticket = 1;
+    string code = 2;
+}
+
+message EnrolledFactor {
+    string method = 1;
+    string destination = 2;
+    bool confirmed = 3;
+    string last_used_at = 4;
+}
+
+message FactorList {
+    repeated EnrolledFactor methods = 1;
+    repeated string available = 2;
+    int32 unused_recovery_codes = 3;
+}
+
+message LoginResult {
+    bool requires_second_factor = 1;
+    Credentials credentials = 2;
+    string login_ticket = 3;
+    repeated string methods = 4;
+}
+
+message Message {
+    string detail = 1;
+}
+
+message RecoveryCodes {
+    repeated string codes = 1;
+}
+
+message RemoveRequest {
+    string method = 1;
+}
+
+message SentCode {
+    string ticket = 1;
+    string channel = 2;
+    string destination = 3;
+    int32 expires_in = 4;
+}
+
+message SmsConfirmRequest {
+    string ticket = 1;
+    string code = 2;
+}
+
+message SmsEnrollRequest {
+    string phone = 1;
+}
+
+message TotpConfirmRequest {
+    string code = 1;
+}
+
+message TotpEnrolment {
+    string secret = 1;
+    string otpauth_uri = 2;
+}
+
+message VerifyRequest {
+    string login_ticket = 1;
+    string code = 2;
+    string method = 3;
+}
+

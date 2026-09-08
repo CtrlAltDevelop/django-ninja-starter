@@ -149,13 +149,18 @@ def test_the_projects_own_configuration_raises_no_errors() -> None:
     assert errors == []
 
 
-def test_the_only_thing_the_suite_is_warned_about_is_the_test_challenge_store() -> None:
-    """Which is the point of unsafe_defaults: it is fine here and wrong in production."""
+def test_the_only_things_the_suite_is_warned_about_are_its_in_process_doubles() -> None:
+    """Which is the point of unsafe_defaults: both are fine here and wrong in production.
+
+    A suite cannot run against a real Redis, so it keeps the challenge store and
+    the notification broker that live in the process -- and each of them says so
+    about itself rather than being quietly exempted.
+    """
     warnings = {
         message.id for message in check_declared_app_settings() if isinstance(message, Warning)
     }
 
-    assert warnings == {"auth_core.AUTH_CHALLENGE_STORE"}
+    assert warnings == {"auth_core.AUTH_CHALLENGE_STORE", "notifications.NOTIFICATIONS_BROKER"}
 
 
 def test_the_apps_this_suite_enables_all_declare_a_contract() -> None:
@@ -176,6 +181,7 @@ def test_the_apps_this_suite_enables_all_declare_a_contract() -> None:
         "oauth_sliding",
         "oauth_session",
         "oauth_rotation",
+        "notifications",
     }
 
 

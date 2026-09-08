@@ -33,7 +33,7 @@ def _password_token(client: Client, identifier: str = "zoe") -> str:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    token: str = response.json()["credentials"]["access_token"]
+    token: str = response.json()["data"]["credentials"]["access_token"]
     return token
 
 
@@ -43,7 +43,7 @@ def token(db: None) -> str:
 
 
 def test_me_describes_the_signed_in_account(token: str) -> None:
-    body = Client().get(ME, **_bearer(token)).json()
+    body = Client().get(ME, **_bearer(token)).json()["data"]
 
     assert body["username"] == "zoe"
     assert body["email"] == "zoe@example.com"
@@ -69,7 +69,7 @@ def test_updating_a_profile_returns_the_whole_account(token: str) -> None:
     )
 
     assert response.status_code == 200, response.content
-    body = response.json()
+    body = response.json()["data"]
     assert body["profile"]["display_name"] == "Zoe A."
     assert body["profile"]["timezone"] == "Europe/Lisbon"
     assert body["username"] == "zoe", "the account comes back too, not just the profile"
@@ -83,7 +83,7 @@ def test_an_omitted_field_is_left_alone(token: str) -> None:
         PROFILE, {"display_name": "Zoe"}, content_type="application/json", **_bearer(token)
     )
 
-    assert client.get(ME, **_bearer(token)).json()["profile"]["bio"] == "Keeps this."
+    assert client.get(ME, **_bearer(token)).json()["data"]["profile"]["bio"] == "Keeps this."
 
 
 def test_an_empty_string_clears_a_field(token: str) -> None:
@@ -93,7 +93,7 @@ def test_an_empty_string_clears_a_field(token: str) -> None:
 
     client.patch(PROFILE, {"bio": ""}, content_type="application/json", **_bearer(token))
 
-    assert client.get(ME, **_bearer(token)).json()["profile"]["bio"] == ""
+    assert client.get(ME, **_bearer(token)).json()["data"]["profile"]["bio"] == ""
 
 
 def test_a_date_of_birth_round_trips(token: str) -> None:
@@ -104,7 +104,7 @@ def test_a_date_of_birth_round_trips(token: str) -> None:
         **_bearer(token),
     )
 
-    assert response.json()["profile"]["date_of_birth"] == "1990-04-23"
+    assert response.json()["data"]["profile"]["date_of_birth"] == "1990-04-23"
 
 
 def test_a_date_that_is_not_a_date_is_refused_with_an_explanation(token: str) -> None:
@@ -116,7 +116,7 @@ def test_a_date_that_is_not_a_date_is_refused_with_an_explanation(token: str) ->
     )
 
     assert response.status_code == 400
-    assert "ISO date" in response.json()["detail"]
+    assert "ISO date" in response.json()["description"]
 
 
 def test_an_empty_update_is_refused_rather_than_silently_doing_nothing(token: str) -> None:
@@ -140,7 +140,7 @@ def test_one_account_cannot_reach_anothers_profile(db: None) -> None:
         PROFILE, {"display_name": "Mine"}, content_type="application/json", **_bearer(first)
     )
 
-    assert Client().get(ME, **_bearer(second)).json()["profile"]["display_name"] == ""
+    assert Client().get(ME, **_bearer(second)).json()["data"]["profile"]["display_name"] == ""
 
 
 # --- every method's token opens the same door ------------------------------
@@ -151,7 +151,7 @@ def _email_code_token(client: Client, email: str) -> str:
         "/api/v1/auth/email-code/signup/start",
         {"email": email},
         content_type="application/json",
-    ).json()
+    ).json()["data"]
     code = delivery.outbox[-1].body.rsplit(": ", 1)[1]
     response = client.post(
         "/api/v1/auth/email-code/signup/verify",
@@ -159,7 +159,7 @@ def _email_code_token(client: Client, email: str) -> str:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    token: str = response.json()["credentials"]["access_token"]
+    token: str = response.json()["data"]["credentials"]["access_token"]
     return token
 
 
@@ -168,7 +168,7 @@ def _sms_code_token(client: Client, phone: str) -> str:
         "/api/v1/auth/sms-code/signup/start",
         {"phone": phone},
         content_type="application/json",
-    ).json()
+    ).json()["data"]
     code = delivery.outbox[-1].body.rsplit(": ", 1)[1]
     response = client.post(
         "/api/v1/auth/sms-code/signup/verify",
@@ -176,7 +176,7 @@ def _sms_code_token(client: Client, phone: str) -> str:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    token: str = response.json()["credentials"]["access_token"]
+    token: str = response.json()["data"]["credentials"]["access_token"]
     return token
 
 
@@ -193,7 +193,7 @@ def _magic_link_token(client: Client, email: str) -> str:
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
-    token: str = response.json()["credentials"]["access_token"]
+    token: str = response.json()["data"]["credentials"]["access_token"]
     return token
 
 
@@ -215,7 +215,7 @@ def test_a_token_from_any_method_authenticates_an_unrelated_endpoint(
     response = client.get(ME, **_bearer(make_token(client)))
 
     assert response.status_code == 200, response.content
-    assert response.json()["profile"]["locale"] == "en-us"
+    assert response.json()["data"]["profile"]["locale"] == "en-us"
 
 
 def test_a_code_login_records_that_the_address_was_reached(db: None) -> None:
@@ -223,12 +223,12 @@ def test_a_code_login_records_that_the_address_was_reached(db: None) -> None:
 
     token = _email_code_token(client, "by-code@example.com")
 
-    assert client.get(ME, **_bearer(token)).json()["email_verified"] is True
+    assert client.get(ME, **_bearer(token)).json()["data"]["email_verified"] is True
 
 
 def test_a_password_signup_does_not_claim_the_address_is_verified(token: str) -> None:
     """Nobody proved they can read it: they only typed it into a form."""
-    assert Client().get(ME, **_bearer(token)).json()["email_verified"] is False
+    assert Client().get(ME, **_bearer(token)).json()["data"]["email_verified"] is False
 
 
 def test_a_phone_signup_produces_an_account_with_no_address(db: None) -> None:
@@ -236,7 +236,7 @@ def test_a_phone_signup_produces_an_account_with_no_address(db: None) -> None:
 
     token = _sms_code_token(client, "+14155550101")
 
-    assert client.get(ME, **_bearer(token)).json()["email"] == ""
+    assert client.get(ME, **_bearer(token)).json()["data"]["email"] == ""
 
 
 def test_every_method_lands_on_one_account_model(db: None) -> None:
@@ -265,8 +265,45 @@ def test_a_pending_second_factor_hands_back_no_token_to_use(db: None) -> None:
         content_type="application/json",
     )
 
-    body = response.json()
+    body = response.json()["data"]
     assert body["requires_second_factor"] is True
     assert body["credentials"] is None
     assert Client().get(ME, **_bearer(body["login_ticket"])).status_code == 401
     assert Client().get(ME, **_bearer(token)).status_code == 200, "the earlier token still works"
+
+
+def test_a_value_too_long_for_its_column_is_refused(token: str) -> None:
+    """SQLite would store it and PostgreSQL would raise, so neither gets the chance."""
+    response = Client().patch(
+        PROFILE,
+        {"display_name": "x" * 151},
+        content_type="application/json",
+        **_bearer(token),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["description"] == "display_name must be at most 150 characters."
+
+
+def test_an_avatar_that_is_not_a_url_is_refused(token: str) -> None:
+    response = Client().patch(
+        PROFILE,
+        {"avatar_url": "not a url at all"},
+        content_type="application/json",
+        **_bearer(token),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["description"] == "avatar_url must be a valid URL."
+
+
+def test_a_real_avatar_url_still_goes_through(token: str) -> None:
+    response = Client().patch(
+        PROFILE,
+        {"avatar_url": "https://example.com/zoe.png"},
+        content_type="application/json",
+        **_bearer(token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["profile"]["avatar_url"] == "https://example.com/zoe.png"

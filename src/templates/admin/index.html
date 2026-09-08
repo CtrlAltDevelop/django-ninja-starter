@@ -1,0 +1,178 @@
+{% extends 'admin/base.html' %}
+
+{% comment %}
+The admin's front page, replaced. Django's is a list of models, which answers
+"what exists" and never "what needs doing" -- so an editor lands on a menu and
+has to go looking for the page they were asked to change.
+
+The cards above the model list are the numbers that change what somebody does
+next: how much of the site is translated, which required content is still empty,
+whether sign-ins have started failing, what has been ordered, what the shop has
+run out of, and which of the dates somebody wrote down is now close enough to
+do something about. Each is filled in by
+infrastructure.common.adminui.dashboard, each is permission-checked there, and
+each is missing rather than empty when its app is not installed.
+{% endcomment %}
+
+{% load i18n unfold %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block branding %}
+    {% include "unfold/helpers/site_branding.html" %}
+{% endblock %}
+
+{% block content %}
+    {% if content_numbers or shop_numbers or account_numbers or site_events.tracked %}
+        <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 lg:grid-cols-4">
+            {% if content_numbers %}
+                {% component "unfold/components/card.html" with href=content_numbers.pages_link icon="web" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Published pages" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ content_numbers.pages }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {{ content_numbers.sections }} {% trans "sections" %}{% if content_numbers.drafts %} · {{ content_numbers.drafts }} {% trans "draft(s)" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+
+                {% component "unfold/components/card.html" with icon="text_fields" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Content fields" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ content_numbers.fields }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "across" %} {{ content_numbers.languages|length }} {% trans "language(s)" %}</span>
+                {% endcomponent %}
+
+                {% component "unfold/components/card.html" with icon="warning" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Required, still empty" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ content_numbers.required_missing }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {% if content_numbers.required_missing %}{% trans "fields a page still needs" %}{% else %}{% trans "everything required is written" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+            {% endif %}
+
+            {% if site_events and site_events.tracked %}
+                {% component "unfold/components/card.html" with href=site_events.link icon="event" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Upcoming site events" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ site_events.total }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {% if site_events.overdue %}{{ site_events.overdue }} {% trans "already overdue" %}{% else %}{{ site_events.tracked }} {% trans "date(s) being watched" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+            {% endif %}
+
+            {% if shop_numbers %}
+                {% component "unfold/components/card.html" with href=shop_numbers.orders_link icon="receipt_long" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Orders, last 7 days" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ shop_numbers.orders_week }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{{ shop_numbers.revenue_week }} {% trans "taken" %}</span>
+                {% endcomponent %}
+
+                {% component "unfold/components/card.html" with href=shop_numbers.orders_link icon="local_shipping" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Waiting to go out" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ shop_numbers.to_send }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {% if shop_numbers.awaiting_payment %}{{ shop_numbers.awaiting_payment }} {% trans "still awaiting payment" %}{% else %}{% trans "nothing is awaiting payment" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+
+                {% component "unfold/components/card.html" with href=shop_numbers.products_link icon="inventory_2" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Out of stock" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ shop_numbers.out_of_stock }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {% if shop_numbers.low_stock %}{{ shop_numbers.low_stock }} {% trans "more running low" %}{% else %}{% trans "nothing else is running low" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+
+                {% component "unfold/components/card.html" with href=shop_numbers.reviews_link icon="reviews" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Reviews to moderate" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ shop_numbers.reviews_waiting }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                        {% if shop_numbers.reviews_waiting %}{% trans "nobody can read these yet" %}{% else %}{% trans "the queue is empty" %}{% endif %}
+                    </span>
+                {% endcomponent %}
+            {% endif %}
+
+            {% if account_numbers %}
+                {% component "unfold/components/card.html" with href=account_numbers.link icon="person" %}
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Accounts" %}</span>
+                    <h1 class="font-semibold text-3xl text-font-important-light dark:text-font-important-dark">{{ account_numbers.total }}</h1>
+                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{{ account_numbers.recent }} {% trans "joined this week" %}</span>
+                {% endcomponent %}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    {% if content_numbers or sign_in_numbers or site_events.events %}
+        <div class="grid grid-cols-1 gap-4 mb-8 lg:grid-cols-2">
+            {% if content_numbers %}
+                {% component "unfold/components/card.html" with title=_("Translation coverage") %}
+                    <div class="flex flex-col gap-4">
+                        {% for row in content_numbers.coverage %}
+                            {% component "unfold/components/progress.html" with title=row.language description=row.percent|stringformat:"s"|add:"%" value=row.percent %}{% endcomponent %}
+                        {% endfor %}
+                        <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">
+                            {% trans "A field with no translation falls back to the default language, so a page always renders." %}
+                        </span>
+                    </div>
+                {% endcomponent %}
+            {% endif %}
+
+            {% if site_events.events %}
+                {% component "unfold/components/card.html" with title=_("Upcoming site events") %}
+                    <div class="flex flex-col gap-3">
+                        {% for event in site_events.events %}
+                            <a href="{{ event.link }}" class="flex flex-row gap-4 items-baseline justify-between">
+                                <span class="flex flex-col">
+                                    <span class="font-medium text-font-important-light dark:text-font-important-dark">{{ event.name }}</span>
+                                    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{{ event.kind }} · {{ event.date|date:"j M Y" }}</span>
+                                </span>
+                                <span class="text-sm whitespace-nowrap {% if event.overdue %}text-red-600 dark:text-red-400{% else %}text-font-subtle-light dark:text-font-subtle-dark{% endif %}">
+                                    {% if event.overdue %}{% trans "overdue" %}{% elif event.days == 0 %}{% trans "today" %}{% else %}{% blocktrans with days=event.days %}in {{ days }} day(s){% endblocktrans %}{% endif %}
+                                </span>
+                            </a>
+                        {% endfor %}
+                        {% if site_events.total > site_events.events|length %}
+                            <a href="{{ site_events.link }}" class="text-font-subtle-light text-sm underline dark:text-font-subtle-dark">
+                                {% blocktrans with more=site_events.total %}{{ more }} in all{% endblocktrans %}
+                            </a>
+                        {% endif %}
+                    </div>
+                {% endcomponent %}
+            {% endif %}
+
+            {% if sign_in_numbers %}
+                {% component "unfold/components/card.html" with title=_("Sign-ins, last 7 days") %}
+                    <div class="flex flex-col gap-4">
+                        <div class="flex flex-row gap-8">
+                            <div class="flex flex-col">
+                                <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Succeeded" %}</span>
+                                <h2 class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ sign_in_numbers.succeeded }}</h2>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Failed" %}</span>
+                                <h2 class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ sign_in_numbers.failed }}</h2>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Success rate" %}</span>
+                                <h2 class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ sign_in_numbers.success_rate }}%</h2>
+                            </div>
+                        </div>
+
+                        {% for row in sign_in_numbers.by_method %}
+                            {% component "unfold/components/progress.html" with title=row.method description=row.count value=row.count %}{% endcomponent %}
+                        {% empty %}
+                            <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">{% trans "Nobody has signed in this week." %}</span>
+                        {% endfor %}
+                    </div>
+                {% endcomponent %}
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <div class="flex flex-col lg:flex-row lg:gap-8">
+        <div class="grow">
+            {% include "unfold/helpers/app_list_default.html" %}
+        </div>
+
+        {% include "unfold/helpers/history.html" %}
+    </div>
+{% endblock %}
