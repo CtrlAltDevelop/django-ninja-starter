@@ -66,11 +66,20 @@ class PageMetaOut(Schema):
 
 
 class PageOut(Schema):
+    """One page. ``json_ld`` is the schema.org description of it.
+
+    Named ``json_ld`` rather than ``schema``: ``schema`` is an attribute of the
+    model this inherits from, and a field shadowing it is the kind of collision
+    that surfaces as a warning nobody reads and a serialiser that misbehaves
+    somewhere else.
+    """
+
     id: str
     name: str
     language: str
     status: str
     meta: PageMetaOut
+    json_ld: dict[str, Any] = {}
     sections: list[SectionOut] = []
 
 

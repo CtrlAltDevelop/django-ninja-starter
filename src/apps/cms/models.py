@@ -53,11 +53,13 @@ this page not live?" by checking three unrelated things.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Self
 
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -125,6 +127,22 @@ class SwitchableModel(CmsModel):
         abstract = True
 
 
+class ChangeFrequency(models.TextChoices):
+    """How often a page changes, in the vocabulary sitemaps.org defines.
+
+    A hint and never a promise: a crawler weighs it against what it has seen
+    change, so the honest answer is worth more than the flattering one.
+    """
+
+    ALWAYS = "always", "Always"
+    HOURLY = "hourly", "Hourly"
+    DAILY = "daily", "Daily"
+    WEEKLY = "weekly", "Weekly"
+    MONTHLY = "monthly", "Monthly"
+    YEARLY = "yearly", "Yearly"
+    NEVER = "never", "Never"
+
+
 class SiteSettings(models.Model):
     """The one row describing whatever this content belongs to.
 
@@ -165,6 +183,40 @@ class SiteSettings(models.Model):
         "Canonical URL",
         blank=True,
         help_text="The site's own address, for any page that does not set one.",
+    )
+    # The sitemap, which is the one piece of SEO nobody can write by hand and
+    # keep right: it has to list what is live *now*, and what is live now
+    # changes every time somebody publishes. So it is generated, and what an
+    # editor owns here is the handful of judgements a generator cannot make --
+    # whether to publish one at all, what address the pages actually have, and
+    # how often a crawler should bother coming back.
+    sitemap_enabled = models.BooleanField(
+        "Publish a sitemap",
+        default=True,
+        help_text="Turn off to answer the sitemap URL with a 404, for a site behind a login.",
+    )
+    sitemap_base_url = models.URLField(
+        "Sitemap base URL",
+        blank=True,
+        help_text=(
+            "The address pages hang off, for example https://example.com. "
+            "Blank uses the canonical URL above."
+        ),
+    )
+    sitemap_changefreq = models.CharField(
+        "Default change frequency",
+        max_length=16,
+        choices=ChangeFrequency.choices,
+        default=ChangeFrequency.WEEKLY,
+        help_text="Used for any page that does not set its own.",
+    )
+    sitemap_priority = models.DecimalField(
+        "Default priority",
+        max_digits=2,
+        decimal_places=1,
+        default=Decimal("0.5"),
+        validators=(MinValueValidator(Decimal("0.0")), MaxValueValidator(Decimal("1.0"))),
+        help_text="Between 0.0 and 1.0, and only ever compared with this site's own pages.",
     )
     contact = models.JSONField(
         default=dict, blank=True, help_text='Free-form contact details: {"email": "..."}.'
@@ -288,6 +340,32 @@ class Page(CmsModel):
     og_image = models.URLField("Social preview image", blank=True)
     og_url = models.URLField(
         "Canonical URL", blank=True, help_text="Where this page really lives, if not here."
+    )
+
+    # Per page, and all three optional: the sitemap works with none of them
+    # filled in, and each is here for the page that is an exception. Excluding
+    # one is the common case -- a thank-you page or a landing page for one
+    # campaign is live, reachable and has no business in a search index.
+    in_sitemap = models.BooleanField(
+        "List in the sitemap",
+        default=True,
+        help_text="Turn off for a page that is live but should not be indexed.",
+    )
+    sitemap_changefreq = models.CharField(
+        "Change frequency",
+        max_length=16,
+        blank=True,
+        choices=ChangeFrequency.choices,
+        help_text="Leave empty to use the site's default.",
+    )
+    sitemap_priority = models.DecimalField(
+        "Priority",
+        max_digits=2,
+        decimal_places=1,
+        null=True,
+        blank=True,
+        validators=(MinValueValidator(Decimal("0.0")), MaxValueValidator(Decimal("1.0"))),
+        help_text="Between 0.0 and 1.0. Leave empty to use the site's default.",
     )
 
     objects = PageQuerySet.as_manager()
@@ -659,3 +737,146 @@ class MenuItem(SwitchableModel):
             raise ValidationError({"parent": "Menus nest one level deep, no further."})
         if parent.menu_id != self.menu_id:
             raise ValidationError({"parent": "The parent entry belongs to a different menu."})
+
+
+class SiteEventKind(models.TextChoices):
+    """What kind of thing the date is, because it decides who reacts to it."""
+
+    RENEWAL = "renewal", "Renewal"
+    CAMPAIGN = "campaign", "Campaign"
+    DEADLINE = "deadline", "Deadline"
+    CONTENT = "content", "Content refresh"
+    OTHER = "other", "Other"
+
+
+class SiteEventQuerySet(models.QuerySet["SiteEvent"]):
+    def watched(self) -> "SiteEventQuerySet":
+        """The events still being kept an eye on.
+
+        Ticked-off ones stay in: a yearly event that was handled last year is
+        handled and due again, and only :meth:`SiteEvent.is_due` -- which knows
+        which occurrence the tick was for -- can tell the two apart.
+        """
+        return self.filter(is_active=True)
+
+
+class SiteEvent(SwitchableModel):
+    """A date somebody running this site has to do something about.
+
+    Not content: nothing here is ever served to a reader. It is the other half
+    of running a site -- the domain that expires, the campaign that starts on
+    the first, the price list that has to be checked before the new year -- and
+    the reason it is a model rather than a calendar invitation is that the
+    person who has to act on it is looking at this admin, not at that calendar.
+
+    A reminder is a *lead time* rather than a second date. "Tell me two weeks
+    before" survives the date moving; "remind me on the 14th" does not, and the
+    date moves constantly.
+
+    ``repeats_yearly`` is here because most of these dates are annual by nature
+    -- renewals, audits, the January price review -- and the alternative is a
+    row that goes stale the day after it fires and is either deleted, losing the
+    history, or left to nag forever.
+    """
+
+    name = models.CharField("Event", max_length=200, help_text="What has to happen.")
+    kind = models.CharField(
+        max_length=16, choices=SiteEventKind.choices, default=SiteEventKind.OTHER
+    )
+    happens_on = models.DateField(
+        "Date", help_text="The day it happens, or the deadline it has to be done by."
+    )
+    repeats_yearly = models.BooleanField(
+        default=False, help_text="For a date that comes round every year, like a renewal."
+    )
+    remind_days_before = models.PositiveSmallIntegerField(
+        "Remind this many days before",
+        default=14,
+        help_text="How much warning the dashboard gives. Zero means on the day.",
+    )
+    notes = models.TextField(blank=True, help_text="What whoever picks this up needs to know.")
+    url = models.URLField(blank=True, help_text="Where the work gets done: a registrar, a doc.")
+    is_done = models.BooleanField(
+        "Handled",
+        default=False,
+        help_text="Ticked off. A yearly event comes back on its own once the date has passed.",
+    )
+    # Which occurrence the tick above refers to. Without it, ticking off this
+    # year's domain renewal would silence next year's too -- and the reminder
+    # nobody sees is the one for the renewal that lapses.
+    handled_occurrence = models.DateField(null=True, blank=True, editable=False)
+
+    objects = SiteEventQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "Site event"
+        verbose_name_plural = "Site events"
+        ordering = ("happens_on", "name")
+        indexes = (models.Index(fields=("is_done", "happens_on")),)
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.happens_on:%Y-%m-%d})"
+
+    def clean(self) -> None:
+        super().clean()
+        if self.repeats_yearly and self.remind_days_before > 365:
+            raise ValidationError(
+                {"remind_days_before": "A yearly event cannot be announced more than a year out."}
+            )
+        # Recorded on the way in rather than by the screen that ticked the box,
+        # because an admin action, a fixture and a shell session all tick it.
+        self.handled_occurrence = self.next_date() if self.is_done else None
+
+    def next_date(self, today: date | None = None) -> date:
+        """The occurrence being counted down to.
+
+        For a one-off that is simply its date, past or not: an overdue renewal
+        must keep saying it is overdue rather than disappearing. For a yearly
+        one it is this year's, or next year's once this year's has gone by.
+        """
+        moment = today or timezone.localdate()
+        if not self.repeats_yearly or self.happens_on >= moment:
+            return self.happens_on
+        try:
+            this_year = self.happens_on.replace(year=moment.year)
+        except ValueError:
+            # 29 February in a year that has none. The 28th is what everybody
+            # means by "the same day", and is what every calendar app does.
+            this_year = self.happens_on.replace(year=moment.year, day=28)
+        return this_year if this_year >= moment else this_year.replace(year=moment.year + 1)
+
+    def days_away(self, today: date | None = None) -> int:
+        """Days until the next occurrence. Negative once it has gone by."""
+        return (self.next_date(today) - (today or timezone.localdate())).days
+
+    def is_overdue(self, today: date | None = None) -> bool:
+        return self.days_away(today) < 0
+
+    def is_due(self, today: date | None = None) -> bool:
+        """Whether the dashboard should be showing this now.
+
+        Overdue counts as due. The whole point of the reminder is the thing that
+        did not get done, and a list that drops a date the moment it passes is a
+        list that is empty exactly when it matters.
+        """
+        if self.is_done and self.handled_occurrence == self.next_date(today):
+            return False
+        return self.days_away(today) <= self.remind_days_before
+
+    @property
+    def reminder_starts_on(self) -> date:
+        """The day this begins appearing on the dashboard."""
+        return self.next_date() - timedelta(days=self.remind_days_before)
+
+
+def due_events(today: date | None = None) -> list[SiteEvent]:
+    """Every event whose reminder window is open, soonest first.
+
+    Sorted and filtered in Python rather than in SQL, and deliberately: a yearly
+    event's next occurrence is a calculation over the row, not a column, and
+    expressing it in the database would take a ``CASE`` over three date parts to
+    order a table that holds a dozen rows. This is the cheap half of that trade.
+    """
+    moment = today or timezone.localdate()
+    due = [event for event in SiteEvent.objects.watched() if event.is_due(moment)]
+    return sorted(due, key=lambda event: (event.next_date(moment), event.name))
