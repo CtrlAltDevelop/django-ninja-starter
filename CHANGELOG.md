@@ -485,6 +485,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A scaffolded API version came out of `startapi` failing the project's own
+  `make check`.** Two blank lines before `router = Router()` where isort wants
+  one -- it is an assignment, not a definition -- and a test assertion pre-split
+  across three lines that `ruff format` collapses because it fits. A generator
+  that writes code its own checks reject is a generator whose first instruction
+  to a new project is "now fix what I just wrote".
+- **The wheel smoke test never compiled the protos it then type-checked.** CI
+  scaffolds an app and runs `make check` on it; `startapi` writes a gRPC service
+  whose stubs `manage.py protos` produces, and prints exactly that. The step was
+  missing, so mypy failed on an import of a module nothing had generated yet.
 - **The site settings form was missing every input it existed for.** Its
   per-language boxes were added in the form's `__init__`, so they never reached
   `base_fields` -- and the admin builds its layout from `base_fields`. The page
