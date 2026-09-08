@@ -133,7 +133,9 @@ class Command(BaseCommand):
             "from django.http import HttpRequest\n"
             "from ninja import Router\n\n"
             f"from apps.{app_name}.rest.schemas import ApiMessage\n"
-            f"from apps.{app_name}.services import {app_name}_service\n\n\n"
+            # One blank line rather than two: what follows the imports is an
+            # assignment, not a definition, and that is where isort stops.
+            f"from apps.{app_name}.services import {app_name}_service\n\n"
             "router = Router()\n\n\n"
             '@router.get("/", response=ApiMessage, summary="Example endpoint")\n'
             "def index(request: HttpRequest) -> ApiMessage:\n"
@@ -230,10 +232,13 @@ class Command(BaseCommand):
             f'        data={{"query": "{{ {_camel(app_name)}Greeting }}"}},\n'
             '        content_type="application/json",\n'
             "    )\n\n"
+            "    body = json.loads(response.content)\n\n"
             "    assert response.status_code == 200\n"
-            '    assert json.loads(response.content)["data"] == {\n'
-            f'        "{_camel(app_name)}Greeting": "{class_name} {version} API"\n'
-            "    }\n",
+            # Read into a local first and compared on one line: `ruff format`
+            # collapses anything that fits, and this scaffold has to come out of
+            # the generator already formatted the way the project checks for.
+            '    assert body["data"] == '
+            f'{{"{_camel(app_name)}Greeting": "{class_name} {version} API"}}\n',
         )
 
         routes.append(route)
