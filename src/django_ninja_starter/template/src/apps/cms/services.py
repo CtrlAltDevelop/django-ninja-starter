@@ -1,6 +1,6 @@
 """Reading content: what exists, what it is called, and what is on it.
 
-Five questions, all read-only. Writing is the admin's job -- a CMS whose content
+Six questions, all read-only. Writing is the admin's job -- a CMS whose content
 can be changed over the same API that serves it has to answer "who may edit
 this?" on every request, and this one answers "nobody, here" instead.
 
@@ -26,6 +26,7 @@ from apps.cms.content import (
 )
 from apps.cms.models import Menu, Page, SiteSettings
 from apps.cms.preview import slug_from_token
+from apps.cms.sitemap import SitemapDisabled, sitemap_xml
 
 
 class ContentNotFound(LookupError):
@@ -33,6 +34,15 @@ class ContentNotFound(LookupError):
 
     Deliberately not distinguished from "exists but is a draft": saying which
     would turn the read API into a way to enumerate unpublished work.
+    """
+
+
+class SitemapNotPublished(LookupError):
+    """This installation has turned its sitemap off.
+
+    Its own class rather than :class:`ContentNotFound`, because the two mean
+    different things to a caller: one is "no such page", the other is "this site
+    does not do that" -- and only the second is worth an editor's attention.
     """
 
 
@@ -52,6 +62,13 @@ class ContentService:
         site not existing.
         """
         return site_payload(await SiteSettings.aload(), language)
+
+    async def sitemap(self) -> str:
+        """Every live page as sitemap XML, or a refusal if the site publishes none."""
+        try:
+            return await sitemap_xml()
+        except SitemapDisabled as disabled:
+            raise SitemapNotPublished(str(disabled)) from None
 
     async def menus(self) -> list[dict[str, Any]]:
         menus = Menu.objects.filter(is_active=True).order_by("name")

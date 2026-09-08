@@ -32,7 +32,12 @@ from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.errors import HttpError
 
+from apps.shop.attributes import parse_filters
 from apps.shop.rest.schemas import (
+    AddressIn,
+    AddressOut,
+    AddressPatchIn,
+    AddressRemovedOut,
     BrandOut,
     CartAddIn,
     CartOut,
@@ -41,6 +46,8 @@ from apps.shop.rest.schemas import (
     CategoryOut,
     CheckoutIn,
     CollectionOut,
+    CouponPreviewIn,
+    CouponPreviewOut,
     InvoiceOut,
     LikeOut,
     ListingOut,
@@ -58,6 +65,7 @@ from apps.shop.rest.schemas import (
     ReviewRemovedOut,
     SellerDetailOut,
     SellerOut,
+    ShippingMethodOut,
     ViewOut,
 )
 from apps.shop.services import ShopNotFound, ShopRefused, shop_service
@@ -107,17 +115,11 @@ def _caller(request: HttpRequest) -> Any | None:
 def _attribute_filters(pairs: list[str]) -> dict[str, str]:
     """Parse ``?attribute=colour:Red&attribute=size:M`` into what the service takes.
 
-    Repeated parameters rather than a JSON blob in a query string, because this
-    is what a filter sidebar's checkboxes produce and what a shopper can edit in
-    the address bar. A malformed pair is ignored rather than refused: a filter
-    somebody mistyped should show them the unfiltered list, not an error page.
+    The parsing itself is :func:`apps.shop.attributes.parse_filters`, so this
+    door and the gRPC one cannot come to different conclusions about the same
+    sidebar.
     """
-    filters: dict[str, str] = {}
-    for pair in pairs:
-        code, separator, value = pair.partition(":")
-        if separator and code.strip() and value.strip():
-            filters[code.strip()] = value.strip()
-    return filters
+    return parse_filters(pairs)
 
 
 # ----------------------------------------------------------------------
@@ -398,6 +400,97 @@ def remove_from_cart(request: HttpRequest, item_id: str) -> dict:
 @router.delete("/cart", response=CartOut, auth=api_auth, summary="Empty your basket")
 def clear_cart(request: HttpRequest) -> dict:
     return shop_service.clear_cart(request.user)
+
+
+# ----------------------------------------------------------------------
+# What a checkout needs first: an address to send it to, a way to get it
+# there, and whatever code the shopper is holding.
+# ----------------------------------------------------------------------
+
+
+@router.get(
+    "/addresses", response=list[AddressOut], auth=api_auth, summary="List your saved addresses"
+)
+def list_addresses(request: HttpRequest) -> list[dict]:
+    """This account's address book, the default one first."""
+    return shop_service.addresses(request.user)
+
+
+@router.post("/addresses", response=AddressOut, auth=api_auth, summary="Save a delivery address")
+def add_address(request: HttpRequest, payload: AddressIn) -> dict:
+    """Save somewhere to send an order. The first one saved becomes the default."""
+    with _answers():
+        return shop_service.add_address(request.user, **payload.dict())
+
+
+@router.get(
+    "/addresses/{address_id}", response=AddressOut, auth=api_auth, summary="Read one address"
+)
+def read_address(request: HttpRequest, address_id: str) -> dict:
+    with _answers():
+        return shop_service.address(request.user, address_id)
+
+
+@router.patch(
+    "/addresses/{address_id}", response=AddressOut, auth=api_auth, summary="Edit an address"
+)
+def update_address(request: HttpRequest, address_id: str, payload: AddressPatchIn) -> dict:
+    """Change part of a saved address.
+
+    Editing one never rewrites an order that has already been placed: an order
+    carries a flat copy of the address it was sent to, taken at that moment.
+    """
+    with _answers():
+        return shop_service.update_address(
+            request.user, address_id, **payload.dict(exclude_unset=True)
+        )
+
+
+@router.put(
+    "/addresses/{address_id}/default",
+    response=AddressOut,
+    auth=api_auth,
+    summary="Choose the default address",
+)
+def set_default_address(request: HttpRequest, address_id: str) -> dict:
+    """Choosing one unchooses the last, so "the default" always means one address."""
+    with _answers():
+        return shop_service.set_default_address(request.user, address_id)
+
+
+@router.delete(
+    "/addresses/{address_id}",
+    response=AddressRemovedOut,
+    auth=api_auth,
+    summary="Forget an address",
+)
+def remove_address(request: HttpRequest, address_id: str) -> dict:
+    with _answers():
+        return shop_service.remove_address(request.user, address_id)
+
+
+@router.get("/shipping-methods", response=list[ShippingMethodOut], summary="List delivery options")
+def list_shipping_methods(request: HttpRequest) -> list[dict]:
+    """Every way an order can be delivered, costed against the caller's basket.
+
+    Public, because a shopper comparing delivery options has not necessarily
+    signed in yet -- but a signed-in caller gets each option costed for what is
+    actually in their basket, which is the only way "free over 50" can be
+    printed honestly.
+    """
+    return shop_service.shipping_methods(_caller(request))
+
+
+@router.post("/cart/coupon", response=CouponPreviewOut, auth=api_auth, summary="Try a coupon code")
+def preview_coupon(request: HttpRequest, payload: CouponPreviewIn) -> dict:
+    """What a code would take off this basket, without committing to it.
+
+    A code the shop will not accept comes back as an answer saying why, not as
+    an error: this is what a checkout page asks while somebody is still typing,
+    and a 400 per keystroke is not a thing a client should have to handle.
+    """
+    with _answers():
+        return shop_service.preview_coupon(request.user, payload.code)
 
 
 def _order_out(order: Any) -> dict:

@@ -84,7 +84,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Avg, Count, Q
 from django.utils import timezone
 
@@ -1418,11 +1418,48 @@ class OrderStatus(models.TextChoices):
     REFUNDED = "refunded", "Refunded"
 
 
+#: Which status an order may move to from the one it is in. A shop's order cycle
+#: is a handful of one-way steps, and the two that matter -- cancelling and
+#: refunding -- put stock back, so "anything to anything" is not a policy but the
+#: absence of one. Written here rather than in the admin because the service
+#: enforces it and all three transports go through the service.
+#:
+#: Cancelling stops at ``PENDING`` on purpose. Once money has been collected the
+#: way out is a refund, which gives it back; letting a paid order be cancelled
+#: would put the stock on the shelf and leave the payment sitting there saying
+#: the shop was paid for something it no longer owes. Nothing walks backwards
+#: either: an order that was refunded is not returned to paid, because the money
+#: went out and this row is the record of that.
+#:
+#: Every member is spelled ``str(...)``: a ``TextChoices`` member is a
+#: ``(value, label)`` pair to a type checker, and only its ``__str__`` is the
+#: value a status column actually holds.
+ORDER_TRANSITIONS: dict[str, tuple[str, ...]] = {
+    str(OrderStatus.PENDING): (str(OrderStatus.PAID), str(OrderStatus.CANCELLED)),
+    str(OrderStatus.PAID): (str(OrderStatus.PROCESSING), str(OrderStatus.REFUNDED)),
+    str(OrderStatus.PROCESSING): (str(OrderStatus.SHIPPED), str(OrderStatus.REFUNDED)),
+    str(OrderStatus.SHIPPED): (str(OrderStatus.COMPLETED), str(OrderStatus.REFUNDED)),
+    str(OrderStatus.COMPLETED): (str(OrderStatus.REFUNDED),),
+    str(OrderStatus.CANCELLED): (),
+    str(OrderStatus.REFUNDED): (),
+}
+
+#: The states in which nothing has been dispatched, so the stock an order took
+#: off the shelf is still the shop's to put back.
+RESTOCKING_STATUSES = frozenset({str(OrderStatus.CANCELLED), str(OrderStatus.REFUNDED)})
+
+
 class PaymentStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     SUCCEEDED = "succeeded", "Succeeded"
     FAILED = "failed", "Failed"
     REFUNDED = "refunded", "Refunded"
+
+
+class AddressQuerySet(models.QuerySet["Address"]):
+    def default_first(self) -> "AddressQuerySet":
+        """The order an address book is read in: the chosen one, then the newest."""
+        return self.order_by("-is_default", "-updated_at")
 
 
 class Address(ShopModel):
@@ -1445,7 +1482,11 @@ class Address(ShopModel):
     postal_code = models.CharField(max_length=32)
     line1 = models.CharField(max_length=200)
     line2 = models.CharField(max_length=200, blank=True)
-    is_default = models.BooleanField(default=False)
+    is_default = models.BooleanField(
+        default=False, help_text="The one a checkout offers first. There is at most one."
+    )
+
+    objects = AddressQuerySet.as_manager()
 
     class Meta:
         verbose_name = "Delivery address"
@@ -1454,6 +1495,32 @@ class Address(ShopModel):
 
     def __str__(self) -> str:
         return f"{self.label}: {self.full_name}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Keep "the default" meaning exactly one address.
+
+        Enforced here rather than as a constraint because the rule is not that
+        the column is unique -- an account with no addresses at all has no
+        default, and that is fine. It is that choosing one unchooses the last,
+        which is a write to a second row and therefore not something a database
+        constraint can do. The first address an account saves becomes the
+        default on its own, because a shopper who has typed one address in has
+        already told the shop which one they mean.
+        """
+        with transaction.atomic():
+            if not self.is_default and not Address.objects.filter(user_id=self.user_id).exists():
+                self.is_default = True
+            super().save(*args, **kwargs)
+            if self.is_default:
+                Address.objects.filter(user_id=self.user_id).exclude(pk=self.pk).update(
+                    is_default=False
+                )
+
+    def clean(self) -> None:
+        super().clean()
+        self.country = (self.country or "").upper()
+        if len(self.country) != 2 or not self.country.isalpha():
+            raise ValidationError({"country": "A two-letter ISO country code, for example GB."})
 
     def snapshot(self) -> dict[str, str]:
         """This address as flat text, for an order to keep a copy of.
@@ -1488,8 +1555,16 @@ class ShippingMethod(ShopModel):
 
     name = models.CharField(max_length=120, unique=True)
     description = models.TextField(blank=True)
-    price = models.DecimalField(**MONEY, default=Decimal("0"))
-    free_from = models.DecimalField(**MONEY, null=True, blank=True)
+    price = models.DecimalField(
+        **MONEY, default=Decimal("0"), validators=[MinValueValidator(Decimal("0"))]
+    )
+    free_from = models.DecimalField(
+        **MONEY,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Delivery is free on a basket at least this big. Empty means never.",
+    )
     min_days = models.PositiveSmallIntegerField(default=1)
     max_days = models.PositiveSmallIntegerField(default=3)
     is_active = models.BooleanField(default=True)
@@ -1502,6 +1577,13 @@ class ShippingMethod(ShopModel):
 
     def __str__(self) -> str:
         return self.name
+
+    def clean(self) -> None:
+        super().clean()
+        if self.max_days < self.min_days:
+            raise ValidationError(
+                {"max_days": "The slowest this arrives cannot be sooner than the fastest."}
+            )
 
     def cost_for(self, subtotal: Decimal) -> Decimal:
         """What this option costs for a basket of that size."""
@@ -1523,9 +1605,24 @@ class Coupon(ShopModel):
     """
 
     code = models.CharField(max_length=40, unique=True)
-    percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    amount = models.DecimalField(**MONEY, null=True, blank=True)
-    minimum_subtotal = models.DecimalField(**MONEY, default=Decimal("0"))
+    percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))],
+        help_text="Percent off the basket. Fill this in or the amount, not both.",
+    )
+    amount = models.DecimalField(
+        **MONEY,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="A flat amount off. Fill this in or the percentage, not both.",
+    )
+    minimum_subtotal = models.DecimalField(
+        **MONEY, default=Decimal("0"), validators=[MinValueValidator(Decimal("0"))]
+    )
     starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
     usage_limit = models.PositiveIntegerField(null=True, blank=True)
@@ -1540,16 +1637,70 @@ class Coupon(ShopModel):
     def __str__(self) -> str:
         return self.code
 
-    def valid_for(self, subtotal: Decimal) -> bool:
-        """Whether this code may be used on a basket of that size, right now."""
+    def clean(self) -> None:
+        """One of the two, worth something, over a window that runs forwards.
+
+        A coupon with neither a percentage nor an amount is worth nothing and
+        silently takes nothing off, which looks to a shopper exactly like a code
+        that was rejected. A coupon with both is a question nobody has answered
+        -- :meth:`saving` would pick the percentage, and whoever typed the
+        amount in would never find out. Both are refused here rather than at
+        checkout, where the person who could fix it is not the person reading
+        the error.
+        """
+        super().clean()
+        self.code = self.code.strip().upper()
+        if (self.percent is None) == (self.amount is None):
+            raise ValidationError(
+                {"percent": "A coupon is worth either a percentage or an amount. Fill in one."}
+            )
+        if self.percent is not None and not (0 < self.percent <= 100):
+            raise ValidationError({"percent": "A percentage off is between 0 and 100."})
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError({"amount": "An amount off has to be more than nothing."})
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValidationError({"ends_at": "The code stops working before it starts."})
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the code is live right now, before any basket is considered."""
         now = timezone.now()
         return bool(
             self.is_active
-            and subtotal >= self.minimum_subtotal
             and (self.starts_at is None or self.starts_at <= now)
             and (self.ends_at is None or self.ends_at > now)
             and (self.usage_limit is None or self.used_count < self.usage_limit)
         )
+
+    def refusal_for(self, subtotal: Decimal) -> str:
+        """Why this code may not be used on a basket that size -- or "" if it may.
+
+        A sentence rather than a boolean, because "this coupon is not available"
+        is the least useful thing a checkout page can say: a shopper eight
+        pounds short of the minimum will add something, and one holding an
+        expired code will stop trying.
+        """
+        now = timezone.now()
+        if not self.is_active:
+            return "That code is no longer in use."
+        if self.starts_at is not None and self.starts_at > now:
+            return "That code is not in use yet."
+        if self.ends_at is not None and self.ends_at <= now:
+            return "That code has expired."
+        if self.usage_limit is not None and self.used_count >= self.usage_limit:
+            return "That code has been used as many times as it can be."
+        if subtotal < self.minimum_subtotal:
+            return f"That code needs a basket of at least {self.minimum_subtotal}."
+        return ""
+
+    def valid_for(self, subtotal: Decimal) -> bool:
+        """Whether this code may be used on a basket of that size, right now.
+
+        The same question :meth:`refusal_for` answers, asked by the code that
+        only needs yes or no. Written in terms of it rather than beside it, so
+        the two cannot come to disagree about what an expired coupon is.
+        """
+        return not self.refusal_for(subtotal)
 
     def saving(self, subtotal: Decimal) -> Decimal:
         """What it takes off, never more than the basket holds."""
@@ -1590,6 +1741,17 @@ class Order(ShopModel):
     tax_total = models.DecimalField(**MONEY, default=Decimal("0"))
     total = models.DecimalField(**MONEY)
     note = models.TextField(blank=True)
+    # How it is getting there. Written when somebody in the admin dispatches it,
+    # and never by the shopper -- which is why they are plain columns on the
+    # order rather than anything the checkout fills in.
+    carrier = models.CharField(
+        max_length=80, blank=True, help_text="Who is carrying it: Royal Mail, DHL."
+    )
+    tracking_number = models.CharField(max_length=120, blank=True)
+    tracking_url = models.URLField(
+        max_length=500, blank=True, help_text="Where the shopper can follow it."
+    )
+    shipped_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = "Order"
@@ -1609,6 +1771,27 @@ class Order(ShopModel):
         if not self.number:
             self.number = f"S{timezone.now():%Y%m%d}{uuid.uuid4().hex[:8].upper()}"
         super().save(*args, **kwargs)
+
+    @property
+    def next_statuses(self) -> tuple[str, ...]:
+        """Where this order may go from here. The admin draws its buttons from this."""
+        return ORDER_TRANSITIONS.get(str(self.status), ())
+
+    def may_become(self, status: str) -> bool:
+        return status in self.next_statuses
+
+    @property
+    def is_open(self) -> bool:
+        """Whether the shop still owes this shopper something."""
+        return str(self.status) not in RESTOCKING_STATUSES and str(self.status) != (
+            OrderStatus.COMPLETED
+        )
+
+    @property
+    def paid_amount(self) -> Decimal:
+        """What has actually been collected against this order."""
+        settled = self.payments.filter(status=PaymentStatus.SUCCEEDED)
+        return sum((payment.amount for payment in settled), Decimal("0.00"))
 
 
 class OrderItem(ShopModel):
@@ -1648,6 +1831,45 @@ class OrderItem(ShopModel):
 
     def __str__(self) -> str:
         return f"{self.quantity} × {self.product_name}"
+
+
+class OrderEvent(ShopModel):
+    """One thing that happened to one order, in the order it happened.
+
+    A row per step rather than a set of ``shipped_at``/``cancelled_at`` columns
+    on the order, for the reason :class:`Payment` is a row per attempt: the
+    columns answer "when", and the question a shop is actually asked is "what
+    happened, in what order, and who did it". Refunding an order that was
+    shipped after being cancelled and reinstated is four rows here and an
+    unanswerable mess of nullable timestamps there.
+
+    ``actor`` is nullable and set to null rather than cascading, because the
+    trail has to outlive the account of whoever left it, and because a step a
+    webhook took was not taken by anybody.
+    """
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="events")
+    status = models.CharField(
+        max_length=16, choices=OrderStatus.choices, help_text="What the order became."
+    )
+    note = models.CharField(max_length=300, blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shop_order_events",
+        help_text="Who moved it. Empty for a step a gateway or a job took.",
+    )
+
+    class Meta:
+        verbose_name = "Order event"
+        verbose_name_plural = "Order events"
+        ordering = ("created_at",)
+        indexes = (models.Index(fields=("order", "created_at")),)
+
+    def __str__(self) -> str:
+        return f"{self.order.number}: {self.get_status_display()}"
 
 
 class Payment(ShopModel):

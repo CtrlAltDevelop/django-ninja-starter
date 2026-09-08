@@ -23,7 +23,7 @@ from datetime import timedelta
 from typing import Any
 
 from django.apps import apps
-from django.db.models import Count, Q
+from django.db.models import Case, Count, F, Q, Sum, When
 from django.http import HttpRequest
 from django.urls import reverse_lazy
 from django.utils import timezone
@@ -99,6 +99,12 @@ def _content_group() -> dict[str, Any]:
                 "permission": _may("cms.view_menu"),
             },
             {
+                "title": "Site events",
+                "icon": "event",
+                "link": _changelist("cms", "siteevent"),
+                "permission": _may("cms.view_siteevent", "cms.change_siteevent"),
+            },
+            {
                 "title": "Site settings",
                 "icon": "public",
                 "link": _changelist("cms", "sitesettings"),
@@ -126,6 +132,108 @@ def _notifications_group() -> dict[str, Any]:
                 "icon": "mark_email_read",
                 "link": _changelist("notifications", "notificationreceipt"),
                 "permission": _may("notifications.view_notificationreceipt"),
+            },
+        ],
+    }
+
+
+def _shop_group() -> dict[str, Any]:
+    """The catalogue somebody curates, and the orders that come out of it.
+
+    Ordered the way a shopkeeper's day is rather than the way the models are:
+    what needs doing (orders, payments, moderation) sits above what is designed
+    once and edited rarely (the category tree, the attribute schema). The
+    records nobody edits are collapsed at the bottom, because they are read
+    after something went wrong rather than as part of the work.
+    """
+    return {
+        "title": "Shop",
+        "separator": False,
+        "collapsible": False,
+        "items": [
+            {
+                "title": "Orders",
+                "icon": "receipt_long",
+                "link": _changelist("shop", "order"),
+                "permission": _may("shop.view_order"),
+            },
+            {
+                "title": "Payments",
+                "icon": "payments",
+                "link": _changelist("shop", "payment"),
+                "permission": _may("shop.view_payment"),
+            },
+            {
+                "title": "Invoices",
+                "icon": "description",
+                "link": _changelist("shop", "invoice"),
+                "permission": _may("shop.view_invoice"),
+            },
+            {
+                "title": "Products",
+                "icon": "inventory_2",
+                "link": _changelist("shop", "product"),
+                "permission": _may("shop.view_product", "shop.change_product"),
+            },
+            {
+                "title": "Categories",
+                "icon": "account_tree",
+                "link": _changelist("shop", "category"),
+                "permission": _may("shop.view_category"),
+            },
+            {
+                "title": "Brands",
+                "icon": "sell",
+                "link": _changelist("shop", "brand"),
+                "permission": _may("shop.view_brand"),
+            },
+            {
+                "title": "Sellers",
+                "icon": "storefront",
+                "link": _changelist("shop", "seller"),
+                "permission": _may("shop.view_seller"),
+            },
+            {
+                "title": "Collections",
+                "icon": "collections_bookmark",
+                "link": _changelist("shop", "collection"),
+                "permission": _may("shop.view_collection"),
+            },
+            {
+                "title": "Discounts",
+                "icon": "local_offer",
+                "link": _changelist("shop", "discount"),
+                "permission": _may("shop.view_discount"),
+            },
+            {
+                "title": "Coupons",
+                "icon": "confirmation_number",
+                "link": _changelist("shop", "coupon"),
+                "permission": _may("shop.view_coupon"),
+            },
+            {
+                "title": "Delivery options",
+                "icon": "local_shipping",
+                "link": _changelist("shop", "shippingmethod"),
+                "permission": _may("shop.view_shippingmethod"),
+            },
+            {
+                "title": "Reviews",
+                "icon": "reviews",
+                "link": _changelist("shop", "review"),
+                "permission": _may("shop.view_review", "shop.change_review"),
+            },
+            {
+                "title": "Stock held",
+                "icon": "inventory",
+                "link": _changelist("shop", "inventoryreservation"),
+                "permission": _may("shop.view_inventoryreservation"),
+            },
+            {
+                "title": "Baskets",
+                "icon": "shopping_cart",
+                "link": _changelist("shop", "cart"),
+                "permission": _may("shop.view_cart"),
             },
         ],
     }
@@ -280,6 +388,8 @@ def sidebar_navigation(request: HttpRequest) -> list[dict[str, Any]]:
         groups.append(_content_group())
     if apps.is_installed("apps.notifications"):
         groups.append(_notifications_group())
+    if apps.is_installed("apps.shop"):
+        groups.append(_shop_group())
     groups.extend([_people_group(), _credentials_group(), _audit_group()])
     return [group for group in groups if group is not None]
 
@@ -321,6 +431,95 @@ def _content_numbers() -> dict[str, Any]:
         ],
         "required_missing": required_missing,
         "pages_link": reverse_lazy("admin:cms_page_changelist"),
+    }
+
+
+def _site_events() -> dict[str, Any]:
+    """The dates whose reminder window is open, soonest first.
+
+    Its own block rather than another number on the content card, because it is
+    the one thing on this page that is a list: "three things are coming up" is
+    not actionable, and "the certificate expires on Tuesday" is.
+    """
+    from apps.cms.models import SiteEvent, due_events
+
+    events = due_events()
+    return {
+        "events": [
+            {
+                "name": event.name,
+                "kind": event.get_kind_display(),
+                "date": event.next_date(),
+                "days": event.days_away(),
+                "overdue": event.is_overdue(),
+                "url": event.url,
+                "link": reverse_lazy("admin:cms_siteevent_change", args=(event.pk,)),
+            }
+            # Five, because a dashboard block that scrolls is a block nobody
+            # reads to the bottom of, and the list itself is one click away.
+            for event in events[:5]
+        ],
+        "total": len(events),
+        "overdue": sum(1 for event in events if event.is_overdue()),
+        "tracked": SiteEvent.objects.filter(is_active=True).count(),
+        "link": reverse_lazy("admin:cms_siteevent_changelist"),
+    }
+
+
+def _shop_numbers() -> dict[str, Any]:
+    """The six numbers a shopkeeper opens the admin to find out.
+
+    Chosen the way the content block was: not "how many rows are there" but
+    "what has to happen today". Money taken this week is the one number that is
+    a result rather than a task, and it counts orders that were actually paid --
+    a total over every row would include the baskets that were abandoned at the
+    payment page and would flatter the shop every morning.
+    """
+    from apps.shop.models import (
+        Order,
+        OrderStatus,
+        Product,
+        ProductStatus,
+        Review,
+        ReviewStatus,
+    )
+
+    week_ago = timezone.now() - timedelta(days=7)
+    settled = (
+        OrderStatus.PAID,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+        OrderStatus.COMPLETED,
+    )
+    paid_this_week = Order.objects.filter(status__in=settled, created_at__gte=week_ago)
+    revenue = paid_this_week.aggregate(taken=Sum("total"))["taken"] or 0
+    # Counted in the database rather than over `available_stock` in Python: the
+    # dashboard runs on every admin page load, and a property per product is a
+    # query per product.
+    tracked = Product.objects.filter(status=ProductStatus.ACTIVE, track_inventory=True)
+    on_hand = Case(
+        When(
+            has_variants=True,
+            then=Sum("variants__stock", filter=Q(variants__is_active=True)),
+        ),
+        default=F("stock"),
+    )
+    counted = tracked.annotate(on_hand=on_hand)
+    return {
+        "orders_week": paid_this_week.count(),
+        "revenue_week": revenue,
+        "awaiting_payment": Order.objects.filter(status=OrderStatus.PENDING).count(),
+        "to_send": Order.objects.filter(
+            status__in=(OrderStatus.PAID, OrderStatus.PROCESSING)
+        ).count(),
+        "out_of_stock": counted.filter(
+            Q(on_hand__lte=0) | Q(on_hand__isnull=True), allow_backorder=False
+        ).count(),
+        "low_stock": counted.filter(on_hand__gt=0, on_hand__lte=F("low_stock_threshold")).count(),
+        "reviews_waiting": Review.objects.filter(status=ReviewStatus.PENDING).count(),
+        "orders_link": reverse_lazy("admin:shop_order_changelist"),
+        "products_link": reverse_lazy("admin:shop_product_changelist"),
+        "reviews_link": reverse_lazy("admin:shop_review_changelist"),
     }
 
 
@@ -380,6 +579,14 @@ def dashboard(request: HttpRequest, context: dict[str, Any]) -> dict[str, Any]:
         user.is_superuser or user.has_perm("cms.view_page") or user.has_perm("cms.change_field")
     ):
         content = _content_numbers()
+    site_events = None
+    if apps.is_installed("apps.cms") and (user.is_superuser or user.has_perm("cms.view_siteevent")):
+        site_events = _site_events()
+    shop = None
+    if apps.is_installed("apps.shop") and (
+        user.is_superuser or user.has_perm("shop.view_order") or user.has_perm("shop.view_product")
+    ):
+        shop = _shop_numbers()
     accounts = None
     if user.is_superuser or user.has_perm("accounts.view_user"):
         accounts = _account_numbers()
@@ -390,6 +597,8 @@ def dashboard(request: HttpRequest, context: dict[str, Any]) -> dict[str, Any]:
     context.update(
         {
             "content_numbers": content,
+            "site_events": site_events,
+            "shop_numbers": shop,
             "account_numbers": accounts,
             "sign_in_numbers": sign_ins,
         }

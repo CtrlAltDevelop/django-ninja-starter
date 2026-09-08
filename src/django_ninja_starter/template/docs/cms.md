@@ -26,9 +26,13 @@ drop-it-in-elsewhere guide.
 | `GET` | `/api/v1/cms/pages` | None | List every published page |
 | `GET` | `/api/v1/cms/pages/{page_name}` | None | Read one page and everything on it |
 | `GET` | `/api/v1/cms/site` | None | Read the site metadata |
+| `GET` | `/api/v1/cms/sitemap.xml` | None | Every live page, as sitemap XML |
 <!-- /generated:routes -->
 
-All five are public and read-only. Content is written in the admin: an API that
+All six are public and read-only. Five answer JSON in the usual
+[envelope](responses.md); `sitemap.xml` answers `application/xml`, because it is
+read by crawlers rather than by this site's frontend and has to be the document
+they already know how to read. Content is written in the admin: an API that
 also writes has to answer "who may edit this?" on every request, and this one
 answers "nobody, here" instead.
 
@@ -53,6 +57,7 @@ A page response, inside the usual [envelope](responses.md):
     "og_title": "Acme — we make things", "og_description": "…",
     "og_image": "https://…/card.png", "og_url": "https://acme.example.com/"
   },
+  "json_ld": { "@context": "https://schema.org", "@graph": ["…"] },
   "sections": [
     {
       "id": "hero",
@@ -239,6 +244,65 @@ on every page they write. It was removed in
 [`0002`](../src/apps/cms/migrations/0002_open_graph_and_choice_options.py) rather
 than deprecated.
 
+## The sitemap
+
+`GET /api/v1/cms/sitemap.xml` is generated at the moment it is asked for, from
+exactly the pages the read API would serve: a draft, a page dated for next
+Tuesday and a page an editor excluded are all absent, and there is no second
+definition of "live" to drift from the first.
+
+What is stored is only what a generator cannot work out, on the site settings
+row: whether to publish one at all, the base URL the pages hang off, and the
+default change frequency and priority. Each page may override the last two, and
+may set `in_sitemap` off — for a page that is live and has no business in a
+search index, like a thank-you page or a single campaign's landing page.
+
+A page carrying its own `og_url` is listed at that address. Otherwise the entry
+is the base URL plus the page's slug; with no base URL filled in the entries are
+paths rather than addresses, which the site settings screen says out loud rather
+than leaving to be discovered by reading the XML.
+
+Turning `sitemap_enabled` off answers the route with a 404 rather than an empty
+document — an empty `<urlset>` claims the site has no pages, which is a claim,
+where a missing document says only that there is nothing to read here.
+
+## Structured data
+
+Every page response carries `json_ld`: the same page described in schema.org
+vocabulary, ready to be dropped into a `<script type="application/ld+json">`.
+Open Graph decides what a shared link looks like; this decides what a search
+engine understands the page to *be*, which is the difference between a plain
+blue result and one carrying a site name, a breadcrumb and a logo.
+
+It is a `@graph` of three linked nodes rather than one flat object — a `WebPage`
+that `isPartOf` a `WebSite` that has an `Organization` as its `publisher` — so
+two pages are understood as two pages of one site instead of two unrelated
+documents. Titles and descriptions are the ones the API already resolved, so the
+block cannot disagree with the `meta` beside it, and a value nobody filled in is
+left out entirely: an empty string in JSON-LD asserts that the site has no name.
+
+Nothing about it is typed by hand. Asking an editor to maintain a second copy of
+every title and address, in a syntax where a missing brace is invisible until a
+crawler silently drops the block, is asking for a block that is quietly wrong.
+
+## Site events
+
+The one part of this app that is never served to a reader. A **site event** is a
+date whoever runs the site has to act on — a domain renewal, a certificate, the
+campaign that starts on the first, the price list to be checked before January —
+and it is here rather than in somebody's calendar because the person who has to
+act on it is looking at this admin.
+
+The reminder is a *lead time* rather than a second date: "tell me two weeks
+before" survives the date moving, and the date moves constantly. An event
+appears on the dashboard once its window opens and keeps appearing after the
+date has gone by, marked overdue — a list that drops a date the moment it passes
+is empty exactly when it matters.
+
+`repeats_yearly` covers the ones that are annual by nature. Ticking one off
+records *which* occurrence was settled, so this year's renewal being handled
+does not silence next year's, and nobody has to re-enter a row every January.
+
 ## Models
 
 <!-- generated:models -->
@@ -314,6 +378,9 @@ Something a client can ask for by name.
 | `og_description` | JSON |  |
 | `og_image` | Char |  |
 | `og_url` | Char |  |
+| `in_sitemap` | Boolean |  |
+| `sitemap_changefreq` | Char |  |
+| `sitemap_priority` | Decimal | nullable |
 
 #### `Section`
 
@@ -345,6 +412,26 @@ One library section, put on one page, at one position.
 | `section` | ForeignKey | → `cms.Section` |
 | `order` | PositiveInteger |  |
 
+#### `SiteEvent`
+
+A date somebody running this site has to do something about.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID | primary key, not editable |
+| `created_at` | DateTime | not editable |
+| `updated_at` | DateTime | not editable |
+| `is_active` | Boolean |  |
+| `name` | Char |  |
+| `kind` | Char |  |
+| `happens_on` | Date |  |
+| `repeats_yearly` | Boolean |  |
+| `remind_days_before` | PositiveSmallInteger |  |
+| `notes` | Text |  |
+| `url` | Char |  |
+| `is_done` | Boolean |  |
+| `handled_occurrence` | Date | not editable, nullable |
+
 #### `SiteSettings`
 
 The one row describing whatever this content belongs to.
@@ -361,6 +448,10 @@ The one row describing whatever this content belongs to.
 | `og_description` | JSON |  |
 | `og_image` | Char |  |
 | `og_url` | Char |  |
+| `sitemap_enabled` | Boolean |  |
+| `sitemap_base_url` | Char |  |
+| `sitemap_changefreq` | Char |  |
+| `sitemap_priority` | Decimal |  |
 | `contact` | JSON |  |
 | `social_links` | JSON |  |
 | `extra` | JSON |  |
@@ -398,13 +489,14 @@ row would make declaring a required field impossible.
 | `Field` | Yes | — | `field_header`, `section`, `kind`, `required`, `complete`, `active` |
 | `Menu` | Yes | — | `name`, `slug`, `entry_count`, `active` |
 | `MenuItem` | Yes | — | `__str__`, `menu`, `parent`, `target`, `order`, `is_active` |
-| `Page` | Yes | `publish_now`, `unpublish`, `duplicate` | `page_header`, `state`, `structure`, `translations`, `edit_content` |
+| `Page` | Yes | `publish_now`, `unpublish`, `duplicate`, `list_in_sitemap`, `hide_from_sitemap` | `page_header`, `state`, `structure`, `translations`, `edit_content` |
 | `Section` | Yes | — | `section_header`, `belongs_to`, `used_on`, `field_count`, `active`, `edit_content` |
 | `SectionPlacement` | Yes | — | `page`, `section`, `order`, `is_active` |
+| `SiteEvent` | Yes | `mark_handled`, `reopen` | `event`, `when`, `countdown`, `reminder`, `state` |
 | `SiteSettings` | Yes | — | `__str__` |
 <!-- /generated:admin -->
 
-Two screens, because two different people use them. Both are themed by
+Three screens, for three different jobs. Both are themed by
 [the project's admin theme](admin.md), and both work without it.
 
 **Structure** — pages, sections, fields, placements and menus — is
@@ -434,7 +526,16 @@ that translation, and readers fall back.
 Site metadata has its own form, with one input per language for the copy —
 grouped into copy, search, sharing, branding and the open-ended parts, rather
 than one JSON box per attribute. A page's own change form groups the same way:
-*Publishing*, *Search*, then *Sharing (Open Graph)*.
+*Publishing*, *Search*, *Sharing (Open Graph)*, then *Sitemap* — which shows the
+exact address a crawler will be given, so a missing base URL is visible on the
+screen rather than in the XML.
+
+**Site events** is the third screen, and the only one that is about running the
+site rather than writing it. It lists what is coming up soonest first, with a
+state column that computes handled, due, overdue and waiting rather than showing
+the raw checkbox — a yearly event ticked off last year is handled *and* due
+again, and the two must not look the same. Whatever is inside its reminder
+window appears on the admin dashboard, overdue items first.
 
 The rest of what the admin gives an editor:
 
@@ -447,6 +548,9 @@ The rest of what the admin gives an editor:
 | **Edit content** | On pages *and* on sections, since a shared one has no page to be reached from |
 | **Upload** | On every media field, beside the box that takes an address instead |
 | State, shared and library badges | So nobody edits nine pages thinking they are editing one |
+| **List in / leave out of the sitemap** | Actions on the page list, for the pages that should not be indexed |
+| **Mark as handled** / **Reopen** | Actions on site events; handling one records which occurrence it settled |
+| **Upcoming site events** | A dashboard card and list, from the events whose reminder window is open |
 
 ## Moving content between environments
 

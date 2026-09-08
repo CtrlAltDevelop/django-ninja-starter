@@ -23,6 +23,8 @@ from apps.shop.models import (
     Collection,
     Coupon,
     Discount,
+    OrderStatus,
+    PaymentStatus,
     Product,
     ProductLike,
     ProductStatus,
@@ -53,6 +55,12 @@ REGISTERED = [
     "coupon",
     "order",
     "payment",
+    "seller",
+    "productoffer",
+    "invoice",
+    "address",
+    "inventoryreservation",
+    "orderevent",
 ]
 
 
@@ -475,3 +483,94 @@ class TestWritingThroughTheAdmin:
 
         assert response.status_code == 200
         assert not Discount.objects.exists()
+
+
+class TestNothingIsRegisteredWithoutAScreenTest:
+    def test_the_list_above_is_the_whole_registry(self) -> None:
+        """Otherwise a new model gets a screen nobody ever opens."""
+        from django.contrib import admin as django_admin
+
+        registered = {
+            model._meta.model_name
+            for model in django_admin.site._registry
+            if model._meta.app_label == "shop"
+        }
+
+        assert registered == set(REGISTERED)
+
+
+class TestTheOrderScreenMovesOrders:
+    """The admin is the only place an order's status changes, so these are the
+    write path for fulfilment the way the product form is for the catalogue."""
+
+    @pytest.fixture
+    def order(self, laptop: Product, alice: Any, address: Address, shipping: ShippingMethod) -> Any:
+        shop_service.add_to_cart(alice, "featherbook-14", quantity=2)
+        return shop_service.checkout(alice, address_id=address.pk, shipping_method_id=shipping.pk)
+
+    def _act(self, client: Client, action: str, order: Any) -> Any:
+        return client.post(
+            changelist("order"),
+            {"action": action, "_selected_action": [str(order.pk)]},
+            follow=True,
+        )
+
+    def test_an_order_is_walked_from_pending_to_delivered(
+        self, admin_client: Client, order: Any
+    ) -> None:
+        for action in ("mark_paid", "start_processing", "mark_sent", "mark_completed"):
+            assert self._act(admin_client, action, order).status_code == 200
+
+        order.refresh_from_db()
+        assert order.status == OrderStatus.COMPLETED
+
+    def test_a_step_out_of_turn_is_reported_rather_than_taken(
+        self, admin_client: Client, order: Any
+    ) -> None:
+        response = self._act(admin_client, "mark_completed", order)
+
+        order.refresh_from_db()
+        assert response.status_code == 200
+        assert order.status == OrderStatus.PENDING
+
+    def test_cancelling_an_unpaid_order_puts_the_stock_back(
+        self, admin_client: Client, order: Any, laptop: Product
+    ) -> None:
+        reserved = Product.objects.get(pk=laptop.pk).stock
+
+        self._act(admin_client, "cancel_orders", order)
+
+        order.refresh_from_db()
+        assert order.status == OrderStatus.CANCELLED
+        assert Product.objects.get(pk=laptop.pk).stock == reserved + 2
+
+    def test_refunding_a_paid_order_puts_the_money_and_the_stock_back(
+        self, admin_client: Client, order: Any, laptop: Product
+    ) -> None:
+        self._act(admin_client, "mark_paid", order)
+        sold = Product.objects.get(pk=laptop.pk).stock
+
+        self._act(admin_client, "refund_orders", order)
+
+        order.refresh_from_db()
+        assert order.status == OrderStatus.REFUNDED
+        assert Product.objects.get(pk=laptop.pk).stock == sold + 2
+        assert list(order.payments.values_list("status", flat=True)) == [PaymentStatus.REFUNDED]
+
+    def test_cancelling_a_paid_order_is_refused(self, admin_client: Client, order: Any) -> None:
+        """It would release the stock while the money stayed taken."""
+        self._act(admin_client, "mark_paid", order)
+
+        self._act(admin_client, "cancel_orders", order)
+
+        order.refresh_from_db()
+        assert order.status == OrderStatus.PAID
+
+    def test_every_step_shows_up_on_the_order_form(self, admin_client: Client, order: Any) -> None:
+        self._act(admin_client, "mark_paid", order)
+        self._act(admin_client, "start_processing", order)
+
+        page = admin_client.get(reverse("admin:shop_order_change", args=(order.pk,)))
+
+        assert page.status_code == 200
+        assert order.events.count() == 3

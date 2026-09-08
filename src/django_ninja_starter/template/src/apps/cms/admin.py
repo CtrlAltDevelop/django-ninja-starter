@@ -20,6 +20,12 @@ That screen is permission-driven rather than superuser-only -- ``cms.change_fiel
 is what it asks for -- so a content editor can be given exactly it and nothing
 else.
 
+Beside those two sits a third screen that is neither: **site events**, the dates
+whoever runs the site has to act on -- a domain renewal, a campaign, an audit.
+Nothing on it is ever served to a reader. It is here because the reminder has to
+appear where the person who has to act on it already is, which is the dashboard
+of this admin rather than a calendar they may or may not keep.
+
 The theme is whatever :mod:`apps.cms.theme` resolves: Unfold where the project
 installs it, Django's own admin where it does not.
 """
@@ -52,9 +58,11 @@ from apps.cms.models import (
     Page,
     Section,
     SectionPlacement,
+    SiteEvent,
     SiteSettings,
 )
 from apps.cms.preview import preview_url
+from apps.cms.sitemap import page_location, sitemap_summary
 from apps.cms.theme import (
     ADMIN_BASE_TEMPLATE,
     BooleanRadioFilter,
@@ -68,6 +76,11 @@ from apps.cms.theme import (
 from apps.cms.translations import default_language, known_languages, match_language
 
 CONTENT_PERMISSION = "cms.change_field"
+#: Where this app's router is mounted in this project. Only ever shown to an
+#: editor, never used to build anything: the app is mounted by whatever project
+#: installs it, and a prefix it guessed wrong would be a broken link rather than
+#: a broken import.
+SITEMAP_URL = "/api/v1/cms/sitemap.xml"
 
 
 class CompletenessFilter(admin.SimpleListFilter):
@@ -315,8 +328,8 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
     list_disable_select_all = True
     ordering = ("order", "name")
     inlines = (SectionInline, PlacementInline)
-    readonly_fields = ("id", "created_at", "updated_at", "preview_link")
-    actions = ("publish_now", "unpublish", "duplicate")
+    readonly_fields = ("id", "created_at", "updated_at", "preview_link", "sitemap_entry")
+    actions = ("publish_now", "unpublish", "duplicate", "list_in_sitemap", "hide_from_sitemap")
     fieldsets = (
         (None, {"fields": ("id", "name", "slug", "order")}),
         (
@@ -345,6 +358,20 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
                     "timeline. Anything left blank falls back to the meta values "
                     "above, then to the site's. Meta keywords are deliberately "
                     "absent: nothing has read them for over a decade."
+                ),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Sitemap",
+            {
+                "fields": ("in_sitemap", "sitemap_changefreq", "sitemap_priority", "sitemap_entry"),
+                "description": (
+                    "How this page appears in /api/v1/cms/sitemap.xml, which is "
+                    "generated from whatever is live. Frequency and priority left "
+                    "blank use the site's defaults; priority is only ever compared "
+                    "with this site's own pages, so making every page a 1.0 says "
+                    "nothing at all."
                 ),
                 "classes": ("collapse",),
             },
@@ -426,6 +453,24 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
             '<a href="{}" target="_blank" rel="noopener" class="underline">{}</a>', url, url
         )
 
+    @display(description="Listed as")
+    def sitemap_entry(self, obj: Page) -> str:
+        """The address a crawler will be given, worked out the way the XML does it.
+
+        Shown rather than described, because the commonest sitemap fault is a
+        site whose base URL was never filled in and whose entries are therefore
+        paths a crawler cannot follow -- which is invisible until somebody reads
+        the document, and obvious the moment the address is on the screen.
+        """
+        if obj.pk is None:
+            return "Saved pages appear in the sitemap."
+        if not obj.in_sitemap:
+            return "Left out of the sitemap."
+        location = page_location(obj, SiteSettings.load())
+        if not location.startswith(("http://", "https://")):
+            return f"{location} — relative. Set a base URL in the site settings."
+        return location
+
     @admin.action(description="Publish now")
     def publish_now(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
         published = 0
@@ -461,6 +506,18 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
             self.message_user(request, f"Copied {page.name} to {copy.slug}.", messages.SUCCESS)
         if not copied:
             self.message_user(request, "Nothing selected.", messages.INFO)
+
+    @admin.action(description="List in the sitemap")
+    def list_in_sitemap(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
+        # `update` rather than a loop: nothing on a page validates against this
+        # column, and a hundred pages is a hundred `full_clean` calls otherwise.
+        listed = queryset.update(in_sitemap=True)
+        self.message_user(request, f"Listed {listed} page(s) in the sitemap.", messages.SUCCESS)
+
+    @admin.action(description="Leave out of the sitemap")
+    def hide_from_sitemap(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
+        hidden = queryset.update(in_sitemap=False)
+        self.message_user(request, f"Left {hidden} page(s) out of the sitemap.", messages.WARNING)
 
     def get_urls(self) -> list[URLPattern]:
         """Put the content screen ahead of the admin's catch-all object route."""
@@ -834,7 +891,7 @@ class SiteSettingsAdmin(ModelAdmin):
     """
 
     form = SiteSettingsForm
-    readonly_fields = ("updated_at",)
+    readonly_fields = ("updated_at", "sitemap_status")
     warn_unsaved_form = True
 
     def get_form(self, request: HttpRequest, obj: Any = None, **kwargs: Any) -> Any:
@@ -876,10 +933,54 @@ class SiteSettingsAdmin(ModelAdmin):
             ),
             ("Branding", {"fields": ("logo", "favicon")}),
             (
+                "Sitemap",
+                {
+                    "fields": (
+                        "sitemap_enabled",
+                        "sitemap_base_url",
+                        "sitemap_changefreq",
+                        "sitemap_priority",
+                        "sitemap_status",
+                    ),
+                    "description": (
+                        "The sitemap is generated from whatever is published, so "
+                        "it is never out of date and there is nothing to upload. "
+                        "What is set here is what a generator cannot work out: "
+                        "whether to publish one, the address pages hang off, and "
+                        "the defaults a page may override."
+                    ),
+                },
+            ),
+            (
                 "Contact and links",
                 {"fields": ("contact", "social_links"), "classes": ("collapse",)},
             ),
             ("Anything else", {"fields": ("extra", "updated_at"), "classes": ("collapse",)}),
+        )
+
+    @display(description="Sitemap")
+    def sitemap_status(self, obj: Any = None) -> str:
+        """Where the sitemap is, what is in it, and the one way it goes wrong.
+
+        A link rather than a path: the first thing anybody does after filling
+        this in is check that the document is what they expected, and the second
+        is paste the address into a search console.
+        """
+        summary = sitemap_summary(obj if isinstance(obj, SiteSettings) else None)
+        if not summary["enabled"]:
+            return "Turned off. The sitemap URL answers 404."
+        left_out = f", {summary['excluded']} left out" if summary["excluded"] else ""
+        counted = f"{summary['pages']} page(s){left_out}"
+        if not summary["base_url"]:
+            return (
+                f"{counted}. No base URL yet, so entries are paths rather than "
+                "addresses -- fill in the box above."
+            )
+        return format_html(
+            '<a href="{}" target="_blank" rel="noopener" class="underline">{}</a> — {}',
+            SITEMAP_URL,
+            f"{summary['base_url']}{SITEMAP_URL}",
+            counted,
         )
 
     def has_add_permission(self, request: HttpRequest) -> bool:
@@ -887,3 +988,105 @@ class SiteSettingsAdmin(ModelAdmin):
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+
+@admin.register(SiteEvent)
+class SiteEventAdmin(ModelAdmin):
+    """The dates somebody running this site has to remember, and how soon.
+
+    Not superuser-only, and not under the content permission either: the person
+    who knows the domain expires in March is whoever is on the hook for it, and
+    the ordinary Django permissions on this model are how a project decides who
+    that is.
+
+    The list is ordered by what is closest rather than by what was typed first,
+    because the question this screen answers is "what is coming up".
+    """
+
+    list_display = ("event", "when", "countdown", "reminder", "state")
+    list_filter = (
+        dropdown_filter("kind", ChoicesDropdownFilter),
+        dropdown_filter("is_done", BooleanRadioFilter),
+        dropdown_filter("repeats_yearly", BooleanRadioFilter),
+    )
+    search_fields = ("name", "notes")
+    ordering = ("happens_on", "name")
+    date_hierarchy = "happens_on"
+    readonly_fields = ("id", "created_at", "updated_at", "reminder")
+    actions = ("mark_handled", "reopen")
+    warn_unsaved_form = True
+    fieldsets = (
+        (None, {"fields": ("id", "name", "kind", "url")}),
+        (
+            "When",
+            {
+                "fields": ("happens_on", "repeats_yearly", "remind_days_before", "reminder"),
+                "description": (
+                    "The reminder is a lead time rather than a second date, so "
+                    "moving the date moves the warning with it."
+                ),
+            },
+        ),
+        ("Notes", {"fields": ("notes", "is_done", "is_active")}),
+        ("Dates", {"fields": ("created_at", "updated_at")}),
+    )
+
+    @display(description="Event", header=True)
+    def event(self, obj: SiteEvent) -> list[str]:
+        return [obj.name, obj.get_kind_display()]
+
+    @display(description="Date", ordering="happens_on")
+    def when(self, obj: SiteEvent) -> str:
+        next_date = obj.next_date()
+        if next_date == obj.happens_on:
+            return f"{next_date:%d %b %Y}"
+        # A yearly event whose date this year has gone by: showing the original
+        # would have somebody reading a date in 2019 and wondering what is wrong.
+        return f"{next_date:%d %b %Y} (yearly, from {obj.happens_on:%Y})"
+
+    @display(description="Countdown")
+    def countdown(self, obj: SiteEvent) -> str:
+        days = obj.days_away()
+        if days == 0:
+            return "Today"
+        return f"in {days} day(s)" if days > 0 else f"{abs(days)} day(s) ago"
+
+    @display(description="Warning from")
+    def reminder(self, obj: SiteEvent) -> str:
+        if obj.pk is None:
+            return "Saved events appear on the dashboard."
+        return f"{obj.reminder_starts_on:%d %b %Y} ({obj.remind_days_before} day(s) before)"
+
+    @display(
+        description="State",
+        label={"Overdue": "danger", "Due": "warning", "Handled": "success", "Waiting": "info"},
+    )
+    def state(self, obj: SiteEvent) -> str:
+        """One column for the three questions, because they are asked together.
+
+        "Handled" is computed rather than read straight off the checkbox: a
+        yearly event ticked off last year is handled and due again, and a column
+        that showed the raw boolean would say it was dealt with.
+        """
+        if not obj.is_due():
+            return "Handled" if obj.is_done else "Waiting"
+        return "Overdue" if obj.is_overdue() else "Due"
+
+    @admin.action(description="Mark as handled")
+    def mark_handled(self, request: HttpRequest, queryset: QuerySet[SiteEvent]) -> None:
+        """Ticked one at a time, because each has to record which date it settled."""
+        handled = 0
+        for event in queryset:
+            event.is_done = True
+            event.save()
+            handled += 1
+        self.message_user(request, f"Marked {handled} event(s) as handled.", messages.SUCCESS)
+
+    @admin.action(description="Reopen")
+    def reopen(self, request: HttpRequest, queryset: QuerySet[SiteEvent]) -> None:
+        reopened = 0
+        for event in queryset:
+            event.is_done = False
+            event.save()
+            reopened += 1
+        self.message_user(request, f"Reopened {reopened} event(s).", messages.WARNING)

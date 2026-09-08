@@ -58,6 +58,14 @@ class SellerDetailOut(SellerOut):
     product_count: int = 0
 
 
+class OptionValueOut(Schema):
+    """One value of one variant axis, and whether a shopper can still press it."""
+
+    value: str
+    in_stock: bool = False
+    variants: list[str] = []
+
+
 class AttributeOut(Schema):
     """One thing every product in a category answers, and how."""
 
@@ -70,6 +78,17 @@ class AttributeOut(Schema):
     is_variant: bool = False
     is_filterable: bool = True
     help_text: str = ""
+
+
+class VariantAttributeOut(AttributeOut):
+    """A variant axis on a product page: the attribute, plus which of its values are left.
+
+    Its own schema rather than a nullable field on ``AttributeOut``, because a
+    category listing its attributes has no product to count stock for and should
+    not publish an empty list that looks like "nothing is available".
+    """
+
+    values: list[OptionValueOut] = []
 
 
 class CategorySummaryOut(Schema):
@@ -131,17 +150,6 @@ class ImageOut(Schema):
     is_primary: bool = False
 
 
-class VariantOut(Schema):
-    id: str
-    sku: str
-    label: str
-    options: dict[str, Any] = {}
-    image: str = ""
-    stock: int = 0
-    in_stock: bool = False
-    price: PriceOut
-
-
 class OfferOut(Schema):
     """One seller's offer of one thing, priced now."""
 
@@ -153,6 +161,25 @@ class OfferOut(Schema):
     lead_time_days: int = 0
     stock: int = 0
     in_stock: bool = True
+    price: PriceOut
+
+
+class VariantOut(Schema):
+    """One buyable version of a product, and everybody holding it.
+
+    ``stock`` is the shop's own shelf; ``total_stock`` counts every seller's.
+    """
+
+    id: str
+    sku: str
+    label: str
+    options: dict[str, Any] = {}
+    image: str = ""
+    stock: int = 0
+    total_stock: int = 0
+    in_stock: bool = False
+    sellers: list[OfferOut] = []
+    seller_count: int = 0
     price: PriceOut
 
 
@@ -226,7 +253,7 @@ class ProductOut(ProductSummaryOut):
     dimensions_mm: DimensionsOut | None = None
     images: list[ImageOut] = []
     attributes: list[ProductAttributeOut] = []
-    variant_attributes: list[AttributeOut] = []
+    variant_attributes: list[VariantAttributeOut] = []
     variants: list[VariantOut] = []
     breadcrumbs: list[BreadcrumbOut] = []
     meta: SeoOut
@@ -345,6 +372,87 @@ class CartQuantityIn(Schema):
     quantity: int
 
 
+class AddressIn(Schema):
+    """A new address. Everything a parcel needs, and nothing about the account."""
+
+    label: str = "Home"
+    full_name: str
+    phone: str
+    country: str
+    city: str
+    postal_code: str
+    line1: str
+    province: str = ""
+    line2: str = ""
+    is_default: bool = False
+
+
+class AddressPatchIn(Schema):
+    """An edit. Every field is optional, and ``None`` means "leave it alone"."""
+
+    label: str | None = None
+    full_name: str | None = None
+    phone: str | None = None
+    country: str | None = None
+    province: str | None = None
+    city: str | None = None
+    postal_code: str | None = None
+    line1: str | None = None
+    line2: str | None = None
+    is_default: bool | None = None
+
+
+class AddressOut(Schema):
+    id: str
+    label: str
+    full_name: str
+    phone: str
+    country: str
+    province: str = ""
+    city: str
+    postal_code: str
+    line1: str
+    line2: str = ""
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AddressRemovedOut(Schema):
+    deleted: bool
+
+
+class ShippingMethodOut(Schema):
+    """One delivery option, costed for the basket that asked for it."""
+
+    id: str
+    name: str
+    description: str = ""
+    price: Decimal
+    cost: Decimal
+    is_free: bool = False
+    free_from: Decimal | None = None
+    min_days: int
+    max_days: int
+    currency: str
+
+
+class CouponPreviewIn(Schema):
+    code: str
+
+
+class CouponPreviewOut(Schema):
+    """What a code is worth on this basket -- or, in the same shape, why it is not."""
+
+    code: str
+    is_valid: bool
+    reason: str = ""
+    discount: Decimal
+    subtotal: Decimal
+    total: Decimal
+    currency: str
+
+
 class CheckoutIn(Schema):
     address: str
     shipping_method: str
@@ -368,6 +476,15 @@ class OrderLineOut(Schema):
     line_total: Decimal
 
 
+class OrderEventOut(Schema):
+    """One step of an order's history, as the shopper is allowed to see it."""
+
+    status: str
+    status_label: str
+    note: str = ""
+    at: datetime
+
+
 class OrderOut(Schema):
     """One order, read entirely off its own snapshot."""
 
@@ -388,6 +505,11 @@ class OrderOut(Schema):
     note: str = ""
     payment_status: str | None = None
     invoice: str | None = None
+    carrier: str = ""
+    tracking_number: str = ""
+    tracking_url: str = ""
+    shipped_at: datetime | None = None
+    history: list[OrderEventOut] = []
 
 
 class OrderPageOut(Schema):

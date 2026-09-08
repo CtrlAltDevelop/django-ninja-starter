@@ -19,6 +19,7 @@ from typing import Any
 from django.db.models import Prefetch, Q, QuerySet
 
 from apps.cms.models import Field, Menu, MenuItem, Page, Section, SectionPlacement, SiteSettings
+from apps.cms.structured_data import page_json_ld
 from apps.cms.translations import default_language, known_languages, translation
 
 
@@ -199,12 +200,18 @@ def page_summary(page: Page, language: str) -> dict[str, Any]:
 
 
 def page_payload(page: Page, site: SiteSettings, language: str) -> dict[str, Any]:
+    meta = page_meta(page, site, language)
     return {
         "id": page.slug,
         "name": page.name,
         "language": language,
         "status": page.status,
-        "meta": page_meta(page, site, language),
+        "meta": meta,
+        # Served with the page rather than from an endpoint of its own, because
+        # a frontend needs it at exactly the moment it is rendering the page and
+        # a second round trip to describe the page it already has is a round
+        # trip nobody makes -- the block ends up hand-written instead, or absent.
+        "json_ld": page_json_ld(page, site, meta, language),
         "sections": page_sections(page, language),
     }
 

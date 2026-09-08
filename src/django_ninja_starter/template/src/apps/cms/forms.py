@@ -483,6 +483,12 @@ SITE_TRANSLATED = {
 }
 #: The ones an editor should be given room to write a sentence in.
 SITE_LONG = frozenset({"description", "og_description"})
+#: The site fields that have a sensible answer already and must never be blank.
+#: The model gives each a default and refuses an empty one, which would make the
+#: form insist on them -- so the form fills the default in instead. Nobody
+#: setting up a site should have to have an opinion about crawl frequency before
+#: they are allowed to save the site's name.
+SITE_DEFAULTED = ("sitemap_changefreq", "sitemap_priority")
 
 
 def site_translation_fields() -> dict[str, forms.Field]:
@@ -532,6 +538,10 @@ class SiteSettingsForm(forms.ModelForm):
             "favicon",
             "og_image",
             "og_url",
+            "sitemap_enabled",
+            "sitemap_base_url",
+            "sitemap_changefreq",
+            "sitemap_priority",
             "contact",
             "social_links",
             "extra",
@@ -539,6 +549,9 @@ class SiteSettingsForm(forms.ModelForm):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        for name in SITE_DEFAULTED:
+            if name in self.fields:
+                self.fields[name].required = False
         self.translated_names: dict[tuple[str, str], str] = {}
         for attribute in SITE_TRANSLATED:
             stored = getattr(self.instance, attribute, None) or {}
@@ -551,6 +564,11 @@ class SiteSettingsForm(forms.ModelForm):
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
+        for defaulted in SITE_DEFAULTED:
+            if defaulted in self.fields and cleaned.get(defaulted) in (None, ""):
+                default = SiteSettings._meta.get_field(defaulted).get_default()
+                cleaned[defaulted] = default
+                setattr(self.instance, defaulted, default)
         for attribute in SITE_TRANSLATED:
             collected: dict[str, str] = {}
             for language in known_languages():

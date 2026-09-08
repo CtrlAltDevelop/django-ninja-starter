@@ -30,12 +30,15 @@ from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, F, Q, QuerySet
+from django.db.models import Count, F, Q, QuerySet, Value
+from django.db.models.functions import Greatest
 from django.utils import timezone
 
 from apps.shop import options
 from apps.shop.attributes import AttributeType, normalize_value
 from apps.shop.models import (
+    RESTOCKING_STATUSES,
+    Address,
     Brand,
     Cart,
     CartItem,
@@ -43,8 +46,10 @@ from apps.shop.models import (
     CategoryAttribute,
     Collection,
     Coupon,
+    InventoryReservation,
     Invoice,
     Order,
+    OrderEvent,
     OrderItem,
     OrderStatus,
     Payment,
@@ -60,12 +65,14 @@ from apps.shop.models import (
     ShippingMethod,
 )
 from apps.shop.payloads import (
+    address_payload,
     brand_payload,
     cart_line_payload,
     cart_payload,
     category_payload,
     category_tree,
     collection_payload,
+    coupon_preview_payload,
     detailed_products,
     invoice_payload,
     listed_products,
@@ -75,14 +82,17 @@ from apps.shop.payloads import (
     product_summary,
     review_payload,
     seller_payload,
+    shipping_method_payload,
 )
 from apps.shop.pricing import (
     buy_box,
+    can_fill,
     discounted_ids,
     price_of,
     reach,
     running_discounts,
     sellable_offers,
+    shelf,
     to_cents,
 )
 
@@ -421,9 +431,10 @@ class ShopService:
             raise ShopNotFound("No such product.")
         discounts = running_discounts()
         branches = reach(discounts)
+        variants = {variant.pk: variant for variant in product.variants.all()}
         variant_prices = {
             variant.pk: price_of(product, variant, discounts, branches)
-            for variant in product.variants.all()
+            for variant in variants.values()
         }
         liked = False
         own_review = None
@@ -439,9 +450,16 @@ class ShopService:
             variant_prices=variant_prices,
             liked=liked,
             own_review=own_review,
+            # Every seller of every size, not just the ones selling the product
+            # row. A shirt sold in four sizes has no offer whose variant is
+            # empty, so a page that asked only for those would say "sold by us
+            # alone" over four sizes three other shops are holding.
             offers=[
-                offer_payload(offer, price_of(product, None, discounts, branches, offer))
-                for offer in sellable_offers(product)
+                offer_payload(
+                    offer,
+                    price_of(product, variants.get(offer.variant_id), discounts, branches, offer),
+                )
+                for offer in sellable_offers(product, any_variant=True)
             ],
         )
 
@@ -720,6 +738,113 @@ class ShopService:
         cart.save()
         return self._cart_payload(cart)
 
+    # ------------------------------------------------------------------
+    # What a checkout needs before it can run: somewhere to send it, a way
+    # to get it there, and whatever code the shopper is holding.
+    # ------------------------------------------------------------------
+
+    #: The fields a shopper may write on their own address. Spelled out rather
+    #: than taken from the model, so a column added later is private until
+    #: somebody puts it here on purpose -- the same rule the payloads follow.
+    ADDRESS_FIELDS = (
+        "label",
+        "full_name",
+        "phone",
+        "country",
+        "province",
+        "city",
+        "postal_code",
+        "line1",
+        "line2",
+        "is_default",
+    )
+
+    def addresses(self, user: Any) -> list[dict[str, Any]]:
+        """This account's address book, the default one first."""
+        return [
+            address_payload(address)
+            for address in Address.objects.filter(user=user).default_first()
+        ]
+
+    def address(self, user: Any, address_id: UUID | str) -> dict[str, Any]:
+        """One of this account's addresses. Somebody else's does not exist."""
+        return address_payload(self._address_row(user, address_id))
+
+    def add_address(self, user: Any, **fields: Any) -> dict[str, Any]:
+        """Save somewhere to send an order to.
+
+        The first one an account saves becomes its default without being asked,
+        which the model does; every later one says so or does not.
+        """
+        address = Address(user=user, **self._address_fields(fields))
+        self._save_address(address)
+        return address_payload(address)
+
+    def update_address(self, user: Any, address_id: UUID | str, **fields: Any) -> dict[str, Any]:
+        """Edit a saved address, leaving out whatever the caller did not send.
+
+        Editing one never rewrites an order: an order carries a flat copy of the
+        address it was sent to, taken when it was placed.
+        """
+        address = self._address_row(user, address_id)
+        for field, value in self._address_fields(fields).items():
+            setattr(address, field, value)
+        self._save_address(address)
+        return address_payload(address)
+
+    def set_default_address(self, user: Any, address_id: UUID | str) -> dict[str, Any]:
+        """Choose which address a checkout offers first. Choosing one unchooses the last."""
+        address = self._address_row(user, address_id)
+        address.is_default = True
+        self._save_address(address)
+        return address_payload(address)
+
+    def remove_address(self, user: Any, address_id: UUID | str) -> dict[str, Any]:
+        """Forget a saved address, and hand the default to another if this was it."""
+        address = self._address_row(user, address_id)
+        was_default = address.is_default
+        address.delete()
+        if was_default:
+            replacement = Address.objects.filter(user=user).default_first().first()
+            if replacement is not None:
+                replacement.is_default = True
+                replacement.save()
+        return {"deleted": True}
+
+    def shipping_methods(self, user: Any = None) -> list[dict[str, Any]]:
+        """Every way an order can be delivered, costed for this caller's basket.
+
+        The basket is what makes the answer useful: "free over 50" is a
+        different number for a basket of 49 and one of 51, and a client that had
+        to work that out itself would be the second place the rule lives.
+        Called without an account -- from a public route -- it quotes the list
+        price instead.
+        """
+        subtotal = self._cart_subtotal(user) if user is not None else None
+        return [
+            shipping_method_payload(method, subtotal)
+            for method in ShippingMethod.objects.filter(is_active=True).order_by("order", "name")
+        ]
+
+    def preview_coupon(self, user: Any, code: str) -> dict[str, Any]:
+        """What a code would take off this basket, before anybody commits to it.
+
+        A refusal comes back as an answer rather than an exception, because this
+        is what a checkout page asks while somebody is still typing. Checkout
+        asks the same two questions of the same two methods and *does* refuse,
+        which is the difference between previewing a code and using one.
+        """
+        subtotal = self._cart_subtotal(user)
+        typed = (code or "").strip()
+        if not typed:
+            raise ShopRefused("Type a code.")
+        coupon = Coupon.objects.filter(code__iexact=typed).first()
+        if coupon is None:
+            return coupon_preview_payload(typed.upper(), Decimal("0.00"), "No such code.", subtotal)
+        refusal = coupon.refusal_for(subtotal)
+        saving = Decimal("0.00") if refusal else coupon.saving(subtotal)
+        return coupon_preview_payload(coupon.code, saving, refusal, subtotal)
+
     def checkout(
         self,
         user: Any,
@@ -731,8 +856,6 @@ class ShopService:
         provider: str = "manual",
     ) -> Order:
         """Atomically turn the caller's cart into an immutable order and payment intent."""
-        from apps.shop.models import Address, InventoryReservation
-
         with transaction.atomic():
             cart = Cart.objects.select_for_update().filter(user=user).first()
             if cart is None or not cart.items.exists():
@@ -762,7 +885,7 @@ class ShopService:
                     if line.offer_id
                     else None
                 )
-                self._check_stock(product, variant, line.quantity, offer)
+                self._check_still_sold(product, variant, offer, line.quantity)
                 price = price_of(product, variant, discounts, branches, offer)
                 line_total = to_cents(price.amount * line.quantity)
                 subtotal += line_total
@@ -829,6 +952,9 @@ class ShopService:
             # payment: a shopper who has to pay by transfer needs the document
             # before the money moves, not after.
             Invoice.objects.create(order=order)
+            OrderEvent.objects.create(
+                order=order, status=OrderStatus.PENDING, note="Placed.", actor=user
+            )
             cart.items.all().delete()
         return order
 
@@ -860,7 +986,9 @@ class ShopService:
             raise ShopNotFound("No invoice has been issued for that order.")
         return invoice_payload(document)
 
-    def settle_order(self, order: Order, *, reference: str = "", provider: str = "") -> Order:
+    def settle_order(
+        self, order: Order, *, reference: str = "", provider: str = "", actor: Any = None
+    ) -> Order:
         """Mark a pending order paid, and turn its reservations into sales.
 
         The one place an order becomes paid, whether that was decided by a
@@ -893,6 +1021,12 @@ class ShopService:
             )
             locked.status = OrderStatus.PAID
             locked.save(update_fields=["status", "updated_at"])
+            OrderEvent.objects.create(
+                order=locked,
+                status=OrderStatus.PAID,
+                note=f"Paid via {payment.provider}.",
+                actor=actor,
+            )
         return locked
 
     def reject_payment(self, order: Order, *, reason: str = "") -> Order:
@@ -940,34 +1074,180 @@ class ShopService:
 
     def cancel_order(self, user: Any, number: str) -> Order:
         """Cancel an unpaid order and release its stock reservation exactly once."""
-        from apps.shop.models import InventoryReservation
-
         with transaction.atomic():
             order = Order.objects.select_for_update().filter(number=number, user=user).first()
             if order is None:
                 raise ShopNotFound("No such order.")
             if order.status != OrderStatus.PENDING:
                 raise ShopRefused("Only an unpaid order can be cancelled here.")
-            for reservation in (
-                InventoryReservation.objects.select_for_update()
-                .select_related("product", "variant", "offer")
-                .filter(order=order, released_at__isnull=True)
-            ):
-                self._move_stock(
-                    reservation.product,
-                    reservation.variant,
-                    reservation.quantity,
-                    reservation.offer,
-                )
-                reservation.released_at = timezone.now()
-                reservation.save(update_fields=["released_at", "updated_at"])
+            self._release_stock(order)
             order.status = OrderStatus.CANCELLED
             order.save(update_fields=["status", "updated_at"])
+            OrderEvent.objects.create(
+                order=order,
+                status=OrderStatus.CANCELLED,
+                note="Cancelled by the shopper.",
+                actor=user,
+            )
         return order
+
+    def advance_order(
+        self,
+        order: Order,
+        status: str,
+        *,
+        actor: Any = None,
+        note: str = "",
+        carrier: str = "",
+        tracking_number: str = "",
+        tracking_url: str = "",
+    ) -> Order:
+        """Move an order one legal step, and do whatever that step means.
+
+        The one place an order's status changes after it has been paid, and the
+        reason there is no editable status field anywhere: three of these steps
+        are not a word in a column. Cancelling and refunding put stock back on
+        the shelf, once, through the same reservations a checkout wrote;
+        dispatching stamps the moment and the tracking a shopper is waiting for.
+        A status somebody could type over would let the column and the shelf
+        disagree, and the shelf is the one customers find out about.
+
+        :data:`~apps.shop.models.ORDER_TRANSITIONS` is what "legal" means, and
+        it is deliberately a one-way map: an order that was refunded is not
+        walked back to paid, because the money went out and this row is the
+        record of that.
+        """
+        with transaction.atomic():
+            locked = Order.objects.select_for_update().get(pk=order.pk)
+            wanted = str(status)
+            if wanted == str(locked.status):
+                return locked
+            if not locked.may_become(wanted):
+                allowed = (
+                    ", ".join(OrderStatus(step).label for step in locked.next_statuses)
+                    or "nothing -- it is finished"
+                )
+                raise ShopRefused(
+                    f"An order that is {locked.get_status_display().lower()} can become {allowed}."
+                )
+            if wanted == OrderStatus.PAID:
+                # Settling is more than a status: it turns reservations into
+                # sales and closes the payment attempt. One implementation.
+                return self.settle_order(locked, actor=actor)
+            if wanted == OrderStatus.REFUNDED:
+                # Before the release, because both read the same reservations
+                # and releasing one closes it.
+                self._uncount_sales(locked)
+            if wanted in RESTOCKING_STATUSES:
+                self._release_stock(locked)
+            changed = ["status", "updated_at"]
+            if wanted == OrderStatus.REFUNDED:
+                self._refund_payments(locked)
+            if wanted == OrderStatus.SHIPPED:
+                locked.shipped_at = timezone.now()
+                locked.carrier = carrier or locked.carrier
+                locked.tracking_number = tracking_number or locked.tracking_number
+                locked.tracking_url = tracking_url or locked.tracking_url
+                changed += ["shipped_at", "carrier", "tracking_number", "tracking_url"]
+            locked.status = wanted
+            locked.save(update_fields=changed)
+            OrderEvent.objects.create(order=locked, status=wanted, note=note[:300], actor=actor)
+        return locked
+
+    def start_processing(self, order: Order, *, actor: Any = None, note: str = "") -> Order:
+        """A paid order somebody has begun picking."""
+        return self.advance_order(order, str(OrderStatus.PROCESSING), actor=actor, note=note)
+
+    def ship_order(
+        self,
+        order: Order,
+        *,
+        carrier: str = "",
+        tracking_number: str = "",
+        tracking_url: str = "",
+        actor: Any = None,
+        note: str = "",
+    ) -> Order:
+        """It has gone out, with whoever is carrying it and whatever number follows it."""
+        return self.advance_order(
+            order,
+            str(OrderStatus.SHIPPED),
+            actor=actor,
+            note=note or (f"Dispatched with {carrier}." if carrier else "Dispatched."),
+            carrier=carrier,
+            tracking_number=tracking_number,
+            tracking_url=tracking_url,
+        )
+
+    def complete_order(self, order: Order, *, actor: Any = None, note: str = "") -> Order:
+        """It arrived, and the shop owes nothing further."""
+        return self.advance_order(order, str(OrderStatus.COMPLETED), actor=actor, note=note)
+
+    def refund_order(self, order: Order, *, actor: Any = None, reason: str = "") -> Order:
+        """Give the money back, put the stock back, and say so on every payment.
+
+        Distinct from cancelling, which is for an order nobody has paid for. A
+        refund is the shop undoing a sale it took money for, so it marks the
+        settled payments refunded rather than leaving a row that says money was
+        collected and nothing that says it went back.
+        """
+        return self.advance_order(
+            order, str(OrderStatus.REFUNDED), actor=actor, note=reason or "Refunded."
+        )
 
     # ------------------------------------------------------------------
     # The small shared pieces.
     # ------------------------------------------------------------------
+
+    def _release_stock(self, order: Order) -> None:
+        """Put back everything this order took off the shelf, exactly once.
+
+        ``released_at`` rather than deleting the row is what makes "exactly
+        once" true: a cancellation, a refund and a retry of either all ask the
+        same question, and only the reservations still open answer it.
+        """
+        for reservation in (
+            InventoryReservation.objects.select_for_update()
+            .select_related("product", "variant", "offer")
+            .filter(order=order, released_at__isnull=True)
+        ):
+            self._move_stock(
+                reservation.product,
+                reservation.variant,
+                reservation.quantity,
+                reservation.offer,
+            )
+            reservation.released_at = timezone.now()
+            reservation.save(update_fields=["released_at", "updated_at"])
+
+    def _uncount_sales(self, order: Order) -> None:
+        """Take a refunded order's units back out of what each product has sold.
+
+        Only for an order that was actually paid, because ``sales_count`` is
+        incremented at settlement rather than at checkout: subtracting from an
+        order that never settled would make a product's sales negative, which is
+        a number a bestsellers list would happily sort by.
+        """
+        if str(order.status) == OrderStatus.PENDING:
+            return
+        for reservation in order.reservations.filter(released_at__isnull=True):
+            Product.objects.filter(pk=reservation.product_id).update(
+                sales_count=Greatest(F("sales_count") - reservation.quantity, Value(0))
+            )
+
+    def _refund_payments(self, order: Order) -> None:
+        """Mark what was collected as given back, and close what never arrived.
+
+        A pending attempt on a refunded order is not a payment anybody is
+        waiting for, so it is failed rather than left open for somebody to
+        settle after the money has gone back out.
+        """
+        order.payments.filter(status=PaymentStatus.SUCCEEDED).update(
+            status=PaymentStatus.REFUNDED, updated_at=timezone.now()
+        )
+        order.payments.filter(status=PaymentStatus.PENDING).update(
+            status=PaymentStatus.FAILED, updated_at=timezone.now()
+        )
 
     def _order_row(self, user: Any, number: str) -> Order:
         """One of *this* account's orders, by the number they were given.
@@ -985,6 +1265,80 @@ class ShopService:
         if order is None:
             raise ShopNotFound("No such order.")
         return order
+
+    def _address_row(self, user: Any, address_id: UUID | str) -> Address:
+        """One of *this* account's addresses, or a 404 -- never a 403."""
+        try:
+            address = Address.objects.filter(pk=address_id, user=user).first()
+        except (ValueError, ValidationError):
+            address = None
+        if address is None:
+            raise ShopNotFound("No such address.")
+        return address
+
+    def _address_fields(self, fields: dict[str, Any]) -> dict[str, Any]:
+        """Whatever of an address the caller actually sent, and nothing else.
+
+        ``None`` means "not sent" rather than "clear it", because every optional
+        field here is a blank string when empty: a transport that omits
+        ``line2`` and one that sends it empty must not mean two different
+        things.
+        """
+        return {
+            field: value
+            for field, value in fields.items()
+            if field in self.ADDRESS_FIELDS and value is not None
+        }
+
+    def _save_address(self, address: Address) -> None:
+        try:
+            address.save()
+        except ValidationError as invalid:
+            raise ShopRefused("; ".join(invalid.messages)) from None
+
+    def _cart_subtotal(self, user: Any) -> Decimal:
+        """What the caller's basket is worth right now, priced the way checkout will.
+
+        The same code path the basket and the product page use, so a coupon
+        preview and the order it turns into cannot disagree about what the
+        basket was worth.
+        """
+        cart = Cart.for_user(user)
+        lines = list(cart.items.select_related("product", "variant", "offer"))
+        discounts = running_discounts()
+        branches = reach(discounts)
+        return sum(
+            (
+                to_cents(
+                    price_of(line.product, line.variant, discounts, branches, line.offer).amount
+                    * line.quantity
+                )
+                for line in lines
+            ),
+            Decimal("0.00"),
+        )
+
+    def _check_still_sold(self, product: Product, variant: Any, offer: Any, quantity: int) -> None:
+        """Refuse to sell something the shop has since stopped selling.
+
+        A basket is a list of intentions and it is priced when it is read, but
+        nothing was re-checking whether the thing is still *for sale*: a product
+        returned to draft, a variant switched off or a seller suspended while a
+        line sat in somebody's basket would have gone through checkout as if
+        nothing had changed. It is checked here rather than when the line is
+        added because that is the moment the shop is being asked to commit.
+        """
+        if not product.is_live:
+            raise ShopRefused(f"{product.name} is no longer for sale. Remove it from your basket.")
+        if variant is not None and not variant.is_active:
+            raise ShopRefused(
+                f"{product.name} is no longer sold in that version. Pick another one."
+            )
+        if offer is not None and not (offer.is_active and offer.seller.is_active):
+            raise ShopRefused(
+                f"{offer.seller.name} has stopped selling {product.name}. Choose another seller."
+            )
+        self._check_stock(product, variant, quantity, offer)
 
     def _line_sku(self, line: CartItem, offer: Any) -> str:
         """The code that identifies what was sold, most specific first.
@@ -1088,16 +1442,10 @@ class ShopService:
         Which shelf to count is the rule the price follows: the named seller's
         offer, then the variant, then the product.
         """
-        if not product.track_inventory or product.allow_backorder:
+        if can_fill(product, variant, offer, quantity):
             return
-        if offer is not None:
-            available = offer.stock
-        elif variant is not None:
-            available = variant.stock
-        else:
-            available = product.available_stock
-        if quantity > available:
-            raise ShopRefused(f"Only {available} left." if available else "That is out of stock.")
+        available = shelf(product, variant, offer)
+        raise ShopRefused(f"Only {available} left." if available else "That is out of stock.")
 
     def _save_line(self, line: CartItem) -> None:
         try:

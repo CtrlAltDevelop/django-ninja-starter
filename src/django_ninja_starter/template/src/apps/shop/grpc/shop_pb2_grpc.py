@@ -35,15 +35,80 @@ class ShopControllerStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.AddAddress = channel.unary_unary(
+                '/config.shop.ShopController/AddAddress',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddAddressRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressResult.FromString,
+                _registered_method=True)
         self.AddToCart = channel.unary_unary(
                 '/config.shop.ShopController/AddToCart',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddToCartRequest.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddToCartResult.FromString,
                 _registered_method=True)
+        self.Addresses = channel.unary_unary(
+                '/config.shop.ShopController/Addresses',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressList.FromString,
+                _registered_method=True)
+        self.Brands = channel.unary_unary(
+                '/config.shop.ShopController/Brands',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.BrandList.FromString,
+                _registered_method=True)
+        self.CancelOrder = channel.unary_unary(
+                '/config.shop.ShopController/CancelOrder',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CancelOrderRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CancelOrderResult.FromString,
+                _registered_method=True)
         self.Categories = channel.unary_unary(
                 '/config.shop.ShopController/Categories',
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryList.FromString,
+                _registered_method=True)
+        self.Category = channel.unary_unary(
+                '/config.shop.ShopController/Category',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryResult.FromString,
+                _registered_method=True)
+        self.Checkout = channel.unary_unary(
+                '/config.shop.ShopController/Checkout',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CheckoutRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CheckoutResult.FromString,
+                _registered_method=True)
+        self.ClearCart = channel.unary_unary(
+                '/config.shop.ShopController/ClearCart',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ClearCartResult.FromString,
+                _registered_method=True)
+        self.Collection = channel.unary_unary(
+                '/config.shop.ShopController/Collection',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionResult.FromString,
+                _registered_method=True)
+        self.Collections = channel.unary_unary(
+                '/config.shop.ShopController/Collections',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.FromString,
+                _registered_method=True)
+        self.ConfirmPayment = channel.unary_unary(
+                '/config.shop.ShopController/ConfirmPayment',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.FromString,
+                _registered_method=True)
+        self.DeleteReview = channel.unary_unary(
+                '/config.shop.ShopController/DeleteReview',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewResult.FromString,
+                _registered_method=True)
+        self.Favourites = channel.unary_unary(
+                '/config.shop.ShopController/Favourites',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.FavouritesRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.FavouritesResult.FromString,
+                _registered_method=True)
+        self.GetAddress = channel.unary_unary(
+                '/config.shop.ShopController/GetAddress',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.GetAddressRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.GetAddressResult.FromString,
                 _registered_method=True)
         self.GetCart = channel.unary_unary(
                 '/config.shop.ShopController/GetCart',
@@ -55,6 +120,11 @@ class ShopControllerStub:
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.InvoiceRequest.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.InvoiceResult.FromString,
                 _registered_method=True)
+        self.LikeProduct = channel.unary_unary(
+                '/config.shop.ShopController/LikeProduct',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.LikeProductRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.LikeResult.FromString,
+                _registered_method=True)
         self.Listing = channel.unary_unary(
                 '/config.shop.ShopController/Listing',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ListingRequest.SerializeToString,
@@ -64,6 +134,11 @@ class ShopControllerStub:
                 '/config.shop.ShopController/Listings',
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ListingList.FromString,
+                _registered_method=True)
+        self.MyReviews = channel.unary_unary(
+                '/config.shop.ShopController/MyReviews',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.MyReviewsRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.MyReviewsResult.FromString,
                 _registered_method=True)
         self.Order = channel.unary_unary(
                 '/config.shop.ShopController/Order',
@@ -75,6 +150,11 @@ class ShopControllerStub:
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.FromString,
                 _registered_method=True)
+        self.PreviewCoupon = channel.unary_unary(
+                '/config.shop.ShopController/PreviewCoupon',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CouponPreviewRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CouponPreviewResult.FromString,
+                _registered_method=True)
         self.Product = channel.unary_unary(
                 '/config.shop.ShopController/Product',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ProductRequest.SerializeToString,
@@ -84,6 +164,36 @@ class ShopControllerStub:
                 '/config.shop.ShopController/Products',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ProductsRequest.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ProductsResult.FromString,
+                _registered_method=True)
+        self.RecordView = channel.unary_unary(
+                '/config.shop.ShopController/RecordView',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RecordViewRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RecordViewResult.FromString,
+                _registered_method=True)
+        self.RelatedProducts = channel.unary_unary(
+                '/config.shop.ShopController/RelatedProducts',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RelatedProductsRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RelatedProductsResult.FromString,
+                _registered_method=True)
+        self.RemoveAddress = channel.unary_unary(
+                '/config.shop.ShopController/RemoveAddress',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveAddressRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressRemoved.FromString,
+                _registered_method=True)
+        self.RemoveFromCart = channel.unary_unary(
+                '/config.shop.ShopController/RemoveFromCart',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveFromCartRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveFromCartResult.FromString,
+                _registered_method=True)
+        self.ReviewProduct = channel.unary_unary(
+                '/config.shop.ShopController/ReviewProduct',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewProductRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewProductResult.FromString,
+                _registered_method=True)
+        self.Reviews = channel.unary_unary(
+                '/config.shop.ShopController/Reviews',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewsRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewsResult.FromString,
                 _registered_method=True)
         self.Seller = channel.unary_unary(
                 '/config.shop.ShopController/Seller',
@@ -95,10 +205,41 @@ class ShopControllerStub:
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.SellerList.FromString,
                 _registered_method=True)
+        self.SetCartQuantity = channel.unary_unary(
+                '/config.shop.ShopController/SetCartQuantity',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.SetCartQuantityRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.SetCartQuantityResult.FromString,
+                _registered_method=True)
+        self.SetDefaultAddress = channel.unary_unary(
+                '/config.shop.ShopController/SetDefaultAddress',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DefaultAddressResult.FromString,
+                _registered_method=True)
+        self.ShippingMethods = channel.unary_unary(
+                '/config.shop.ShopController/ShippingMethods',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ShippingMethodList.FromString,
+                _registered_method=True)
+        self.UnlikeProduct = channel.unary_unary(
+                '/config.shop.ShopController/UnlikeProduct',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UnlikeProductRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UnlikeResult.FromString,
+                _registered_method=True)
+        self.UpdateAddress = channel.unary_unary(
+                '/config.shop.ShopController/UpdateAddress',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UpdateAddressRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UpdateAddressResult.FromString,
+                _registered_method=True)
 
 
 class ShopControllerServicer:
     """Missing associated documentation comment in .proto file."""
+
+    def AddAddress(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def AddToCart(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -106,7 +247,79 @@ class ShopControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Addresses(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Brands(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CancelOrder(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Categories(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Category(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Checkout(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ClearCart(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Collection(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Collections(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ConfirmPayment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteReview(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Favourites(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAddress(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -124,6 +337,12 @@ class ShopControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def LikeProduct(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Listing(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -131,6 +350,12 @@ class ShopControllerServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Listings(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def MyReviews(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -148,6 +373,12 @@ class ShopControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PreviewCoupon(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Product(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -155,6 +386,42 @@ class ShopControllerServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Products(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RecordView(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RelatedProducts(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RemoveAddress(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RemoveFromCart(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReviewProduct(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Reviews(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -172,18 +439,113 @@ class ShopControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SetCartQuantity(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetDefaultAddress(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ShippingMethods(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UnlikeProduct(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateAddress(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ShopControllerServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'AddAddress': grpc.unary_unary_rpc_method_handler(
+                    servicer.AddAddress,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddAddressRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressResult.SerializeToString,
+            ),
             'AddToCart': grpc.unary_unary_rpc_method_handler(
                     servicer.AddToCart,
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddToCartRequest.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddToCartResult.SerializeToString,
             ),
+            'Addresses': grpc.unary_unary_rpc_method_handler(
+                    servicer.Addresses,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressList.SerializeToString,
+            ),
+            'Brands': grpc.unary_unary_rpc_method_handler(
+                    servicer.Brands,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.BrandList.SerializeToString,
+            ),
+            'CancelOrder': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelOrder,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CancelOrderRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CancelOrderResult.SerializeToString,
+            ),
             'Categories': grpc.unary_unary_rpc_method_handler(
                     servicer.Categories,
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryList.SerializeToString,
+            ),
+            'Category': grpc.unary_unary_rpc_method_handler(
+                    servicer.Category,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryResult.SerializeToString,
+            ),
+            'Checkout': grpc.unary_unary_rpc_method_handler(
+                    servicer.Checkout,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CheckoutRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CheckoutResult.SerializeToString,
+            ),
+            'ClearCart': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClearCart,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ClearCartResult.SerializeToString,
+            ),
+            'Collection': grpc.unary_unary_rpc_method_handler(
+                    servicer.Collection,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionResult.SerializeToString,
+            ),
+            'Collections': grpc.unary_unary_rpc_method_handler(
+                    servicer.Collections,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.SerializeToString,
+            ),
+            'ConfirmPayment': grpc.unary_unary_rpc_method_handler(
+                    servicer.ConfirmPayment,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.SerializeToString,
+            ),
+            'DeleteReview': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteReview,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewResult.SerializeToString,
+            ),
+            'Favourites': grpc.unary_unary_rpc_method_handler(
+                    servicer.Favourites,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.FavouritesRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.FavouritesResult.SerializeToString,
+            ),
+            'GetAddress': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAddress,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.GetAddressRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.GetAddressResult.SerializeToString,
             ),
             'GetCart': grpc.unary_unary_rpc_method_handler(
                     servicer.GetCart,
@@ -195,6 +557,11 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.InvoiceRequest.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.InvoiceResult.SerializeToString,
             ),
+            'LikeProduct': grpc.unary_unary_rpc_method_handler(
+                    servicer.LikeProduct,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.LikeProductRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.LikeResult.SerializeToString,
+            ),
             'Listing': grpc.unary_unary_rpc_method_handler(
                     servicer.Listing,
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ListingRequest.FromString,
@@ -204,6 +571,11 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     servicer.Listings,
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ListingList.SerializeToString,
+            ),
+            'MyReviews': grpc.unary_unary_rpc_method_handler(
+                    servicer.MyReviews,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.MyReviewsRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.MyReviewsResult.SerializeToString,
             ),
             'Order': grpc.unary_unary_rpc_method_handler(
                     servicer.Order,
@@ -215,6 +587,11 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.SerializeToString,
             ),
+            'PreviewCoupon': grpc.unary_unary_rpc_method_handler(
+                    servicer.PreviewCoupon,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CouponPreviewRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CouponPreviewResult.SerializeToString,
+            ),
             'Product': grpc.unary_unary_rpc_method_handler(
                     servicer.Product,
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ProductRequest.FromString,
@@ -224,6 +601,36 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     servicer.Products,
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ProductsRequest.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ProductsResult.SerializeToString,
+            ),
+            'RecordView': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecordView,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RecordViewRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RecordViewResult.SerializeToString,
+            ),
+            'RelatedProducts': grpc.unary_unary_rpc_method_handler(
+                    servicer.RelatedProducts,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RelatedProductsRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RelatedProductsResult.SerializeToString,
+            ),
+            'RemoveAddress': grpc.unary_unary_rpc_method_handler(
+                    servicer.RemoveAddress,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveAddressRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressRemoved.SerializeToString,
+            ),
+            'RemoveFromCart': grpc.unary_unary_rpc_method_handler(
+                    servicer.RemoveFromCart,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveFromCartRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveFromCartResult.SerializeToString,
+            ),
+            'ReviewProduct': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReviewProduct,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewProductRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewProductResult.SerializeToString,
+            ),
+            'Reviews': grpc.unary_unary_rpc_method_handler(
+                    servicer.Reviews,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewsRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewsResult.SerializeToString,
             ),
             'Seller': grpc.unary_unary_rpc_method_handler(
                     servicer.Seller,
@@ -235,6 +642,31 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.SellerList.SerializeToString,
             ),
+            'SetCartQuantity': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetCartQuantity,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.SetCartQuantityRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.SetCartQuantityResult.SerializeToString,
+            ),
+            'SetDefaultAddress': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetDefaultAddress,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.AddressRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DefaultAddressResult.SerializeToString,
+            ),
+            'ShippingMethods': grpc.unary_unary_rpc_method_handler(
+                    servicer.ShippingMethods,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ShippingMethodList.SerializeToString,
+            ),
+            'UnlikeProduct': grpc.unary_unary_rpc_method_handler(
+                    servicer.UnlikeProduct,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UnlikeProductRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UnlikeResult.SerializeToString,
+            ),
+            'UpdateAddress': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateAddress,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UpdateAddressRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.UpdateAddressResult.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'config.shop.ShopController', rpc_method_handlers)
@@ -245,6 +677,33 @@ def add_ShopControllerServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class ShopController:
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def AddAddress(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/AddAddress',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.AddAddressRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.AddressResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def AddToCart(request,
@@ -274,6 +733,87 @@ class ShopController:
             _registered_method=True)
 
     @staticmethod
+    def Addresses(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Addresses',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.AddressList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Brands(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Brands',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.BrandList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CancelOrder(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/CancelOrder',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CancelOrderRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CancelOrderResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Categories(request,
             target,
             options=(),
@@ -290,6 +830,249 @@ class ShopController:
             '/config.shop.ShopController/Categories',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Category(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Category',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CategoryResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Checkout(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Checkout',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CheckoutRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CheckoutResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClearCart(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/ClearCart',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ClearCartResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Collection(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Collection',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Collections(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Collections',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ConfirmPayment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/ConfirmPayment',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteReview(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/DeleteReview',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Favourites(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Favourites',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.FavouritesRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.FavouritesResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAddress(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/GetAddress',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.GetAddressRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.GetAddressResult.FromString,
             options,
             channel_credentials,
             insecure,
@@ -355,6 +1138,33 @@ class ShopController:
             _registered_method=True)
 
     @staticmethod
+    def LikeProduct(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/LikeProduct',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.LikeProductRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.LikeResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Listing(request,
             target,
             options=(),
@@ -398,6 +1208,33 @@ class ShopController:
             '/config.shop.ShopController/Listings',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             apps_dot_shop_dot_grpc_dot_shop__pb2.ListingList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def MyReviews(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/MyReviews',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.MyReviewsRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.MyReviewsResult.FromString,
             options,
             channel_credentials,
             insecure,
@@ -463,6 +1300,33 @@ class ShopController:
             _registered_method=True)
 
     @staticmethod
+    def PreviewCoupon(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/PreviewCoupon',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CouponPreviewRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.CouponPreviewResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Product(request,
             target,
             options=(),
@@ -517,6 +1381,168 @@ class ShopController:
             _registered_method=True)
 
     @staticmethod
+    def RecordView(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/RecordView',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.RecordViewRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.RecordViewResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RelatedProducts(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/RelatedProducts',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.RelatedProductsRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.RelatedProductsResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RemoveAddress(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/RemoveAddress',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveAddressRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.AddressRemoved.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RemoveFromCart(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/RemoveFromCart',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveFromCartRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.RemoveFromCartResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReviewProduct(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/ReviewProduct',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewProductRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewProductResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Reviews(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/Reviews',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewsRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ReviewsResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Seller(request,
             target,
             options=(),
@@ -560,6 +1586,141 @@ class ShopController:
             '/config.shop.ShopController/Sellers',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             apps_dot_shop_dot_grpc_dot_shop__pb2.SellerList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetCartQuantity(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/SetCartQuantity',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.SetCartQuantityRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.SetCartQuantityResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetDefaultAddress(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/SetDefaultAddress',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.AddressRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.DefaultAddressResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ShippingMethods(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/ShippingMethods',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.ShippingMethodList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UnlikeProduct(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/UnlikeProduct',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.UnlikeProductRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.UnlikeResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateAddress(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/UpdateAddress',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.UpdateAddressRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.UpdateAddressResult.FromString,
             options,
             channel_credentials,
             insecure,
