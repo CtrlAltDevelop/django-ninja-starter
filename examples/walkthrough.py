@@ -1109,6 +1109,14 @@ def section_shop(api: Api) -> None:
     )
     api.get("/api/v1/shop/products/featherbook-14", token="")
 
+    note(
+        "A product sold in variants answers the picker's two questions at once: "
+        "which sizes exist, and which of them are still buyable -- here, the "
+        "large is made but nobody is holding one. Each size also carries its own "
+        "sellers, its own shelf and every seller's."
+    )
+    api.get("/api/v1/shop/products/plain-tee", token="")
+
     note("Named lists are filters over the live catalogue, so none of them can go stale.")
     api.get("/api/v1/shop/listings", token="", show=False)
     api.get("/api/v1/shop/listings/bestsellers", token="", show=False)
