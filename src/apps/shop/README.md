@@ -87,7 +87,17 @@ Naming the app is the whole installation; leaving it unset costs nothing.
 declare what a category's products have — screen size in inches as a required
 number, colour as one of a list — and attributes are inherited down the tree, so
 "warranty, in months" declared on Electronics is answered by every laptop under
-it. An attribute marked `is_variant` is answered per variant instead.
+it. An attribute marked `is_variant` is answered per variant instead, and only a
+choice or a colour may be one: an option is the key a shopper picks by, so free
+text would make "Red" and "Red " two variants and two shelves.
+
+**Availability is one question asked in one place.** Three tables carry a
+`stock` column — the product row is the primary seller's shelf, a variant's is
+that size in that colour, an offer's is somebody else's warehouse — and
+`pricing.shelf`, `can_fill`, `total_stock` and `is_available` are how every
+payload, basket check and checkout asks about them. A product page therefore
+publishes, per variant, both the shop's own shelf and every seller's, and per
+variant axis which of its values can still be pressed.
 
 **A discount is a row with a window, not a column on the product.** No
 `sale_price` is ever stored: the campaign is one row naming what it applies to

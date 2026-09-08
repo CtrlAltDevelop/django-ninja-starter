@@ -32,9 +32,16 @@ it, and an id belonging to somebody else's basket is a 404 rather than a 403.
 <!-- generated:routes -->
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
+| `GET` | `/api/v1/shop/addresses` | Bearer | List your saved addresses |
+| `POST` | `/api/v1/shop/addresses` | Bearer | Save a delivery address |
+| `DELETE` | `/api/v1/shop/addresses/{address_id}` | Bearer | Forget an address |
+| `GET` | `/api/v1/shop/addresses/{address_id}` | Bearer | Read one address |
+| `PATCH` | `/api/v1/shop/addresses/{address_id}` | Bearer | Edit an address |
+| `PUT` | `/api/v1/shop/addresses/{address_id}/default` | Bearer | Choose the default address |
 | `GET` | `/api/v1/shop/brands` | None | List every brand |
 | `DELETE` | `/api/v1/shop/cart` | Bearer | Empty your basket |
 | `GET` | `/api/v1/shop/cart` | Bearer | Read your basket |
+| `POST` | `/api/v1/shop/cart/coupon` | Bearer | Try a coupon code |
 | `POST` | `/api/v1/shop/cart/items` | Bearer | Add to your basket |
 | `DELETE` | `/api/v1/shop/cart/items/{item_id}` | Bearer | Remove a line |
 | `PATCH` | `/api/v1/shop/cart/items/{item_id}` | Bearer | Change a line's quantity |
@@ -63,6 +70,7 @@ it, and an id belonging to somebody else's basket is a 404 rather than a 403.
 | `GET` | `/api/v1/shop/reviews/mine` | Bearer | Everything you have reviewed |
 | `GET` | `/api/v1/shop/sellers` | None | List every seller |
 | `GET` | `/api/v1/shop/sellers/{slug}` | None | Read one seller |
+| `GET` | `/api/v1/shop/shipping-methods` | None | List delivery options |
 <!-- /generated:routes -->
 
 The catalogue half needs no credential. The three routes that are public *and*
@@ -90,6 +98,35 @@ buys from somebody dearer with a shorter lead time. Two sellers of one thing are
 two basket lines, and each line's stock check, price and eventual order line
 follow the seller it names.
 
+## Which size, from whom
+
+A product sold in variants asks three questions at once, and the product page
+answers all three in one document.
+
+**What can be picked** is `variant_attributes`: one entry per axis the category
+declares, each carrying the values this product is actually made in — a category
+that allows four colours and a product that comes in two offers two, ordered by
+the declared list so every product in a category prints S, M, L in that order.
+
+**Which of those picks are still buyable** is each value's `in_stock`, and the
+`variants` it names. That is the answer a size picker needs in order to grey a
+button out, and computing it here rather than leaving every storefront to derive
+it by scanning variants is the difference between one rule and one per client.
+
+**Who is holding them** is on the variant: `sellers` is that variant's slice of
+the page's offers, already priced, and `seller_count` counts the shop itself
+among them. `stock` is the shop's own shelf and `total_stock` is every shelf,
+because a page with only the first would print "out of stock" over a size three
+other shops are holding.
+
+Availability is decided in one place — `pricing.shelf`, `can_fill`,
+`total_stock` and `is_available`. Three tables carry a `stock` column and they
+are not alternatives: the product row is the primary seller's shelf, a variant's
+is that size in that colour, and an offer's is somebody else's warehouse. Most
+specific wins, exactly as the price does, and the payloads, the basket's "can
+this still be filled" and the checkout's stock check all ask through the same
+functions rather than each writing the comparison out again.
+
 ## What a price is
 
 There is no `sale_price` column anywhere, and nothing caches a computed price.
@@ -116,6 +153,14 @@ screen size in inches as a required number, colour as one of a list. A product
 fills them in and the value is validated against the declared type; an attribute
 marked as distinguishing variants is answered per variant instead, because "3
 left" is meaningless for a shirt that exists in four sizes.
+
+Only a **choice** or a **colour** can distinguish variants. An option is the key
+a shopper picks by, so free text would make "Red" and "Red " two variants, two
+shelves and one picker offering the same colour twice; a choice is bounded by
+the category's own list and a colour by the swatches somebody entered. This is
+also what keeps a shoe size and a shirt size from ever meeting: they are two
+attributes on two categories, each with its own list, and a book's translation
+and edition are two more on a third.
 
 Attributes are inherited down the tree, so "warranty, in months" declared on
 Electronics is answered by every laptop underneath it, and a child declaring the
@@ -456,6 +501,24 @@ What somebody agreed to buy, at the prices they agreed to.
 | `tax_total` | Decimal |  |
 | `total` | Decimal |  |
 | `note` | Text |  |
+| `carrier` | Char |  |
+| `tracking_number` | Char |  |
+| `tracking_url` | Char |  |
+| `shipped_at` | DateTime | not editable, nullable |
+
+#### `OrderEvent`
+
+One thing that happened to one order, in the order it happened.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID | primary key, not editable |
+| `created_at` | DateTime | not editable |
+| `updated_at` | DateTime | not editable |
+| `order` | ForeignKey | → `shop.Order` |
+| `status` | Char |  |
+| `note` | Char |  |
+| `actor` | ForeignKey | → `accounts.User`, nullable |
 
 #### `OrderItem`
 
@@ -694,15 +757,18 @@ A free label on a product: "vegan", "refurbished", "bestseller-2026".
 <!-- generated:admin -->
 | Model | Editable | Actions | Columns |
 | --- | --- | --- | --- |
+| `Address` | No — read-only | — | `full_name`, `account`, `city`, `country`, `postal_code`, `default_badge` |
 | `Brand` | Yes | — | `name`, `product_count`, `is_active`, `order` |
 | `Cart` | No — read-only | — | `user`, `line_count`, `unit_count`, `updated_at` |
 | `Category` | Yes | — | `tree_name`, `attribute_count`, `product_count`, `is_active`, `order` |
 | `CategoryAttribute` | Yes | — | `name`, `category`, `attribute_type`, `required`, `is_variant`, `order` |
 | `Collection` | Yes | — | `name`, `product_count`, `is_active`, `order` |
-| `Coupon` | Yes | — | `code`, `percent`, `amount`, `minimum_subtotal`, `used_count`, `usage_limit`, `is_active` |
+| `Coupon` | Yes | — | `code`, `worth`, `minimum_subtotal`, `usage`, `window`, `state` |
 | `Discount` | Yes | — | `name`, `offer`, `window`, `running`, `priority`, `is_active` |
+| `InventoryReservation` | No — read-only | — | `product`, `variant`, `seller`, `quantity`, `order_link`, `state` |
 | `Invoice` | Yes | — | `number`, `order`, `customer`, `total`, `order_status`, `issued_at` |
-| `Order` | Yes | `mark_paid`, `cancel_orders` | `number`, `user`, `status`, `total`, `currency`, `invoice_number`, `created_at` |
+| `Order` | Yes | `mark_paid`, `start_processing`, `mark_sent`, `mark_completed`, `cancel_orders`, `refund_orders` | `number`, `customer`, `status_badge`, `line_count`, `money`, `fulfilment`, `invoice_number`, `created_at` |
+| `OrderEvent` | No — read-only | — | `created_at`, `order_number`, `status_badge`, `note`, `actor` |
 | `Payment` | No — read-only | `mark_paid`, `mark_rejected` | `order`, `provider`, `status_badge`, `amount`, `currency`, `provider_reference`, `paid_at` |
 | `Product` | Yes | `publish`, `unpublish`, `archive`, `feature`, `unfeature` | `name`, `category`, `brand`, `seller`, `live_price`, `stock_state`, `rating_badge`, `like_count`, `status_badge` |
 | `ProductLike` | No — read-only | — | `product`, `user`, `created_at` |
@@ -710,7 +776,7 @@ A free label on a product: "vegan", "refurbished", "bestseller-2026".
 | `ProductVariant` | Yes | — | `sku`, `product`, `label`, `price`, `stock`, `is_active` |
 | `Review` | Yes | `approve`, `reject` | `product`, `author`, `stars`, `title`, `status_badge`, `created_at` |
 | `Seller` | Yes | — | `name`, `city`, `listing_count`, `offer_count`, `is_active`, `order` |
-| `ShippingMethod` | Yes | — | `name`, `price`, `free_from`, `min_days`, `max_days`, `is_active`, `order` |
+| `ShippingMethod` | Yes | — | `name`, `cost_summary`, `speed`, `is_active`, `order` |
 | `Tag` | Yes | — | `name`, `slug`, `product_count` |
 <!-- /generated:admin -->
 
@@ -789,10 +855,29 @@ curl 'http://localhost:8000/api/v1/shop/orders/S20260902ABCD1234/invoice' \
 ```
 
 The same shop answers over **GraphQL** at `/graphql` (`shopProducts`,
-`shopProduct`, `shopCart`, `shopOrders`, `shopInvoice`, and the basket, review
-and like mutations) and over **gRPC** on `DJANGO_GRPC_PORT`
+`shopProduct`, `shopCart`, `shopOrders`, `shopInvoice`, and the basket, address,
+review, like and order mutations) and over **gRPC** on `DJANGO_GRPC_PORT`
 (`ShopController`). All three call the same service, so a decision — what
 "bestsellers" means, whether an unmoderated review is visible, which seller wins
 the buy box — is made once and cannot drift between doors. The gRPC basket and
 order calls read the caller from `authorization` metadata, so no field on any
 request could name somebody else's.
+
+**All three doors carry the whole shop.** Every route above has its counterpart
+on the other two: the catalogue and each of its filters, the category tree,
+brands, collections, the product page, related products, view counts, reviews,
+likes, the basket, the address book, checkout, orders, invoices and the payment
+callback. A door that answered only part of it would push its clients back onto
+HTTP for the rest — and the half nobody exercised is the half that rots.
+
+Three differences between the doors are the transport's rather than the shop's,
+and protobuf forces all three. Money crosses the wire as a string, because
+protobuf has no decimal and a shop that adds up nearly prices sells things for
+nearly the right amount; that is also why an empty `min_price` means "no bound"
+rather than zero. An attribute's value and a variant's options cross as JSON,
+because the shape of each is decided by a type the same message carries. And
+`UpdateAddress` reads an empty field as "not sent", so it cannot *clear* an
+optional one — the HTTP `PATCH` can tell those two apart. `is_default` is
+deliberately not on that request for the same reason: `SetDefaultAddress` is how
+the default gets chosen, because a bool indistinguishable from unset would
+silently unset it on every unrelated edit.
