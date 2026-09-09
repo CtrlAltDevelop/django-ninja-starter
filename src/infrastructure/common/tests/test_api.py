@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, patch
 
 from django.db.utils import OperationalError
@@ -209,6 +210,35 @@ def test_tag_names_match_the_names_their_apps_carry_in_the_admin() -> None:
         assert spelled is None or spelled == tag["name"], (
             f"the document says {tag['name']!r} and the admin says {spelled!r}"
         )
+
+
+def test_the_published_document_declares_no_key_twice() -> None:
+    """A JSON object may not carry the same key twice, and Swagger enforces it.
+
+    Swagger UI parses the document as YAML -- JSON being a subset of it -- and
+    a duplicated mapping key is fatal there, not a warning: the page renders
+    "Parser error" and nothing else, whatever the rest of the document says.
+
+    Python lets a dict hold both `200` and `"200"`, and `json.dumps` writes them
+    out as the same key. Django Ninja keys its own responses map by `int` and
+    deep-merges `openapi_extra` into it, so one route documenting a status by
+    string is enough to break the whole page. Parsed from the raw bytes, because
+    `response.json()` silently keeps the last of the two and sees nothing wrong.
+    """
+    response = Client().get("/api/v1/openapi.json")
+    duplicated: list[str] = []
+
+    def keep_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        seen: dict[str, object] = {}
+        for key, value in pairs:
+            if key in seen:
+                duplicated.append(key)
+            seen[key] = value
+        return seen
+
+    json.loads(response.content, object_pairs_hook=keep_duplicates)
+
+    assert not duplicated, f"the document declares these keys twice: {duplicated}"
 
 
 def test_versioned_openapi_schema_contains_health_routes() -> None:
