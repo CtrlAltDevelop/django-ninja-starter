@@ -55,7 +55,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import build
 
@@ -136,6 +136,10 @@ class Api:
 
         self.client = Client()
         self.token = ""
+        # Every path this tour has asked for, so a section can assert it left
+        # nothing out. A transcript that quietly stops covering an endpoint is
+        # how a tour comes to describe an app it no longer exercises.
+        self.visited: set[tuple[str, str]] = set()
 
     def request(
         self,
@@ -147,13 +151,25 @@ class Api:
         expect: int = 200,
         show: bool = True,
         headers: dict[str, str] | None = None,
+        files: dict[str, tuple[str, bytes]] | None = None,
     ) -> Any:
+        self.visited.add((method.upper(), path.split("?")[0]))
         bearer = self.token if token is None else token
         extra: dict[str, Any] = {"HTTP_AUTHORIZATION": f"Bearer {bearer}"} if bearer else {}
         if headers:
             extra["headers"] = headers
         send = getattr(self.client, method.lower())
-        if payload is None:
+        if files is not None:
+            # Multipart rather than JSON, because an upload endpoint takes a
+            # file and there is no way to put one in a JSON body. Django's test
+            # client picks the encoding from the absence of `content_type`.
+            from django.core.files.uploadedfile import SimpleUploadedFile
+
+            body_files = {
+                field: SimpleUploadedFile(name, content) for field, (name, content) in files.items()
+            }
+            response = send(path, {**(payload or {}), **body_files}, **extra)
+        elif payload is None:
             response = send(path, **extra)
         else:
             response = send(path, payload, content_type="application/json", **extra)
@@ -209,6 +225,11 @@ class Socket:
     path below is resolved the way a real connection's would be, and a project
     that mounted nothing there would fail here too.
     """
+
+    #: Every command name any connection in this tour has sent. Shared across
+    #: instances because a conversation is two connections and the coverage
+    #: question is about the socket, not about either end of it.
+    sent: ClassVar[set[str]] = set()
 
     def __init__(self, path: str, *, query: str = "", label: str = "") -> None:
         from config.sockets import websocket_application
@@ -280,9 +301,25 @@ class Socket:
         print(f"  {CYAN}{'WS':<6}{OFF} {self._path}{offered} {GREEN}→ accepted{OFF}")
         return await self.frame("ready")
 
-    async def frame(self, expect: str, *, show: bool = True) -> dict[str, Any]:
-        """Read one server frame, insisting it is the one the tour says it is."""
+    async def frame(
+        self, expect: str, *, show: bool = True, patient: bool = False
+    ) -> dict[str, Any]:
+        """Read one server frame, insisting it is the one the tour says it is.
+
+        ``patient`` reads past anything else that arrives first. One command
+        can legitimately produce several frames -- a reply, the thread's own
+        update, a read receipt -- and a connection belonging to an agent is
+        joined to the desk's channel as well as to its own conversations. A
+        transcript that wants one of those frames should not have to know the
+        order the others happen to arrive in.
+        """
         message = await self._next_message()
+        if patient:
+            while message["type"] == "websocket.send":
+                if json.loads(message["text"]).get("type") == expect:
+                    break
+                print(f"  {DIM}│ (also sent {json.loads(message['text']).get('type')}){OFF}")
+                message = await self._next_message()
         if message["type"] != "websocket.send":
             raise WalkthroughError(f"the socket closed instead of answering: {message}")
         frame: dict[str, Any] = json.loads(message["text"])
@@ -297,12 +334,20 @@ class Socket:
         return frame
 
     async def command(
-        self, command: dict[str, Any], expect: str, *, show: bool = True
+        self, command: dict[str, Any], expect: str, *, show: bool = True, patient: bool = False
     ) -> dict[str, Any]:
-        """Send one command and read the frame it is answered with."""
+        """Send one command and read the frame it is answered with.
+
+        ``patient`` reads past anything else that arrives first. A connection
+        belonging to an agent is joined to the desk's channel as well as to its
+        own conversations, so it is told about a thread changing at the same
+        time as it is answered -- which is right for a client and unhelpful for
+        a transcript that wants the answer to the command it just sent.
+        """
+        Socket.sent.add(command["command"])
         print(f"  {DIM}│{OFF} {CYAN}→ {command['command']}{OFF}")
         await self._to_server.put({"type": "websocket.receive", "text": json.dumps(command)})
-        return await self.frame(expect, show=show)
+        return await self.frame(expect, show=show, patient=patient)
 
 
 def outbox() -> list[Any]:
@@ -417,6 +462,11 @@ def section_configuration() -> None:
     if settings.NOTIFICATIONS_ENABLED:
         notifications = f"on, socket at {settings.NOTIFICATIONS_WS_PATH}"
     print(f"  notifications    {notifications}")
+    print(f"  shop             {'on' if settings.SHOP_ENABLED else 'off'}")
+    support = "off"
+    if settings.SUPPORT_ENABLED:
+        support = f"on, socket at {settings.SUPPORT_WS_PATH}"
+    print(f"  support          {support}")
     print()
     for app in settings.INSTALLED_APPS:
         marker = " " if app.startswith("django.contrib") else "•"
@@ -948,12 +998,10 @@ def section_shop(api: Api) -> None:
 
     from decimal import Decimal
 
-    from django.contrib.auth import get_user_model
     from django.utils import timezone
 
     from apps.shop.attributes import AttributeType
     from apps.shop.models import (
-        Address,
         Brand,
         Category,
         CategoryAttribute,
@@ -1036,6 +1084,21 @@ def section_shop(api: Api) -> None:
     ProductOffer.objects.create(
         product=laptop, seller=bargains, price=Decimal("1100.00"), stock=2, lead_time_days=2
     )
+    # A sibling in the same category, so the row under a product page has
+    # something in it rather than proving only that the endpoint answers.
+    Product.objects.create(
+        category=laptops,
+        brand=acme,
+        seller=store,
+        name="Acme Featherbook 16",
+        slug="featherbook-16",
+        summary="The same laptop, two inches wider.",
+        sku="FB-16",
+        price=Decimal("1500.00"),
+        status=ProductStatus.ACTIVE,
+        stock=2,
+        sales_count=11,
+    )
     tee = Product.objects.create(
         category=shirts,
         name="Plain tee",
@@ -1076,19 +1139,15 @@ def section_shop(api: Api) -> None:
     shipping = ShippingMethod.objects.create(
         name="Standard", price=Decimal("5.00"), free_from=Decimal("2000.00")
     )
-    zoe = get_user_model().objects.get(username="zoe")
-    address = Address.objects.create(
-        user=zoe,
-        full_name="Zoe Example",
-        phone="+441234567890",
-        country="GB",
-        city="Bristol",
-        postal_code="BS1 4ST",
-        line1="1 Example Street",
-    )
-
     note("The category tree, with a count on each node. No credential anywhere here.")
     api.get("/api/v1/shop/categories", token="")
+
+    note("And one node of it alone, which is what a category page opens with.")
+    api.get("/api/v1/shop/categories/laptops", token="", show=False)
+
+    note("The two other axes a shopper narrows by before searching at all.")
+    api.get("/api/v1/shop/brands", token="", show=False)
+    api.get("/api/v1/shop/sellers", token="", show=False)
 
     note(
         "One endpoint answers search, a category page and every filter on it. "
@@ -1110,6 +1169,12 @@ def section_shop(api: Api) -> None:
     api.get("/api/v1/shop/products/featherbook-14", token="")
 
     note(
+        "The row every product page carries under it: the same category, best "
+        "rated first, and never the product being looked at."
+    )
+    api.get("/api/v1/shop/products/featherbook-14/related", token="", show=False)
+
+    note(
         "A product sold in variants answers the picker's two questions at once: "
         "which sizes exist, and which of them are still buyable -- here, the "
         "large is made but nobody is holding one. Each size also carries its own "
@@ -1120,11 +1185,22 @@ def section_shop(api: Api) -> None:
     note("Named lists are filters over the live catalogue, so none of them can go stale.")
     api.get("/api/v1/shop/listings", token="", show=False)
     api.get("/api/v1/shop/listings/bestsellers", token="", show=False)
+    api.get("/api/v1/shop/collections", token="", show=False)
     api.get("/api/v1/shop/collections/staff-picks", token="", show=False)
     api.get("/api/v1/shop/sellers/bargain-bin", token="", show=False)
 
     note("A view is recorded without a credential; popularity is a public fact.")
     api.post("/api/v1/shop/products/featherbook-14/view", token="", show=False)
+
+    note(
+        "A basket is scratch paper before it is an order. A line can be dropped "
+        "and the whole thing tipped out, and either way what comes back is the "
+        "basket as it now stands rather than a bare 204 to go and re-read."
+    )
+    scratch = api.post("/api/v1/shop/cart/items", {"product": "featherbook-16"}, show=False)
+    api.delete(f"/api/v1/shop/cart/items/{scratch['items'][0]['id']}", show=False)
+    api.post("/api/v1/shop/cart/items", {"product": "featherbook-16"}, show=False)
+    api.delete("/api/v1/shop/cart", show=False)
 
     note("The basket needs one. Without a seller named, it takes the one the page showed.")
     api.post("/api/v1/shop/cart/items", {"product": "featherbook-14", "quantity": 1})
@@ -1164,6 +1240,69 @@ def section_shop(api: Api) -> None:
     api.get("/api/v1/shop/reviews/mine", show=False)
     api.get("/api/v1/shop/favourites", show=False)
 
+    note("Both are the shopper's to take back, and taking one back is not an error.")
+    api.put("/api/v1/shop/products/plain-tee/like", show=False)
+    api.delete("/api/v1/shop/products/plain-tee/like", show=False)
+    api.post(
+        "/api/v1/shop/products/plain-tee/reviews",
+        {"rating": 3, "title": "Plain", "body": "It is a shirt."},
+        show=False,
+    )
+    api.delete("/api/v1/shop/products/plain-tee/reviews", show=False)
+
+    note(
+        "Checkout needs an address and a delivery option, and the address book "
+        "is the caller's own -- written, read, corrected and defaulted through "
+        "the API rather than seeded behind it."
+    )
+    address = api.post(
+        "/api/v1/shop/addresses",
+        {
+            "full_name": "Zoe Example",
+            "phone": "+441234567890",
+            "country": "GB",
+            "city": "Bristol",
+            "postal_code": "BS1 4ST",
+            "line1": "1 Example Street",
+        },
+    )
+    api.get("/api/v1/shop/addresses", show=False)
+    api.get(f"/api/v1/shop/addresses/{address['id']}", show=False)
+    api.patch(f"/api/v1/shop/addresses/{address['id']}", {"line2": "Flat 2"}, show=False)
+    api.put(f"/api/v1/shop/addresses/{address['id']}/default", show=False)
+
+    note("A second one, saved and then forgotten again.")
+    spare = api.post(
+        "/api/v1/shop/addresses",
+        {
+            "label": "Work",
+            "full_name": "Zoe Example",
+            "phone": "+441234567890",
+            "country": "GB",
+            "city": "Bath",
+            "postal_code": "BA1 1AA",
+            "line1": "2 Example Road",
+        },
+        show=False,
+    )
+    api.delete(f"/api/v1/shop/addresses/{spare['id']}", show=False)
+
+    note(
+        "Delivery options are public, so a shopper comparing them need not have "
+        "signed in -- but a caller who has gets each one costed against what is "
+        "actually in the basket, which is the only way a free-over threshold can "
+        "be printed honestly."
+    )
+    api.get("/api/v1/shop/shipping-methods")
+
+    note(
+        "A coupon is tried before it is committed to. A code the shop will not "
+        "take comes back as an answer saying why, not as a 400 per keystroke on "
+        "a checkout page somebody is still typing into."
+    )
+    api.post("/api/v1/shop/cart/coupon", {"code": "WELCOME"}, show=False)
+    api.post("/api/v1/shop/cart/coupon", {"code": "NOT-A-COUPON"})
+
     note(
         "Checkout is one atomic step: it prices the basket, holds the stock, "
         "writes an immutable order and issues its invoice."
@@ -1171,7 +1310,7 @@ def section_shop(api: Api) -> None:
     order = api.post(
         "/api/v1/shop/checkout",
         {
-            "address": str(address.pk),
+            "address": address["id"],
             "shipping_method": str(shipping.pk),
             "coupon": "WELCOME",
         },
@@ -1198,6 +1337,9 @@ def section_shop(api: Api) -> None:
     )
     api.get(f"/api/v1/shop/orders/{order['number']}", show=False)
 
+    note("And the whole shelf of them, newest first, which is what an account page shows.")
+    api.get("/api/v1/shop/orders", show=False)
+
     note("An order that has been paid for can no longer be cancelled.")
     api.post(f"/api/v1/shop/orders/{order['number']}/cancel", expect=400, show=False)
 
@@ -1205,9 +1347,583 @@ def section_shop(api: Api) -> None:
     api.get("/api/v1/shop/orders/S00000000XXXX0000", expect=404, show=False)
 
 
-def section_email_code(api: Api) -> None:
+def section_support(api: Api) -> None:
+    """The fourth feature app: one conversation, seen from both sides of a desk."""
+    from django.apps import apps as django_apps
+    from django.conf import settings
+
+    if not settings.SUPPORT_ENABLED or not django_apps.is_installed("apps.support"):
+        heading(
+            10,
+            "Support",
+            "apps.support",
+            "Not installed: DJANGO_SUPPORT_ENABLED is not set.",
+        )
+        return
+
+    from django.contrib.auth import get_user_model
+
+    from apps.support.models import CannedReply, Category, Tag
+
     heading(
         10,
+        "A support desk, from both sides of it",
+        "apps.support",
+        "A ticket is a conversation, which is what lets live chat and a filed "
+        "problem be one app. Everything below is the same account's token "
+        "answering as a client, and an agent's answering as the desk.",
+    )
+
+    agatha = get_user_model().objects.create_user(
+        username="agatha", email="agatha@example.com", is_staff=True
+    )
+    desk = desk_token(agatha)
+
+    note(
+        "The desk's own furniture, made the way an operator would: a category "
+        "carrying the promise, a tag, and a reply somebody says often."
+    )
+    billing = Category.objects.create(
+        name="Billing",
+        description="Invoices, payments and refunds.",
+        first_response_minutes=60,
+        resolution_minutes=60 * 24,
+    )
+    Category.objects.create(name="General")
+    Tag.objects.create(name="Escalated", colour="#dc2626")
+    CannedReply.objects.create(
+        title="Asking for an invoice number",
+        body="Could you send us the invoice number from the email?",
+    )
+    print(f"  {DIM}│ 2 categories, 1 tag, 1 saved reply{OFF}")
+
+    note(
+        "What a client is offered when they file something. The response times "
+        "are a promise the desk is making, so they are public to anybody "
+        "signed in rather than an internal target."
+    )
+    api.get("/api/v1/support/categories")
+
+    note(
+        "The rest of that furniture is the desk's own and is answered for "
+        "staff only: a tag is what the desk says about a thread, not what the "
+        "client is told, and fetching a saved reply counts it, which is what "
+        "tells an operator which ones are worth keeping."
+    )
+    api.get("/api/v1/support/tags", token=desk, show=False)
+    api.get("/api/v1/support/canned-replies", token=desk)
+
+    note(
+        "Opening a ticket. The subject and the category are what make it a "
+        "ticket rather than a chat -- and the category is where the SLA "
+        "deadlines below come from."
+    )
+    ticket = api.post(
+        "/api/v1/support",
+        {
+            "kind": "ticket",
+            "subject": "I was charged twice",
+            "body": "There are two charges on the 3rd, both for $49.",
+            "category": billing.slug,
+        },
+        expect=201,
+    )
+    ticket_id = ticket["id"]
+
+    note(
+        f"The reference {ticket['reference']} is the short string somebody "
+        "reads down a telephone. The id is what every other call takes. Note "
+        "the SLA: two deadlines written now, never a breach flag set later."
+    )
+
+    note(
+        "A file goes up on its own, before the message that carries it. This "
+        "is the one half of the app that has to be HTTP: a WebSocket frame is "
+        "JSON and cannot carry a multipart body."
+    )
+    upload = api.post(
+        "/api/v1/support/uploads",
+        None,
+        expect=201,
+        show=False,
+        files={"file": ("statement.txt", b"03/09 -49.00\n03/09 -49.00\n")},
+    )
+    print(f"  {DIM}│ staged {upload['name']} as {shorten(upload['id'], 12)}{OFF}")
+
+    note("And the message that claims it, sent over HTTP here and over the socket below.")
+    said = api.post(
+        f"/api/v1/support/{ticket_id}/messages",
+        {"body": "Here is the statement.", "upload_ids": [upload["id"]]},
+        expect=201,
+        show=False,
+    )
+
+    note(
+        "Rewriting it is the author's alone -- staff get no exception, because "
+        "editing what somebody else is recorded as having said is not "
+        "moderation. The desk that needs a message gone has the retraction "
+        "below, which leaves a tombstone saying so."
+    )
+    api.patch(
+        f"/api/v1/support/messages/{said['id']}",
+        {"body": "Here is the statement -- both charges are on page 2."},
+        show=False,
+    )
+
+    note(
+        "The desk's queue is the same endpoint, answering a different question "
+        "because a different account is asking. Nothing here takes an account "
+        "id, so no parameter widens what a client can see."
+    )
+    api.get("/api/v1/support?unassigned=true", token=desk)
+
+    note("An agent takes it, and moves it up the queue.")
+    api.post(f"/api/v1/support/{ticket_id}/claim", token=desk, show=False)
+    api.post(f"/api/v1/support/{ticket_id}/priority", {"priority": "high"}, token=desk, show=False)
+    api.post(f"/api/v1/support/{ticket_id}/tags", {"tags": ["escalated"]}, token=desk, show=False)
+
+    note(
+        "Billing is somebody else's, so it is handed on. Who a complaint has "
+        "been passed between is recorded as an internal event: telling the "
+        "client answers a question they did not ask with something that reads "
+        "as an apology."
+    )
+    bruno = get_user_model().objects.create_user(
+        username="bruno", email="bruno@example.com", is_staff=True
+    )
+    api.post(
+        f"/api/v1/support/{ticket_id}/assign", {"agent": str(bruno.pk)}, token=desk, show=False
+    )
+
+    note(
+        "A third person joins the same thread as an observer. An observer who "
+        "is not staff reads the public half of it, exactly as the client does."
+    )
+    dara = get_user_model().objects.create_user(username="dara", email="dara@example.com")
+    api.post(
+        f"/api/v1/support/{ticket_id}/participants",
+        {"account": str(dara.pk), "role": "observer"},
+        token=desk,
+        expect=201,
+        show=False,
+    )
+
+    note(
+        "Typing is published to whoever is in the thread and never stored. It "
+        "is offered over HTTP too, so a client polling one transport is not a "
+        "client missing half the app."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/typing", {"typing": True}, token=desk, show=False)
+
+    note(
+        "A staff-only note goes into the same thread, in the order it was "
+        "written. A thread whose notes live somewhere else is a thread nobody "
+        "reads in order."
+    )
+    api.post(
+        f"/api/v1/support/{ticket_id}/notes",
+        {"body": "Duplicate charge confirmed in the gateway. Refunding."},
+        token=desk,
+        expect=201,
+        show=False,
+    )
+
+    note("The desk sees it. The client asks for the same thread and simply does not.")
+    theirs = api.get(f"/api/v1/support/{ticket_id}/messages", token=desk, show=False)
+    hers = api.get(f"/api/v1/support/{ticket_id}/messages", show=False)
+    print(f"  {DIM}│ desk: {theirs['total']} messages · client: {hers['total']}{OFF}")
+    if theirs["total"] == hers["total"]:
+        raise WalkthroughError("the client was shown the desk's internal note")
+
+    note("The reply the client is meant to see.")
+    api.post(
+        f"/api/v1/support/{ticket_id}/messages",
+        {"body": "Confirmed -- the second charge is refunded, 3-5 working days."},
+        token=desk,
+        expect=201,
+        show=False,
+    )
+
+    note(
+        "Retracting leaves a tombstone rather than removing the row, and is "
+        "answered with the message instead of with nothing -- every reader has "
+        "it on screen and has to be told what it became."
+    )
+    api.delete(f"/api/v1/support/messages/{said['id']}", show=False)
+
+    note(
+        "Moving it without settling it. `pending` and `on_hold` are statements "
+        "about what the desk is doing and are the desk's alone to make; the "
+        "client's own verbs are the three below."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/status", {"status": "pending"}, token=desk, show=False)
+
+    note(
+        "The badge, counted per participant rather than per message: one row "
+        "carrying a watermark, not a receipt for every line ever written."
+    )
+    api.get("/api/v1/support/unread")
+
+    note(
+        "Marking read never moves the watermark backwards, and does not move "
+        "it at all when there was nothing unread -- which is what lets a "
+        "scroll handler call this as often as it likes."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/read")
+    api.post(f"/api/v1/support/{ticket_id}/read", show=False)
+
+    note(
+        "Putting it back is the one way the watermark does move backwards, and "
+        "it drops it entirely rather than by a message: `mark as unread` means "
+        "the whole thread is waiting again, which is what somebody clicking it "
+        "is asking for."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/unread", show=False)
+    api.post(f"/api/v1/support/{ticket_id}/read", show=False)
+
+    note("Somebody else's conversation is a 404, the same answer an id that never existed gets.")
+    stranger = get_user_model().objects.create_user(username="colin", email="colin@example.com")
+    api.get(f"/api/v1/support/{ticket_id}", token=desk_token(stranger), expect=404, show=False)
+
+    note("And the desk's verbs are refused for a client, with FORBIDDEN rather than a 404.")
+    api.post(f"/api/v1/support/{ticket_id}/claim", expect=403, show=False)
+
+    note(
+        "Settled by the client -- and reopened by them, which is the client's "
+        "right of reply to being told a thing is finished. Then settled again."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/close", show=False)
+    api.post(f"/api/v1/support/{ticket_id}/reopen", show=False)
+    api.post(f"/api/v1/support/{ticket_id}/close", show=False)
+
+    note("Rated -- which only the client may do, and only once it is settled.")
+    api.post(f"/api/v1/support/{ticket_id}/rating", {"score": 5, "comment": "Quick."})
+
+    note("The numbers the desk runs on, which a client is not shown at all.")
+    api.get("/api/v1/support/stats", token=desk)
+
+    asyncio.run(_support_socket(api, desk, bruno, dara))
+
+    _support_surface_covered(api)
+
+
+def _support_surface_covered(api: Api) -> None:
+    """Assert the section above left no route and no command untoured.
+
+    Asked of the app's own registries rather than of a list kept here, for the
+    reason the admin section walks Django's: a second list is a list that goes
+    stale quietly, and a tour that has stopped exercising an endpoint is a tour
+    describing an app it no longer checks. Adding a route or a command without
+    showing it here fails the tour, which is the point.
+    """
+    import re
+
+    from apps.support.rest import router
+    from apps.support.sockets import SupportSocket
+
+    missed_routes: list[str] = []
+    total_routes = 0
+    for path, view in router.path_operations.items():
+        # "/{ticket_id}/messages" is a pattern, not a path: the tour visited it
+        # with a real id in place, so each placeholder matches one segment.
+        literals = re.split(r"\{[^}]+\}", f"/api/v1/support{path}")
+        pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+        for operation in view.operations:
+            for method in operation.methods:
+                total_routes += 1
+                if not any(
+                    seen_method == method and pattern.match(seen_path)
+                    for seen_method, seen_path in api.visited
+                ):
+                    missed_routes.append(f"{method} /api/v1/support{path}")
+
+    commands = set(SupportSocket.commands())
+    missed_commands = sorted(commands - Socket.sent)
+
+    if missed_routes or missed_commands:
+        raise WalkthroughError(
+            "the support tour skipped "
+            + ", ".join(sorted(missed_routes) + [f"socket:{name}" for name in missed_commands])
+        )
+    print(
+        f"  {DIM}│ toured {total_routes} of {total_routes} support endpoints and "
+        f"{len(commands)} of {len(commands)} socket commands{OFF}"
+    )
+
+
+def desk_token(user: Any) -> str:
+    """A real credential for somebody the tour did not sign in as."""
+    from django.test import RequestFactory
+
+    from infrastructure.auth.core.sessions import issue_credentials
+
+    issued = issue_credentials(RequestFactory().post("/"), user, method="password")
+    return str(issued.access_token)
+
+
+async def _support_socket(api: Api, desk: str, bruno: Any, dara: Any) -> None:
+    """Two connections, because this socket only makes sense as a conversation."""
+    from django.conf import settings
+
+    path = settings.SUPPORT_WS_PATH
+
+    note(
+        "This socket is useless before it is authenticated, and that is the "
+        "design: unlike the notification one it has no public traffic to "
+        "deliver. Every frame belongs to a named conversation."
+    )
+    async with Socket(path) as anonymous:
+        ready = await anonymous.open()
+        if ready["authenticated"]:
+            raise WalkthroughError("the support socket accepted a connection as somebody")
+        await anonymous.command({"command": "tickets"}, "error")
+
+        note(
+            "Naming yourself in the handshake is one way in; this is the "
+            "other, for a page that opened the socket before the sign-in "
+            "finished. `whoami` is how a client that reconnected asks which "
+            "of the two it turned out to be."
+        )
+        await anonymous.command({"command": "whoami"}, "whoami", show=False)
+        await anonymous.command(
+            {"command": "authenticate", "token": api.token}, "authenticated", show=False
+        )
+        signed_in = await anonymous.command({"command": "whoami"}, "whoami", show=False)
+        if not signed_in["authenticated"]:
+            raise WalkthroughError("the socket stayed anonymous after authenticating")
+
+        note(
+            "And back out again without dropping the connection, which is what "
+            "a shared browser signing out needs: the account is forgotten "
+            "immediately, and the credential itself stays the auth app's to "
+            "revoke."
+        )
+        await anonymous.command({"command": "deauthenticate"}, "deauthenticated", show=False)
+        await anonymous.command({"command": "tickets"}, "error", show=False)
+
+    note(
+        "Two connections now, one each side of the desk, both authenticated in "
+        "the handshake so neither waits a round trip."
+    )
+    async with (
+        Socket(path, query=f"token={api.token}", label="client") as client,
+        Socket(path, query=f"token={desk}", label="desk") as agent,
+    ):
+        await client.open()
+        await agent.open()
+
+        note(
+            "A chat needs no subject and no category. Opening it over the "
+            "socket subscribes this connection in the same round trip -- a "
+            "client that had to subscribe afterwards would miss whatever the "
+            "desk said in between."
+        )
+        opened = await client.command(
+            {"command": "open", "kind": "chat", "body": "Is the refund through yet?"},
+            "opened",
+            show=False,
+            patient=True,
+        )
+        chat = opened["ticket"]["id"]
+        print(f"  {DIM}│ {opened['ticket']['reference']}{OFF}")
+
+        note("The desk joins the thread and is handed its tail, so it has something to render.")
+        await agent.command(
+            {"command": "subscribe", "ticket": chat}, "subscribed", show=False, patient=True
+        )
+
+        note(
+            "The reference data a client needs to render a composer, fetched "
+            "over the socket rather than over HTTP beside it."
+        )
+        await client.command({"command": "categories"}, "categories", show=False, patient=True)
+        await agent.command({"command": "tags"}, "tags", show=False, patient=True)
+        await agent.command({"command": "canned"}, "canned", show=False, patient=True)
+
+        note(
+            "The desk's whole queue-working vocabulary is here too: take it, "
+            "hand it on, reprioritise, tag, and bring somebody else in."
+        )
+        await agent.command(
+            {"command": "claim", "ticket": chat}, "assigned", show=False, patient=True
+        )
+        await agent.command(
+            {"command": "assign", "ticket": chat, "agent": str(bruno.pk)},
+            "assigned",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "priority", "ticket": chat, "priority": "urgent"},
+            "priority",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "tag", "ticket": chat, "tags": ["escalated"]},
+            "tagged",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "invite", "ticket": chat, "account": str(dara.pk), "role": "observer"},
+            "invited",
+            show=False,
+            patient=True,
+        )
+
+        note(
+            "Presence is the socket's own: who is actually looking at the "
+            "thread right now, which no endpoint can answer because HTTP has "
+            "nobody to stop asking."
+        )
+        await client.command(
+            {"command": "presence", "ticket": chat, "present": True},
+            "presence_ack",
+            show=False,
+            patient=True,
+        )
+
+        note("A typing indicator: not stored, and worth nothing unless it is live.")
+        await agent.command(
+            {"command": "typing", "ticket": chat, "typing": True},
+            "typing_ack",
+            show=False,
+            patient=True,
+        )
+        await client.frame("typing", show=False, patient=True)
+
+        note("The desk answers, and the client hears it without asking for anything.")
+        await agent.command(
+            {"command": "send", "ticket": chat, "body": "It went out this morning."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        await client.frame("message", patient=True)
+
+        note(
+            "An internal note is published to the same thread and dropped on "
+            "the way out for a connection that may not read it. This is the "
+            "app's one real confidentiality rule, and this is where it is "
+            "enforced for everybody who is connected."
+        )
+        await agent.command(
+            {"command": "note", "ticket": chat, "body": "Refund reference RF-8812."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "send", "ticket": chat, "body": "Anything else?"},
+            "sent",
+            show=False,
+            patient=True,
+        )
+
+        note(
+            "The next thing the client is sent is the public message. The note "
+            "between them never reached this connection at all."
+        )
+        heard = await client.frame("message", show=False, patient=True)
+        print(f"  {DIM}│ {heard['message']['body']}{OFF}")
+        if "RF-8812" in heard["message"]["body"]:
+            raise WalkthroughError("the client was sent the desk's internal note")
+
+        note(
+            "The client says something of its own, then rewrites it and takes "
+            "it back -- the same two rules the endpoints enforce, applied by "
+            "the same service underneath."
+        )
+        mine = await client.command(
+            {"command": "send", "ticket": chat, "body": "No, that is everythng."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {
+                "command": "edit",
+                "message": mine["message"]["id"],
+                "body": "No, that is everything.",
+            },
+            "edited",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {"command": "delete", "message": mine["message"]["id"]},
+            "deleted",
+            show=False,
+            patient=True,
+        )
+
+        note(
+            "Reading is the socket's too: a page of the thread, the badge, and "
+            "putting a whole thread back into it -- so a client that opened "
+            "this connection never has to reach for HTTP to render itself."
+        )
+        await client.command(
+            {"command": "messages", "ticket": chat, "limit": 5},
+            "messages",
+            show=False,
+            patient=True,
+        )
+        await client.command({"command": "unread"}, "unread", show=False, patient=True)
+        await client.command(
+            {"command": "unread_ticket", "ticket": chat},
+            "unread_ticket",
+            show=False,
+            patient=True,
+        )
+
+        note("The socket does everything the endpoints do, so a client needs no HTTP beside it.")
+        await client.command({"command": "read", "ticket": chat}, "read", show=False, patient=True)
+        await agent.command(
+            {"command": "status", "ticket": chat, "status": "pending"},
+            "status",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {"command": "close", "ticket": chat}, "status", show=False, patient=True
+        )
+        await client.command(
+            {"command": "reopen", "ticket": chat}, "status", show=False, patient=True
+        )
+        await client.command(
+            {"command": "close", "ticket": chat}, "status", show=False, patient=True
+        )
+        await client.command(
+            {"command": "rate", "ticket": chat, "score": 5}, "rated", show=False, patient=True
+        )
+        await agent.command({"command": "stats"}, "stats", patient=True)
+
+        note(
+            "Leaving a thread stops it being sent without dropping the "
+            "connection. The channel stays joined underneath -- a subscription "
+            "can be added to but not removed from -- and the filter is what "
+            "goes quiet."
+        )
+        await agent.command(
+            {"command": "unsubscribe", "ticket": chat}, "unsubscribed", show=False, patient=True
+        )
+
+        note(
+            "A refusal is a frame, not a close -- a mistyped id should cost one "
+            "message, not the conversation flowing over the connection."
+        )
+        await client.command(
+            {"command": "ticket", "ticket": "not-a-uuid"}, "error", show=False, patient=True
+        )
+
+        note("-- and the proof is that the connection is still answering.")
+        await client.command({"command": "ping"}, "pong", show=False, patient=True)
+
+
+def section_email_code(api: Api) -> None:
+    heading(
+        11,
         "One-time code by email",
         "auth_email_code",
         "No password at all: a ticket goes to the client, a code goes to the "
@@ -1253,7 +1969,7 @@ def section_email_code(api: Api) -> None:
 
 def section_sms_code(api: Api) -> None:
     heading(
-        11,
+        12,
         "One-time code by SMS",
         "auth_sms_code",
         "The same two steps over a phone number, which is the one identifier "
@@ -1270,7 +1986,7 @@ def section_sms_code(api: Api) -> None:
 
 def section_magic_link(api: Api) -> None:
     heading(
-        12,
+        13,
         "Magic link",
         "auth_magic_link",
         "One emailed link, good once. The client never sees a code: the token in "
@@ -1286,7 +2002,7 @@ def section_magic_link(api: Api) -> None:
 
 def section_twofactor(api: Api) -> None:
     heading(
-        13,
+        14,
         "Second factors",
         "auth_twofactor",
         "Four factors on one app. Enrolment is not real until a code confirms "
@@ -1378,7 +2094,7 @@ def section_tokens(api: Api) -> None:
 
     mode = settings.AUTH_TOKEN_MODE
     heading(
-        14,
+        15,
         f"Token mode: {mode}",
         "no token app" if mode == "none" else f"oauth_core, oauth_{mode}",
         "All three modes publish the same endpoints under /auth/token, so a "
@@ -1436,7 +2152,7 @@ def section_social(api: Api) -> None:
     from django.conf import settings
 
     heading(
-        15,
+        16,
         "Social sign-in",
         ", ".join(f"oauth_{name}" for name in settings.OAUTH_PROVIDERS),
         "Each provider mounts a start and a callback. Start is the half this "
@@ -1456,7 +2172,7 @@ def section_audit(api: Api) -> None:
     from infrastructure.oauth.core import jwt_tokens
 
     heading(
-        16,
+        17,
         "What was recorded",
         "auth_core, oauth_core",
         "Every step above left an audit row, and every credential above was a "
@@ -1486,7 +2202,7 @@ def section_audit(api: Api) -> None:
 
 def section_openapi(api: Api) -> None:
     heading(
-        17,
+        18,
         "The document all of that produced",
         "config.api",
         "One NinjaAPI per registered version, every enabled app's router "
@@ -1560,7 +2276,7 @@ def section_admin(api: Api) -> None:
     from django.urls import reverse
 
     heading(
-        18,
+        19,
         "The admin, every app of it",
         "all apps",
         "The API is half the project; the other half is the screen the people "
@@ -1682,6 +2398,7 @@ def tour() -> int:
         section_cms(api)
         section_notifications(api)
         section_shop(api)
+        section_support(api)
         section_email_code(api)
         section_sms_code(api)
         section_magic_link(api)

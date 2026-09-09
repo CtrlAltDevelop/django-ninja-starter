@@ -512,6 +512,123 @@ SHOP_MAX_ITEM_QUANTITY = int(os.getenv("DJANGO_SHOP_MAX_ITEM_QUANTITY", "99"))
 SHOP_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_PAGE_SIZE", "24"))
 SHOP_MAX_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_MAX_PAGE_SIZE", "100"))
 
+# The support app. Optional the same way the CMS, the notifications and the shop
+# are: naming it installs its tables, its routes, its admin and its socket, and
+# a project that does not name it never imports the package.
+SUPPORT_ENABLED = os.getenv("DJANGO_SUPPORT_ENABLED", "false").lower() == "true"
+SUPPORT_APP = "apps.support.apps.SupportConfig"
+SUPPORT_INSTALLED_APPS = [SUPPORT_APP] if SUPPORT_ENABLED else []
+# Where the WebSocket is mounted. A setting rather than a constant because it is
+# the one part of this app a reverse proxy has to be told about, and a proxy is
+# usually easier to point at the app than the other way round. Declared above
+# the router because the tag below quotes it.
+SUPPORT_WS_PATH = os.getenv("DJANGO_SUPPORT_WS_PATH", "/ws/support")
+# The letters in front of a ticket reference -- `SUP-3F7A2B`. Branding, so it is
+# a setting; the digits after it are random rather than sequential, because a
+# sequence publishes how many tickets the desk has ever had to anybody who opens
+# one.
+SUPPORT_REFERENCE_PREFIX = os.getenv("DJANGO_SUPPORT_REFERENCE_PREFIX", "SUP")
+# The socket, written into the tag rather than into a route. OpenAPI describes
+# request/response over HTTP and has no vocabulary for a long-lived duplex
+# connection, and Swagger has no transport to open one -- so a path published for
+# it would render an operation whose "Try it out" cannot work. This is the half
+# that can be told truthfully, in the same group heading a reader is already
+# looking at. AsyncAPI is the format that describes the rest.
+SUPPORT_SOCKET_DOCS = f"""
+
+### The live conversation: `{SUPPORT_WS_PATH}`
+
+A WebSocket, so it is not an operation on this page. `runserver` is WSGI and will
+not serve it; any ASGI server will.
+
+**Unlike the notification socket, this one is useless until it is
+authenticated** -- there is no public support traffic, and a channel anybody
+could join would be a channel anybody could read. The handshake is still
+accepted without a credential, so a page can open the socket while its token is
+still being fetched. `{{"command": "authenticate", "token": "..."}}` then
+subscribes the connection to that account's own channel, the desk channel if it
+is staff, and the threads it is currently in -- so one socket carries every
+conversation somebody is part of. A credential offered in the handshake --
+`?token=`, a `bearer` subprotocol, an `Authorization` header, a session cookie
+-- is honoured at connect instead, and any command may carry the same `token` to
+sign in before it runs.
+
+Every frame is JSON, with a `command` going up and a `type` coming down. **The
+socket does everything the endpoints below do**, with one exception that is a
+protocol limit rather than a choice: a file has to be uploaded over
+`POST /support/uploads`, because a WebSocket frame cannot carry a multipart
+body. The message that carries it is then sent over the socket like any other.
+
+Open to anyone: `ping`, `authenticate`, `whoami`, `deauthenticate`. Reading:
+`tickets`, `ticket`, `messages`, `unread`, `categories`, `subscribe`,
+`unsubscribe`. Talking: `open`, `send`, `note`, `edit`, `delete`, `read`,
+`unread_ticket`, `typing`, `presence`. Either side: `status`, `close`, `reopen`,
+`rate`. The desk's own: `assign`, `claim`, `priority`, `tag`, `invite`, `tags`,
+`canned`, `stats`.
+
+Frames coming down: `ready`, `authenticated`, `deauthenticated`, `whoami`,
+`pong`, `message`, `ticket`, `typing`, `presence`, `read`, `error`, and one
+named for each command that answers. **Errors are frames, not closes** -- a
+mistyped id costs one message, not the conversation -- and their `title` is the
+same vocabulary the endpoints below answer with.
+
+The app's own `docs/support.md` carries the frame-by-frame reference.
+"""
+SUPPORT_ROUTERS = (
+    [
+        {
+            "prefix": "/support",
+            "router": "apps.support.rest.router",
+            "tag": "Support",
+            "description": (
+                "Tickets and live chat between a client and the desk. A client "
+                "sees the conversations they opened; a member of staff sees the "
+                "queue, the internal notes, the assignment and the numbers. The "
+                "same account, the same endpoints, two different answers." + SUPPORT_SOCKET_DOCS
+            ),
+        }
+    ]
+    if SUPPORT_ENABLED
+    else []
+)
+# How a message posted in one process reaches sockets held open by another. The
+# default fans out inside a single process only, which is right for development
+# and wrong for anything running more than one worker -- for a chat app that is
+# not a degraded experience but a broken one, and the app's settings contract
+# says so out loud.
+SUPPORT_BROKER = os.getenv("DJANGO_SUPPORT_BROKER", "apps.support.broadcast.MemoryBroker")
+SUPPORT_REDIS_URL = os.getenv("DJANGO_SUPPORT_REDIS_URL", AUTH_REDIS_URL)
+SUPPORT_CHANNEL_PREFIX = os.getenv("DJANGO_SUPPORT_CHANNEL_PREFIX", "support")
+# How many recent messages a client is handed when it joins a thread, so that
+# opening a conversation renders immediately rather than after a round trip. The
+# messages endpoint is where the rest of the history lives.
+SUPPORT_SOCKET_BACKLOG = int(os.getenv("DJANGO_SUPPORT_SOCKET_BACKLOG", "30"))
+# How long a closed ticket is kept. `manage.py support_prune` deletes what is
+# older, and nothing does so on its own: deleting a customer's support history
+# on a timer nobody asked for is the kind of surprise a starter must not ship.
+# Zero -- the default -- means keep everything, so a project that never
+# schedules the command never silently loses a complaint.
+SUPPORT_RETENTION_DAYS = int(os.getenv("DJANGO_SUPPORT_RETENTION_DAYS", "0"))
+# Where a file attached to a message is written, inside whatever
+# `STORAGES["default"]` is. A prefix rather than a path, because the storage
+# decides what a path means: a folder under MEDIA_ROOT locally, a key prefix in
+# a bucket in production.
+SUPPORT_UPLOAD_PATH = os.getenv("DJANGO_SUPPORT_UPLOAD_PATH", "support/uploads")
+# The largest file anybody may attach, in megabytes. Zero means no limit -- for
+# a deployment whose storage or reverse proxy already imposes one and would
+# rather have a single answer to "how big may this be" than two.
+SUPPORT_MAX_UPLOAD_MB = int(os.getenv("DJANGO_SUPPORT_MAX_UPLOAD_MB", "10"))
+SUPPORT_MAX_UPLOAD_BYTES = SUPPORT_MAX_UPLOAD_MB * 1024 * 1024
+# What the desk accepts, as extensions. An allowlist, because a support desk is
+# a place strangers send you files -- the worst possible place to be relaxed
+# about it. Left empty, the app applies no extension check at all, which is a
+# choice a deployment is allowed to make out loud.
+SUPPORT_UPLOAD_EXTENSIONS = [
+    extension.strip().lower()
+    for extension in os.getenv("DJANGO_SUPPORT_UPLOAD_EXTENSIONS", "").split(",")
+    if extension.strip()
+] or None
+
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")
 OAUTH_STATE_TTL_SECONDS = int(os.getenv("DJANGO_OAUTH_STATE_TTL_SECONDS", "600"))
 OAUTH_HTTP_TIMEOUT_SECONDS = float(os.getenv("DJANGO_OAUTH_HTTP_TIMEOUT_SECONDS", "10"))
@@ -562,6 +679,7 @@ INSTALLED_APPS = [
     *CMS_INSTALLED_APPS,
     *NOTIFICATIONS_INSTALLED_APPS,
     *SHOP_INSTALLED_APPS,
+    *SUPPORT_INSTALLED_APPS,
     # The transports beside REST. Both are installed whether or not they are
     # published: `generateproto` and the schema check have to be able to run in a
     # deployment that serves neither.

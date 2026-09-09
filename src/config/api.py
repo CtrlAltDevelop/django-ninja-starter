@@ -34,6 +34,7 @@ def build_apis() -> dict[str, NinjaAPI]:
             *settings.CMS_ROUTERS,
             *settings.NOTIFICATIONS_ROUTERS,
             *settings.SHOP_ROUTERS,
+            *settings.SUPPORT_ROUTERS,
         ]
         api = EnvelopeAPI(
             title="Django Ninja Starter API",

@@ -71,10 +71,11 @@ python manage.py startapi reports --api-version v2 --prefix /internal-reports
 
 ```text
 src/
-├── apps/                   # Feature applications: yours, and the three that ship
+├── apps/                   # Feature applications: yours, and the four that ship
 │   ├── cms/                # Pages, sections and typed multilingual content
 │   ├── notifications/      # Stored notifications, a read API, and a WebSocket
-│   └── shop/               # A catalogue, several sellers per product, and orders
+│   ├── shop/               # A catalogue, several sellers per product, and orders
+│   └── support/            # Live chat and support tickets, over four transports
 ├── infrastructure/
 │   ├── common/             # Project-owned foundation application
 │   ├── accounts/           # The user model and the profile attached to it
@@ -234,7 +235,8 @@ make serve       # start an ASGI server, which does serve the WebSocket
 
 `make run` is `manage.py runserver`, which is WSGI and will never serve a
 WebSocket — the connection simply never opens. Use `make serve` when
-notifications are enabled; it needs the `asgi` extra that `dev` already pulls in.
+notifications or support are enabled; it needs the `asgi` extra that `dev`
+already pulls in.
 
 ## Configuration
 
@@ -276,6 +278,10 @@ wrapping happens once, at the renderer, and `/api/docs` documents it.
 - `GET /api/<version>/openapi.json` — version-specific OpenAPI schema
 - `WS /ws/notifications` — the notification feed, when notifications are enabled
   and the project is served by `make serve` rather than `make run`
+- `WS /ws/support` — the support desk's live conversations, when support is
+  enabled and the project is served by `make serve`
 - `GET /api/v1/shop/...` — the storefront, when the shop is enabled: the
   catalogue and its sellers read without a credential, the basket and the orders
   with one
+- `GET /api/v1/support/...` — support tickets and live chat, when support is
+  enabled: a client's own conversations, and the desk's queue for staff

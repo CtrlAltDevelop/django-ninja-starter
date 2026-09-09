@@ -6,6 +6,69 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`apps.support`: live chat and support tickets, as one app.** Enabled by
+  `DJANGO_SUPPORT_ENABLED=true` alone, and like the other feature apps it lives
+  entirely in its own directory and can be copied out or deleted without leaving
+  a hole. The design is one sentence: **a ticket is a conversation.** A `Ticket`
+  is a thread, a `Message` is something somebody said in it, and `kind` says
+  whether it is being used as a live chat or as a filed problem with a subject,
+  a category and a deadline. Nothing about the storage differs between them, so
+  a chat that turns out to be a real problem is promoted by giving it a subject
+  rather than by copying rows into a second table.
+- **The whole surface over four transports**: HTTP, a WebSocket, GraphQL and
+  gRPC, under the same names with the same arguments, the same replies and the
+  same refusal titles. Every rule about who may do what is decided once in
+  `services.py`, so the four cannot disagree about who may close a ticket or
+  read a note -- which is the failure mode a four-transport app otherwise has
+  four chances to hit.
+- **Staff-only notes live in the thread they belong to**, in the order they were
+  written, and are dropped from every list a client can reach and again on the
+  way out of the socket. A thread whose notes are somewhere else is a thread
+  nobody reads in order.
+- **An SLA stored as two deadlines, never as a breach flag.** The windows are
+  promised by the category and copied onto the ticket when it is opened, so
+  editing the category later does not rewrite the promise made to tickets
+  already open under it, and a breach is true the instant it is true rather than
+  whenever a job last ran.
+- **Read state per participant**, one row carrying `last_read_at` rather than a
+  receipt per message. Marking read never moves the watermark backwards and does
+  not move it at all when there was nothing unread, so a scroll handler can fire
+  it as often as it likes and "you have caught up" stays a different answer from
+  "there was nothing to catch up on".
+- **Attachments in two steps.** A file is uploaded over HTTP -- the one half of
+  the app that has to be, because a WebSocket frame is JSON and cannot carry a
+  multipart body -- and the message claiming it goes over whichever transport
+  the client is already using. An upload is claimable exactly once, by its
+  owner, which is what makes naming somebody else's id a refusal rather than a
+  way to read their file.
+- **A queue the desk actually works**: assignment and claiming, priorities, tags,
+  canned replies, participants invited into a thread, filters for what is
+  unassigned, what is late and what is live, search across subject, body and
+  reference, and a stats endpoint. The admin adds an SLA column, a waiting
+  column, and three bulk actions -- the only three that are safe to do to a
+  hundred rows at once.
+- **`manage.py support_prune`**, and nothing that deletes anything without it.
+  With no retention window set it refuses rather than treating zero as "delete
+  everything", and only closed tickets are ever pruned: an open one is somebody's
+  unanswered question however old it is, and `resolved` is the desk's opinion
+  rather than the client's agreement.
+- **A tour of all of it** in `examples/walkthrough.py`, from both sides of the
+  desk, ending with two sockets open at once -- and `docs/support.md` beside it.
+  "All of it" is checked rather than claimed: the section asks the router and
+  the socket's command tuple what exists and fails the tour if it left anything
+  out, so a route added without being shown here stops the suite.
+
+### Fixed
+
+- **The unread count is no longer permanently stuck at what you had missed.**
+  The correlated subquery that annotates a thread's unread count read its
+  watermark with a single `OuterRef`, which one level deep resolves against the
+  *messages* rather than the tickets, matched no participant, and so counted
+  every message as unread however much had been read. The badge cleared and came
+  straight back.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added

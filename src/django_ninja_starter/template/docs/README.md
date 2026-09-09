@@ -15,7 +15,7 @@ themselves — see [keeping these pages honest](#keeping-these-pages-honest).
 | Social providers | [`oauth_google`](oauth/google.md), [`oauth_apple`](oauth/apple.md), [`oauth_microsoft`](oauth/microsoft.md), [`oauth_github`](oauth/github.md) |
 | Token modes | [`oauth_sliding`](oauth/sliding.md), [`oauth_session`](oauth/session.md), [`oauth_rotation`](oauth/rotation.md) |
 | Shared by those | [`auth_core`](auth/core.md), [`oauth_core`](oauth/core.md) |
-| Feature apps | [`cms`](cms.md), [`notifications`](notifications.md), [`shop`](shop.md) |
+| Feature apps | [`cms`](cms.md), [`notifications`](notifications.md), [`shop`](shop.md), [`support`](support.md) |
 | Cross-cutting | [The response envelope](responses.md), [Signing in](signing-in.md), [Credentials](credentials.md), [The admin](admin.md) |
 
 ## Start here
@@ -98,6 +98,7 @@ features a project chooses rather than the plumbing under them.
 | --- | --- | --- |
 | [`cms`](cms.md) | `DJANGO_CMS_ENABLED=true` | Pages, sections and typed multilingual fields, shared sections, menus, publishing with preview links, and an admin screen built for editors rather than for developers |
 | [`notifications`](notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | Stored notifications, a read API, and a WebSocket that pushes new ones — public before it is authenticated, private after |
+| [`support`](support.md) | `DJANGO_SUPPORT_ENABLED=true` | Live chat and support tickets as one app, because a ticket is a conversation: threads, staff-only notes, attachments, SLA deadlines carried by the category, a queue the desk works, and the whole surface over REST, GraphQL, gRPC and a WebSocket |
 | [`shop`](shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare what their products are, several sellers per product, timed campaigns, search and merchandising lists, reviews and likes, a basket per account, and an order cycle that reserves stock and issues an invoice |
 
 ## The admin

@@ -1,0 +1,465 @@
+syntax = "proto3";
+
+package config.support;
+
+import "google/protobuf/empty.proto";
+
+service SupportController {
+    rpc Assign(AssignRequest) returns (AssignResult) {}
+    rpc Canned(CannedRequest) returns (CannedList) {}
+    rpc Categories(google.protobuf.Empty) returns (CategoryList) {}
+    rpc Claim(ClaimRequest) returns (ClaimResult) {}
+    rpc Count(CountRequest) returns (CountResult) {}
+    rpc Delete(DeleteRequest) returns (DeletedMessage) {}
+    rpc Edit(EditRequest) returns (EditedMessage) {}
+    rpc Get(GetRequest) returns (Ticket) {}
+    rpc Invite(InviteRequest) returns (InvitedParticipant) {}
+    rpc List(ListRequest) returns (TicketList) {}
+    rpc Messages(MessagesRequest) returns (MessageList) {}
+    rpc Open(OpenRequest) returns (OpenedTicket) {}
+    rpc Priority(PriorityRequest) returns (PriorityResult) {}
+    rpc Rate(RateRequest) returns (RateResult) {}
+    rpc Read(ReadRequest) returns (ReadResult) {}
+    rpc Send(SendRequest) returns (SentMessage) {}
+    rpc Stats(google.protobuf.Empty) returns (StatsResult) {}
+    rpc Status(StatusRequest) returns (StatusResult) {}
+    rpc Tag(TagRequest) returns (TagResult) {}
+    rpc Tags(google.protobuf.Empty) returns (TagList) {}
+    rpc Typing(TypingRequest) returns (TypingResult) {}
+    rpc Unread(google.protobuf.Empty) returns (UnreadResult) {}
+    rpc UnreadTicket(UnreadTicketRequest) returns (UnreadTicketResult) {}
+}
+
+message Account {
+    string id = 1;
+    string username = 2;
+    bool staff = 3;
+}
+
+message AccountResponse {
+    string id = 1;
+    string username = 2;
+    bool staff = 3;
+}
+
+message AssignRequest {
+    string ticket_id = 1;
+    string agent = 2;
+}
+
+message AssignResult {
+    string ticket = 1;
+    Account assignee = 2;
+    bool changed = 3;
+}
+
+message Attachment {
+    string id = 1;
+    string name = 2;
+    string url = 3;
+    string content_type = 4;
+    int32 size = 5;
+}
+
+message AttachmentResponse {
+    string id = 1;
+    string name = 2;
+    string url = 3;
+    string content_type = 4;
+    int32 size = 5;
+}
+
+message CannedList {
+    repeated CannedReply replies = 1;
+}
+
+message CannedReply {
+    string id = 1;
+    string title = 2;
+    string body = 3;
+    string category = 4;
+}
+
+message CannedRequest {
+    string category = 1;
+}
+
+message Category {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+    string description = 4;
+    string default_priority = 5;
+    int32 first_response_minutes = 6;
+    int32 resolution_minutes = 7;
+}
+
+message CategoryList {
+    repeated Category categories = 1;
+}
+
+message CategoryRef {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+}
+
+message CategoryRefResponse {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+}
+
+message ClaimRequest {
+    string ticket_id = 1;
+}
+
+message ClaimResult {
+    string ticket = 1;
+    Account assignee = 2;
+    bool changed = 3;
+}
+
+message CountRequest {
+    string status = 1;
+    string kind = 2;
+    string priority = 3;
+    string category = 4;
+    string assignee = 5;
+    bool mine = 6;
+    bool unassigned = 7;
+    optional bool live = 8;
+    string search = 9;
+}
+
+message CountResult {
+    int32 count = 1;
+}
+
+message DeleteRequest {
+    string message_id = 1;
+}
+
+message DeletedMessage {
+    string id = 1;
+    string ticket = 2;
+    AccountResponse author = 3;
+    string kind = 4;
+    string visibility = 5;
+    string body = 6;
+    string data_json = 7;
+    repeated AttachmentResponse attachments = 8;
+    string created_at = 9;
+    string edited_at = 10;
+    bool deleted = 11;
+}
+
+message EditRequest {
+    string message_id = 1;
+    string body = 2;
+}
+
+message EditedMessage {
+    string id = 1;
+    string ticket = 2;
+    AccountResponse author = 3;
+    string kind = 4;
+    string visibility = 5;
+    string body = 6;
+    string data_json = 7;
+    repeated AttachmentResponse attachments = 8;
+    string created_at = 9;
+    string edited_at = 10;
+    bool deleted = 11;
+}
+
+message GetRequest {
+    string ticket_id = 1;
+}
+
+message InviteRequest {
+    string ticket_id = 1;
+    string account = 2;
+    string role = 3;
+}
+
+message InvitedParticipant {
+    AccountResponse user = 1;
+    string role = 2;
+    string joined_at = 3;
+    string last_read_at = 4;
+    bool notify = 5;
+}
+
+message ListRequest {
+    string status = 1;
+    string kind = 2;
+    string priority = 3;
+    string category = 4;
+    string assignee = 5;
+    bool mine = 6;
+    bool unassigned = 7;
+    optional bool live = 8;
+    string search = 9;
+    optional bool breached = 10;
+    int32 limit = 11;
+    int32 offset = 12;
+}
+
+message Message {
+    string id = 1;
+    string ticket = 2;
+    Account author = 3;
+    string kind = 4;
+    string visibility = 5;
+    string body = 6;
+    string data_json = 7;
+    repeated Attachment attachments = 8;
+    string created_at = 9;
+    string edited_at = 10;
+    bool deleted = 11;
+}
+
+message MessageList {
+    string ticket = 1;
+    repeated Message messages = 2;
+    int32 total = 3;
+    int32 limit = 4;
+    int32 offset = 5;
+}
+
+message MessagesRequest {
+    string ticket_id = 1;
+    int32 limit = 2;
+    int32 offset = 3;
+}
+
+message OpenRequest {
+    string subject = 1;
+    string body = 2;
+    string kind = 3;
+    string category = 4;
+    string priority = 5;
+    repeated string upload_ids = 6;
+    string data_json = 7;
+}
+
+message OpenedTicket {
+    string id = 1;
+    string reference = 2;
+    string kind = 3;
+    string subject = 4;
+    string status = 5;
+    string priority = 6;
+    AccountResponse client = 7;
+    AccountResponse assignee = 8;
+    CategoryRefResponse category = 9;
+    repeated string tags = 10;
+    string data_json = 11;
+    string created_at = 12;
+    string updated_at = 13;
+    string last_message_at = 14;
+    string resolved_at = 15;
+    string closed_at = 16;
+    int32 rating = 17;
+    string rating_comment = 18;
+    SlaResponse sla = 19;
+    int32 unread = 20;
+    repeated ParticipantResponse participants = 21;
+}
+
+message Participant {
+    Account user = 1;
+    string role = 2;
+    string joined_at = 3;
+    string last_read_at = 4;
+    bool notify = 5;
+}
+
+message ParticipantResponse {
+    AccountResponse user = 1;
+    string role = 2;
+    string joined_at = 3;
+    string last_read_at = 4;
+    bool notify = 5;
+}
+
+message PriorityRequest {
+    string ticket_id = 1;
+    string priority = 2;
+}
+
+message PriorityResult {
+    string ticket = 1;
+    string priority = 2;
+    bool changed = 3;
+}
+
+message RateRequest {
+    string ticket_id = 1;
+    int32 score = 2;
+    string comment = 3;
+}
+
+message RateResult {
+    string ticket = 1;
+    int32 rating = 2;
+    string comment = 3;
+}
+
+message ReadRequest {
+    string ticket_id = 1;
+}
+
+message ReadResult {
+    string ticket = 1;
+    bool changed = 2;
+    int32 unread = 3;
+    string last_read_at = 4;
+}
+
+message SendRequest {
+    string ticket_id = 1;
+    string body = 2;
+    repeated string upload_ids = 3;
+    bool internal = 4;
+    string data_json = 5;
+}
+
+message SentMessage {
+    string id = 1;
+    string ticket = 2;
+    AccountResponse author = 3;
+    string kind = 4;
+    string visibility = 5;
+    string body = 6;
+    string data_json = 7;
+    repeated AttachmentResponse attachments = 8;
+    string created_at = 9;
+    string edited_at = 10;
+    bool deleted = 11;
+}
+
+message Sla {
+    string first_response_due_at = 1;
+    string resolution_due_at = 2;
+    string first_response_at = 3;
+    bool first_response_breached = 4;
+    bool resolution_breached = 5;
+    bool breached = 6;
+}
+
+message SlaResponse {
+    string first_response_due_at = 1;
+    string resolution_due_at = 2;
+    string first_response_at = 3;
+    bool first_response_breached = 4;
+    bool resolution_breached = 5;
+    bool breached = 6;
+}
+
+message StatsResult {
+    int32 total = 1;
+    int32 open = 2;
+    int32 pending = 3;
+    int32 on_hold = 4;
+    int32 resolved = 5;
+    int32 closed = 6;
+    int32 unassigned = 7;
+    int32 chats = 8;
+    int32 rated = 9;
+    int32 breached = 10;
+    int32 awaiting_first_response = 11;
+    float satisfaction = 12;
+}
+
+message StatusRequest {
+    string ticket_id = 1;
+    string status = 2;
+}
+
+message StatusResult {
+    string ticket = 1;
+    string status = 2;
+    bool changed = 3;
+}
+
+message Tag {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+    string colour = 4;
+}
+
+message TagList {
+    repeated Tag tags = 1;
+}
+
+message TagRequest {
+    string ticket_id = 1;
+    repeated string tags = 2;
+}
+
+message TagResult {
+    string ticket = 1;
+    repeated string tags = 2;
+    bool changed = 3;
+}
+
+message Ticket {
+    string id = 1;
+    string reference = 2;
+    string kind = 3;
+    string subject = 4;
+    string status = 5;
+    string priority = 6;
+    AccountResponse client = 7;
+    AccountResponse assignee = 8;
+    CategoryRefResponse category = 9;
+    repeated string tags = 10;
+    string data_json = 11;
+    string created_at = 12;
+    string updated_at = 13;
+    string last_message_at = 14;
+    string resolved_at = 15;
+    string closed_at = 16;
+    int32 rating = 17;
+    string rating_comment = 18;
+    SlaResponse sla = 19;
+    int32 unread = 20;
+    repeated ParticipantResponse participants = 21;
+}
+
+message TicketList {
+    repeated Ticket tickets = 1;
+    int32 total = 2;
+    int32 limit = 3;
+    int32 offset = 4;
+}
+
+message TypingRequest {
+    string ticket_id = 1;
+    bool typing = 2;
+}
+
+message TypingResult {
+    string ticket = 1;
+    bool typing = 2;
+}
+
+message UnreadResult {
+    int32 messages = 1;
+    int32 tickets = 2;
+}
+
+message UnreadTicketRequest {
+    string ticket_id = 1;
+}
+
+message UnreadTicketResult {
+    string ticket = 1;
+    bool changed = 2;
+    int32 unread = 3;
+    string last_read_at = 4;
+}
+

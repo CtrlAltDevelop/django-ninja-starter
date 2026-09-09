@@ -42,7 +42,7 @@ SECTIONS = ("routes", "models", "admin", "settings")
 # Apps that are this project's own rather than one of the auth/oauth families,
 # and still get a page: the foundation every project carries, the accounts it
 # resolves to, and the optional feature apps.
-PROJECT_LABELS = frozenset({"accounts", "common", "cms", "notifications", "shop"})
+PROJECT_LABELS = frozenset({"accounts", "common", "cms", "notifications", "shop", "support"})
 NONE = "_None._"
 
 

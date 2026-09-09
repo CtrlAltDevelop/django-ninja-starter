@@ -33,6 +33,7 @@ REPORTED_KEYS = (
     "cms",
     "notifications",
     "shop",
+    "support",
     "socket",
 )
 
@@ -73,7 +74,8 @@ def test_the_example_project_has_every_app_on(example_project: Path) -> None:
     assert reported["cms"] == "on"
     assert reported["notifications"] == "on"
     assert reported["shop"] == "on"
-    assert reported["socket"] == "/ws/notifications"
+    assert reported["support"] == "on"
+    assert reported["socket"] == "/ws/notifications,/ws/support"
 
 
 INSTALLED_REPORT = """
@@ -89,6 +91,7 @@ print("versions=" + ",".join(load_api_registry()))
 print("cms=" + ("on" if settings.CMS_ENABLED else "off"))
 print("notifications=" + ("on" if settings.NOTIFICATIONS_ENABLED else "off"))
 print("shop=" + ("on" if settings.SHOP_ENABLED else "off"))
+print("support=" + ("on" if settings.SUPPORT_ENABLED else "off"))
 print("socket=" + ",".join(path for path, _ in websocket_routes()))
 """
 
@@ -146,6 +149,14 @@ def test_the_shop_ships_with_the_generated_project(example_project: Path) -> Non
     assert "no tests ran" not in result.stdout
 
 
+def test_the_support_app_ships_with_the_generated_project(example_project: Path) -> None:
+    """The socket half of it runs nowhere else, same as the notifications app's."""
+    result = _run(example_project, "-m", "pytest", "-q", "--no-cov", "src/apps/support")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no tests ran" not in result.stdout
+
+
 def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     """The tour asserts its own status codes, so a zero exit is the assertion."""
     result = subprocess.run(
@@ -163,7 +174,41 @@ def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     assert "/api/v1/notifications" in result.stdout, "the notifications API was not toured"
     assert "/ws/notifications" in result.stdout, "the notification socket was not toured"
     assert "/api/v1/shop/checkout" in result.stdout, "the shop was not toured"
+    assert "/api/v1/support" in result.stdout, "the support desk was not toured"
+    assert "/ws/support" in result.stdout, "the support socket was not toured"
     assert "admin pages opened" in result.stdout, "the admin was not toured"
+
+
+def test_the_walkthrough_tours_the_whole_support_surface(example_project: Path) -> None:
+    """The support tour checks itself against the app's registries and says so.
+
+    Asserted on the printed totals rather than on a list of routes, for the
+    reason the admin test is asserted on a count: the tour already compares
+    itself against the router and the socket's command tuple, so naming them
+    again here would be a third list to keep in step.
+    """
+    import re
+
+    result = subprocess.run(
+        [sys.executable, str(build.EXAMPLES / "walkthrough.py"), "--project", str(example_project)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=build.pristine_environment(),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    toured = re.search(
+        r"toured (\d+) of (\d+) support endpoints and (\d+) of (\d+) socket commands",
+        result.stdout,
+    )
+    assert toured is not None, "the support section printed no coverage line"
+    endpoints, all_endpoints, commands, all_commands = (int(part) for part in toured.groups())
+    assert endpoints == all_endpoints, result.stdout
+    assert commands == all_commands, result.stdout
+    # A surface this small would mean the tour is checking itself against an
+    # app that has stopped registering most of itself.
+    assert all_endpoints > 20 and all_commands > 25, result.stdout
 
 
 def test_the_walkthrough_opens_every_registered_admin(example_project: Path) -> None:

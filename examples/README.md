@@ -37,7 +37,7 @@ python examples/build.py --rebuild
 ## The tour
 
 `walkthrough.py` prints a transcript of the calls a real client would make,
-against every app the `.env` above turns on. Eighteen sections, in the order the
+against every app the `.env` above turns on. Nineteen sections, in the order the
 tour runs them:
 
 | # | Section | Apps | What it shows |
@@ -51,15 +51,16 @@ tour runs them:
 | 7 | Content, in two languages | `apps.cms` | Pages, sections, typed fields, menus, drafts and preview links |
 | 8 | Notifications | `apps.notifications` | The stored history over HTTP, then three live sockets |
 | 9 | A shop | `apps.shop` | A public catalogue, then a basket, an order and a settled invoice that are nobody's but the caller's |
-| 10 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
-| 11 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
-| 12 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
-| 13 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
-| 14 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
-| 15 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
-| 16 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
-| 17 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
-| 18 | The admin, every app of it | all apps | Every model any installed app registered, opened as a superuser |
+| 10 | A support desk | `apps.support` | One conversation from both sides: a ticket, a queue, a staff-only note, and then the same thing live over a socket |
+| 11 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
+| 12 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
+| 13 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
+| 14 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
+| 15 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
+| 16 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
+| 17 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
+| 18 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
+| 19 | The admin, every app of it | all apps | Every model any installed app registered, opened as a superuser |
 
 The rest of this section is what each one calls, and the property it is there to
 demonstrate. Every path below is printed by the tour, and is the path a real
@@ -231,20 +232,26 @@ Enabled by `DJANGO_SHOP_ENABLED=true` alone, and the largest app here. Two
 halves governed differently: a catalogue anybody may read with no credential at
 all, and a basket, an order and an invoice that are nobody's but the caller's.
 The tour builds the catalogue an admin would — a category tree with attributes,
-a brand, two sellers, a laptop on sale, a shirt that is only buyable through a
-variant, a coupon, a shipping method and a draft nobody announced — and then
-shops in it.
+a brand, two sellers, a laptop on sale beside a plainer sibling, a shirt that is
+only buyable through a variant, a coupon, a shipping method and a draft nobody
+announced — and then shops in it. Every route the app publishes is called: the
+tables below are the whole of `apps.shop`, not a selection from it.
 
 Public, no token anywhere:
 
 | Call | What to notice |
 | --- | --- |
 | `GET /api/v1/shop/categories` | The tree, with a count on each node |
+| `GET /api/v1/shop/categories/laptops` | One node of it alone, which is what a category page opens with |
+| `GET /api/v1/shop/brands`, `GET /api/v1/shop/sellers` | The other two axes a shopper narrows by before searching at all |
 | `GET /api/v1/shop/products?category=electronics&sort=price_low` | A category includes everything underneath it, so `electronics` finds the laptop filed under `electronics/laptops` |
 | `GET /api/v1/shop/products?attribute=screen-size:14` | Attribute filters read `code:value`, are repeatable, and every one given has to match |
 | `GET /api/v1/shop/products/unannounced` | A draft is a **404**: it is in the table and in nothing public |
 | `GET /api/v1/shop/products/featherbook-14` | The price after the running discount, every seller who can fill it, and which one wins the buy box |
-| `GET /api/v1/shop/listings/bestsellers` | A filter over the live catalogue rather than a stored list, so it cannot go stale |
+| `GET /api/v1/shop/products/featherbook-14/related` | The row every product page carries under it: the same category, best rated first, and never the product being looked at |
+| `GET /api/v1/shop/listings`, `GET /api/v1/shop/listings/bestsellers` | A filter over the live catalogue rather than a stored list, so it cannot go stale |
+| `GET /api/v1/shop/collections`, `GET /api/v1/shop/collections/staff-picks` | The curated half of the same idea: a list somebody chose, item by item |
+| `GET /api/v1/shop/sellers/bargain-bin` | One seller and what it lists, which is the page the buy box links to |
 | `POST /api/v1/shop/products/featherbook-14/view` | Popularity is a public fact, so recording a look needs nobody's name |
 
 With a bearer token, and only ever about the caller:
@@ -255,13 +262,56 @@ With a bearer token, and only ever about the caller:
 | `POST /api/v1/shop/cart/items` (a variant) | A product with variants is bought through one, never through the product |
 | `POST /api/v1/shop/cart/items` (out of stock) | Refused, with the number that is actually left |
 | `PATCH /api/v1/shop/cart/items/{id}` | Quantities change on the line, and the basket re-totals itself |
+| `DELETE /api/v1/shop/cart/items/{id}`, `DELETE /api/v1/shop/cart` | A basket is scratch paper before it is an order. Either way the answer is the basket as it now stands, not a bare 204 to go and re-read |
 | `PUT /api/v1/shop/products/{slug}/like`, `POST …/reviews` | One opinion each per product. Moderation is on, so the review is not public yet — and the author can still see their own |
+| `DELETE /api/v1/shop/products/{slug}/like`, `DELETE …/reviews` | Both are the shopper's to take back, and taking one back is not an error |
+| `POST /api/v1/shop/addresses`, `GET`, `PATCH`, `PUT …/default`, `DELETE` | The address book checkout draws on, written and corrected through the API rather than seeded behind it |
+| `GET /api/v1/shop/shipping-methods` | Public, so a shopper comparing options need not have signed in — but a caller who has gets each one costed against what is actually in the basket, which is the only way a free-over threshold can be printed honestly |
+| `POST /api/v1/shop/cart/coupon` | What a code is worth on this basket, tried before it is committed to. A code the shop will not take comes back as an answer saying why, not as a 400 per keystroke |
 | `POST /api/v1/shop/checkout` | One atomic step: price the basket, hold the stock, write an immutable order, issue its invoice |
 | `GET /api/v1/shop/cart` | Empty afterwards — what was in it is on the order now |
+| `GET /api/v1/shop/orders` | Every order this account has placed, newest first |
 | `GET /api/v1/shop/orders/{number}/invoice` | A document, not a view of the order: address, prices and totals are copied, so editing either afterwards cannot rewrite what somebody was charged |
 | `POST /api/v1/shop/orders/{number}/payment/confirm` | The seam a real gateway's callback is pointed at. This starter wires up none, so payments are `manual` and settled here or in the admin |
 | `POST /api/v1/shop/orders/{number}/cancel` | Refused once it is paid for |
 | `GET /api/v1/shop/orders/S00000000XXXX0000` | Somebody else's number is a **404**, not a 403 |
+
+### A support desk — `apps.support`
+
+Enabled by `DJANGO_SUPPORT_ENABLED=true` alone. One conversation, shown from
+both sides of it: the tour holds the client's token and an agent's, and calls
+the same endpoints with each. The point is that they are the same endpoints —
+who you are decides what they answer, and no parameter widens it.
+
+| Call | What to notice |
+| --- | --- |
+| `GET /api/v1/support/categories` | What a client may file under, and the response times the desk is promising. Public to anybody signed in, because a promise nobody is told about is not one |
+| `POST /api/v1/support` | A subject and a category make it a ticket rather than a chat — and the category is where its two SLA deadlines come from |
+| `POST /api/v1/support/uploads` | The one half of the app that has to be HTTP: a WebSocket frame is JSON and cannot carry a multipart body. It answers with an id |
+| `POST /api/v1/support/{id}/messages` | …and the message claims that id. An upload is claimable exactly once, by its owner |
+| `GET /api/v1/support?unassigned=true` | The same endpoint the client used, answering the desk's question instead, because a different account asked it |
+| `POST …/claim`, `…/priority`, `…/tags` | The desk's own verbs. `tags` is a replacement, not an add: a tag picker sends the set it is now showing |
+| `POST /api/v1/support/{id}/notes` | A staff-only note, in the same thread and in the order it was written |
+| `GET …/messages` twice | Six messages for the desk, two for the client. The note is not hidden in the client's copy — it is not in it |
+| `GET /api/v1/support/unread` | The badge: one watermark row per participant, not a receipt per message |
+| `POST /api/v1/support/{id}/read` twice | The second says `changed: false`. It never moves backwards, and does not move at all when there was nothing unread, which is what lets a scroll handler call it freely |
+| `GET /api/v1/support/{id}` as a stranger | A **404**, not a 403 |
+| `POST …/claim` as the client | **403** — the desk's verbs are refused rather than hidden, because the client can see the thread |
+| `POST …/close`, `…/rating` | Either side may settle it; only the client rates it, and only once it is settled |
+| `GET /api/v1/support/stats` | The numbers the desk runs on, which a client is not shown at all |
+
+Then the socket, called the same way the notification one is — the ASGI
+application directly, no server and no port — with two connections open at once:
+
+| Frame | What to notice |
+| --- | --- |
+| `{"command": "tickets"}` with no credential | `AUTHENTICATION_REQUIRED`. Unlike the notification socket, this one has no public traffic to deliver, so it is useless until it knows who you are |
+| `{"command": "open", "kind": "chat"}` | Opens a thread **and** subscribes this connection in the same round trip: a client that had to subscribe afterwards would miss whatever the desk said in between |
+| `{"command": "subscribe"}` | Joins a thread and is handed its tail, so the desk has something to render immediately |
+| `{"command": "typing"}` | Reaches the other side and is stored nowhere. An indicator that is not live is worth nothing |
+| `{"command": "send"}` from the desk | Arrives at the client with no request for it |
+| `{"command": "note"}` from the desk | Published to the same channel and dropped on the way out for a connection that may not read it. The next frame the client is sent is the public message after it |
+| `{"command": "ticket", "ticket": "not-a-uuid"}` | An `error` **frame**, not a close — and the `ping` after it proves the connection is still there |
 
 ### A feature app of your own — `apps.notes`
 
@@ -344,18 +394,18 @@ different configuration:
 DJANGO_AUTH_TOKEN_MODE=sliding python examples/walkthrough.py
 ```
 
-An app that is not enabled is not skipped silently: the CMS, notification and shop
-sections still print their heading and say which variable would have turned them
-on.
+An app that is not enabled is not skipped silently: the CMS, notification, shop
+and support sections still print their heading and say which variable would have
+turned them on.
 
-## The three feature apps that ship
+## The four feature apps that ship
 
-`cms/`, `notifications/` and `shop/` are not in this directory. They come out of the
-generator inside every project it writes, and the `.env` above is the whole of
-what turns them on — which is the property worth seeing, so the tour reads their
-settings back before it calls them. Their full reference is
-[`docs/cms.md`](../docs/cms.md), [`docs/notifications.md`](../docs/notifications.md)
-and [`docs/shop.md`](../docs/shop.md).
+`cms/`, `notifications/`, `shop/` and `support/` are not in this directory. They
+come out of the generator inside every project it writes, and the `.env` above is
+the whole of what turns them on — which is the property worth seeing, so the tour
+reads their settings back before it calls them. Their full reference is
+[`docs/cms.md`](../docs/cms.md), [`docs/notifications.md`](../docs/notifications.md),
+[`docs/shop.md`](../docs/shop.md) and [`docs/support.md`](../docs/support.md).
 
 ## The notes app
 

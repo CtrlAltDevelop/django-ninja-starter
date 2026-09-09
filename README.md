@@ -138,8 +138,8 @@ python examples/walkthrough.py
 
 That builds `example-api` with the packaged generator, copies
 `examples/env.example` in as its `.env` — every login method, second factor,
-social provider and token mode on, plus the CMS and notifications — registers
-the `notes` feature app at v1 and v2 through `manage.py startapi`, and then
+social provider and token mode on, plus the CMS, notifications, the shop and the
+support desk — registers the `notes` feature app at v1 and v2 through `manage.py startapi`, and then
 prints a transcript of the calls a real client would make against it. The tour
 covers the WebSocket too, by calling the ASGI application directly rather than
 starting a server, so it needs no uvicorn and no open port.
@@ -379,11 +379,13 @@ another Django project or deleted from this one without leaving a hole.
 | --- | --- | --- |
 | [`cms`](docs/cms.md) | `DJANGO_CMS_ENABLED=true` | Pages made of sections made of typed, translatable fields; a library of shared sections; menus; drafts, schedules and signed preview links; export/import for moving content between environments; and a content-editing admin screen separate from the structural one |
 | [`notifications`](docs/notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | A notification table addressed to one account or to everybody; per-account read and dismiss receipts, so a broadcast is read and cleared by each person separately; a scoped read API with the same surface over REST, GraphQL, gRPC and a WebSocket that pushes new ones on save and keeps a second device in step; and a retention command |
-| [`shop`](docs/shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare the attributes their products answer; products, variants and stock; timed discount campaigns; search, filters and named listings; reviews and likes; a basket per account; and an order, coupon and payment cycle that reserves stock when the order is placed |
+| [`support`](docs/support.md) | `DJANGO_SUPPORT_ENABLED=true` | Live chat and support tickets as one thing, because a ticket is a conversation: threads either side can open, staff-only notes in the same thread, attachments, categories that carry the SLA the ticket is held to, a queue with assignment, priorities and tags, read state per participant, and the whole surface over REST, GraphQL, gRPC and a WebSocket that carries every conversation an account is in |
+| [`shop`](docs/shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare the attributes their products answer; products, variants and stock; timed discount campaigns; search, filters and named listings; reviews and likes; a basket per account; a saved address book and delivery options costed against that basket; and an order, coupon and payment cycle that reserves stock when the order is placed |
 
-The CMS and notifications are toured end to end by `python examples/walkthrough.py`.
+All four are toured end to end by `python examples/walkthrough.py`, which calls
+every route the shop and the support desk publish.
 
-### The notification socket needs an ASGI server
+### The sockets need an ASGI server
 
 `manage.py runserver` is WSGI and will never serve a WebSocket — the connection
 simply never opens, which is a confusing way to find out. The project ships
@@ -395,11 +397,12 @@ project's file rather than an app's: an app publishes a socket application the w
 it publishes a router, and the project decides whether it is mounted and where. A
 path with nothing on it is closed with code `4404` rather than left hanging.
 
-In production, set `DJANGO_NOTIFICATIONS_BROKER` to
-`apps.notifications.broadcast.RedisBroker`. The default `MemoryBroker` fans out
-inside a single process, so under two workers a client connected to the first
-never hears about a notification created by the second; `manage.py check` warns
-while it is still in place.
+In production, set `DJANGO_NOTIFICATIONS_BROKER` and `DJANGO_SUPPORT_BROKER` to
+the `RedisBroker` in each app. The default `MemoryBroker` fans out inside a
+single process, so under two workers a client connected to the first never hears
+about a notification created by the second — and on the support socket, a client
+and the agent answering them are very likely to be on different workers and hear
+nothing at all. `manage.py check` warns while either is still in place.
 
 ## One shape for every response
 

@@ -5,7 +5,7 @@ the other protocol, and it is deliberately the project's file rather than an
 app's. An app publishes a socket application the way it publishes a router, and
 the project decides whether it is mounted and at what path -- so a project that
 has not enabled notifications serves no socket, exactly as it serves no
-``/notifications`` routes.
+``/notifications`` routes -- and the same is true of support.
 
 Routes are resolved per connection rather than at import, because that is what
 lets ``override_settings`` move the path in a test and lets an app be enabled
@@ -33,6 +33,8 @@ def websocket_routes() -> list[tuple[str, str]]:
         routes.append(
             (settings.NOTIFICATIONS_WS_PATH, "apps.notifications.sockets.notifications_socket")
         )
+    if settings.SUPPORT_ENABLED:
+        routes.append((settings.SUPPORT_WS_PATH, "apps.support.sockets.support_socket"))
     return routes
 
 
