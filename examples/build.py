@@ -13,9 +13,9 @@ reader to configure and extend it:
 
 1.  ``examples/env.example`` is copied in as the project's ``.env``, which is
     what turns every login method, second factor, social provider and token
-    mode on, along with all three feature apps the template ships -- the CMS,
-    notifications and the shop, whose tables, routes and WebSocket exist only
-    once they are named.
+    mode on, along with all four feature apps the template ships -- the CMS,
+    notifications, the shop and the support desk, whose tables, routes and
+    WebSockets exist only once they are named.
 2.  ``manage.py startapi notes`` scaffolds and registers a feature API at v1 and
     again at v2, so the registry entries below are written by the project's own
     command rather than by hand.

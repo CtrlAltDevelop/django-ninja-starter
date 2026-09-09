@@ -21,8 +21,8 @@ alone is enough.
 1. Generates `example-api` with the packaged generator.
 2. Copies `env.example` in as the project's `.env` — four login methods, four
    second factors, four social providers and all three token modes installed
-   with `rotation` issuing, plus all three feature apps the template ships: the
-   **CMS**, **notifications** and the **shop**.
+   with `rotation` issuing, plus all four feature apps the template ships: the
+   **CMS**, **notifications**, the **shop** and the **support desk**.
 3. Runs the project's own `manage.py startapi notes --api-version v1` and `v2`,
    then copies `notes/` over the scaffolding it wrote.
 4. Runs `migrate`, so `make run` inside the built project serves the API.

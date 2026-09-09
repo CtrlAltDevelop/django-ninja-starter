@@ -1,3 +1,12 @@
+# {{ project_title }}'s environment. Copy to `.env` and fill in what your
+# deployment needs.
+#
+# The four feature apps -- cms, notifications, shop and support -- ship OFF, and
+# the *_ENABLED flags below are the whole switch. An app that is not named
+# installs nothing, migrates nothing, publishes no routes and never imports its
+# package, so turning one on is the only thing you have to do to get it, and
+# leaving it off costs you nothing. Turn one on and run `manage.py migrate`.
+#
 DJANGO_SETTINGS_MODULE=config.settings.development
 DJANGO_SECRET_KEY=change-me-in-production
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
