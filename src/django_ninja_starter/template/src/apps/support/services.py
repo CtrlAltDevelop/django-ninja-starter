@@ -31,10 +31,13 @@ from typing import Any
 from uuid import UUID
 
 from django.db.models import Avg, Count, F, Q
+from django.utils.text import slugify
 
 from apps.support import events
 from apps.support.models import (
+    DESK_KINDS,
     LIVE_STATUSES,
+    ROOM_KINDS,
     CannedReply,
     Category,
     Kind,
@@ -50,6 +53,7 @@ from apps.support.models import (
     assign,
     create_ticket,
     delete_message,
+    direct_key_for,
     edit_message,
     join,
     mark_read,
@@ -188,7 +192,7 @@ class SupportService:
         picked up" -- and making a client compose them out of one parameter
         means every client composes them slightly differently.
         """
-        tickets = self._visible(user)
+        tickets = Ticket.objects.listed_for(user)
         if status:
             tickets = tickets.filter(status=_choice(status, Status, "status"))
         if kind:
@@ -442,6 +446,14 @@ class SupportService:
         that belongs, where it is visibly an administrative act.
         """
         kind = _choice(kind, Kind, "kind")
+        if kind not in DESK_KINDS:
+            # A room has rules this path does not apply -- a channel needs its
+            # address, a group needs members, a private chat needs its dedupe
+            # key -- so opening one here would produce a room that half works.
+            raise InvalidRequest(
+                "Open a chat or a ticket here. A channel, a group or a private chat "
+                "is opened by its own command."
+            )
         if priority:
             priority = _choice(priority, Priority, "priority")
         chosen = None
@@ -603,7 +615,7 @@ class SupportService:
         not ask with something that reads as an apology.
         """
         _staff_only(user, "assign a ticket")
-        ticket = self._ticket(user, ticket_id)
+        ticket = self._desk_ticket(user, ticket_id)
         agent = None
         if agent_id is not None:
             agent = type(user).objects.filter(pk=agent_id, is_staff=True, is_active=True).first()
@@ -637,7 +649,7 @@ class SupportService:
         loser should find out before they have typed an answer.
         """
         _staff_only(user, "claim a ticket")
-        ticket = self._ticket(user, ticket_id)
+        ticket = self._desk_ticket(user, ticket_id)
         if ticket.assignee_id not in (None, user.pk):
             raise NotPermitted(f"{ticket.assignee.get_username()} already has this ticket.")
         return self.assign(user, ticket_id, user.pk)
@@ -646,7 +658,7 @@ class SupportService:
         """Move a thread up or down the queue. Staff only, and recorded internally."""
         _staff_only(user, "change a priority")
         priority = _choice(priority, Priority, "priority")
-        ticket = self._ticket(user, ticket_id)
+        ticket = self._desk_ticket(user, ticket_id)
         was = ticket.priority
         changed = set_priority(ticket, priority)
         if changed:
@@ -667,7 +679,7 @@ class SupportService:
         work out the difference from what it was showing before.
         """
         _staff_only(user, "tag a ticket")
-        ticket = self._ticket(user, ticket_id)
+        ticket = self._desk_ticket(user, ticket_id)
         found = list(Tag.objects.filter(slug__in=slugs))
         missing = sorted(set(slugs) - {tag.slug for tag in found})
         if missing:
@@ -704,8 +716,164 @@ class SupportService:
         # The thread they have just been added to, on their own channel: they are
         # not subscribed to its channel yet and would otherwise not learn of it
         # until they next listed their tickets.
-        events.publish_ticket(ticket, reason="invited")
+        events.publish_ticket(ticket, reason="invited", to_members=True)
         return events.participant_payload(participant)
+
+    # -- rooms: channels, groups and private chats ------------------------
+
+    def _room(self, user: Any, ticket_id: UUID, *, kinds: tuple[Any, ...] = ROOM_KINDS) -> Ticket:
+        """One room this account can see, refusing a desk thread by the same 404.
+
+        A desk thread reached through a room command is answered as "no such
+        room" rather than as a refusal, because telling somebody that the id
+        they guessed is a real ticket is itself an answer they had not earned.
+        """
+        ticket = self._ticket(user, ticket_id)
+        if ticket.kind not in kinds:
+            raise TicketNotFound("No such room.")
+        return ticket
+
+    def _desk_ticket(self, user: Any, ticket_id: UUID) -> Ticket:
+        """One chat or ticket. A room reached through a desk verb is "no such ticket".
+
+        Claiming, assigning, prioritising, tagging and rating are the queue's
+        vocabulary, and a channel or somebody's group is not queue work. Without
+        this an agent could put a channel in their own queue, where it would sit
+        being neither answerable nor closable.
+        """
+        ticket = self._ticket(user, ticket_id)
+        if ticket.kind not in DESK_KINDS:
+            raise TicketNotFound("No such ticket.")
+        return ticket
+
+    def channels(self, user: Any, *, search: str = "") -> list[dict[str, Any]]:
+        """Every open channel, whether or not this account is in one.
+
+        Discovery is the point of a channel: one nobody can find is one nobody
+        can join. Groups and direct messages are deliberately absent -- they are
+        listed by `tickets`, which only ever returns what you are already in.
+        """
+        found = Ticket.objects.filter(kind=Kind.CHANNEL)
+        if search.strip():
+            found = found.filter(Q(subject__icontains=search) | Q(slug__icontains=search))
+        mine = set(
+            Ticket.objects.filter(kind=Kind.CHANNEL, participants__user=user).values_list(
+                "pk", flat=True
+            )
+        )
+        return [
+            {
+                **events.ticket_payload(channel),
+                "joined": channel.pk in mine,
+                "members": channel.participants.count(),
+            }
+            for channel in found.order_by("subject")
+        ]
+
+    def create_channel(
+        self, user: Any, name: str, *, slug: str = "", body: str = ""
+    ) -> dict[str, Any]:
+        """Open a channel anybody signed in may find and join.
+
+        The slug is the address, so it is checked rather than suffixed into
+        uniqueness: somebody who asked for `#general` and silently got
+        `#general-2` has been given a different channel from the one they meant.
+        """
+        name = name.strip()
+        if not name:
+            raise InvalidRequest("A channel needs a name.")
+        address = slugify(slug or name)
+        if not address:
+            raise InvalidRequest("That name does not make a usable address.")
+        if Ticket.objects.filter(slug=address).exists():
+            raise InvalidRequest(f"There is already a channel at {address!r}.")
+        ticket = create_ticket(
+            user, kind=str(Kind.CHANNEL), subject=name, slug=address, role=str(Role.OWNER)
+        )
+        if body.strip():
+            post_message(ticket, user, body.strip())
+            ticket.refresh_from_db()
+        return self.ticket(user, ticket.pk)
+
+    def create_group(
+        self, user: Any, name: str, member_ids: list[UUID], *, body: str = ""
+    ) -> dict[str, Any]:
+        """Open a private group with the people who are to be in it.
+
+        Members are named at creation rather than invited afterwards, because a
+        group of one is not a group and the first message should reach somebody.
+        Nobody else can find it: a group is invisible to everyone but its
+        members, staff included.
+        """
+        name = name.strip()
+        if not name:
+            raise InvalidRequest("A group needs a name.")
+        members = self._accounts(user, member_ids)
+        if not members:
+            raise InvalidRequest("A group needs somebody in it besides you.")
+        ticket = create_ticket(user, kind=str(Kind.GROUP), subject=name, role=str(Role.OWNER))
+        for member in members:
+            join(ticket, member, role=str(Role.MEMBER))
+        if body.strip():
+            post_message(ticket, user, body.strip())
+            ticket.refresh_from_db()
+        events.publish_ticket(ticket, reason="invited", to_members=True)
+        return self.ticket(user, ticket.pk)
+
+    def direct(self, user: Any, account_id: UUID) -> dict[str, Any]:
+        """The private chat between this account and one other, opening it if new.
+
+        Idempotent by `direct_key`, so both people calling this at once end up
+        in the same conversation rather than in two halves of one.
+        """
+        (other,) = self._accounts(user, [account_id]) or (None,)
+        if other is None:
+            raise InvalidRequest("You cannot open a private chat with yourself.")
+        key = direct_key_for(user.pk, other.pk)
+        existing = Ticket.objects.filter(direct_key=key).first()
+        if existing is not None:
+            return self.ticket(user, existing.pk)
+        ticket = create_ticket(user, kind=str(Kind.DIRECT), direct_key=key, role=str(Role.MEMBER))
+        join(ticket, other, role=str(Role.MEMBER))
+        events.publish_ticket(ticket, reason="invited", to_members=True)
+        return self.ticket(user, ticket.pk)
+
+    def _accounts(self, user: Any, account_ids: list[UUID]) -> list[Any]:
+        """The active accounts these ids name, never including the caller.
+
+        Silently dropping the caller rather than refusing: naming yourself as a
+        member of your own group is a reasonable thing for a client to do and a
+        silly thing to fail over.
+        """
+        found = list(type(user).objects.filter(pk__in=account_ids, is_active=True))
+        if len(found) != len({*account_ids}):
+            raise InvalidRequest("No such active account.")
+        return [account for account in found if account.pk != user.pk]
+
+    def join_room(self, user: Any, ticket_id: UUID) -> dict[str, Any]:
+        """Join a channel. Only a channel: the other two are joined by invitation.
+
+        Idempotent, so a client that does not track its own membership can call
+        it before opening the room every time.
+        """
+        room = self._room(user, ticket_id, kinds=(Kind.CHANNEL,))
+        participant = join(room, user, role=str(Role.MEMBER))
+        events.publish_ticket(room, reason="joined")
+        return events.participant_payload(participant)
+
+    def leave_room(self, user: Any, ticket_id: UUID) -> dict[str, Any]:
+        """Leave a room. A direct message cannot be left, only muted.
+
+        Leaving a private chat would put it in a state neither person can reason
+        about -- one of the two is gone and the thread is still addressed to
+        them -- so the answer is no rather than a half-empty conversation.
+        """
+        room = self._room(user, ticket_id, kinds=(Kind.CHANNEL, Kind.GROUP))
+        removed, _ = room.participants.filter(user=user).delete()
+        if not removed:
+            raise InvalidRequest("You are not in that room.")
+        events.publish_ticket(room, reason="left")
+        return {"ticket": str(room.pk), "left": True}
 
     def rate(self, user: Any, ticket_id: UUID, score: int, comment: str = "") -> dict[str, Any]:
         """Say what you thought. The client's, and only once it is settled.
@@ -714,7 +882,7 @@ class SupportService:
         that means nothing. Overwriting is allowed, because an opinion formed
         the minute a ticket closed is allowed to change.
         """
-        ticket = self._ticket(user, ticket_id)
+        ticket = self._desk_ticket(user, ticket_id)
         if ticket.client_id != getattr(user, "pk", None):
             raise NotPermitted("Only the client who opened a ticket can rate it.")
         if not ticket.is_settled:

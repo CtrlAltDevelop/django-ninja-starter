@@ -481,3 +481,89 @@ def test_an_agent_can_invite_somebody_into_a_conversation(
 
     assert invited.user.username == "alan"
     assert invited.role == "observer"
+
+
+# -- rooms ------------------------------------------------------------------
+
+
+def test_a_channel_is_opened_over_grpc(token: str, grpc_call: Callable[..., Any]) -> None:
+    answer = grpc_call(
+        Stub,
+        "CreateChannel",
+        support_pb2.CreateChannelRequest(name="Release notes"),
+        token=token,
+    )
+
+    assert answer.kind == "channel"
+    assert answer.slug == "release-notes"
+
+
+def test_the_channel_directory_is_listed_over_grpc(
+    token: str, desk_token: str, grpc_call: Callable[..., Any]
+) -> None:
+    grpc_call(
+        Stub, "CreateChannel", support_pb2.CreateChannelRequest(name="Release notes"), token=token
+    )
+
+    answer = grpc_call(Stub, "Channels", support_pb2.ChannelsRequest(), token=desk_token)
+
+    assert [row.subject for row in answer.channels] == ["Release notes"]
+    assert answer.channels[0].joined is False
+
+
+def test_a_channel_is_joined_and_left_over_grpc(
+    token: str, desk_token: str, grpc_call: Callable[..., Any]
+) -> None:
+    channel = grpc_call(
+        Stub, "CreateChannel", support_pb2.CreateChannelRequest(name="Release notes"), token=token
+    )
+
+    joined = grpc_call(
+        Stub, "Join", support_pb2.JoinRequest(ticket_id=channel.id), token=desk_token
+    )
+    left = grpc_call(
+        Stub, "Leave", support_pb2.LeaveRequest(ticket_id=channel.id), token=desk_token
+    )
+
+    assert joined.role == "member"
+    assert left.left is True
+
+
+def test_a_group_over_grpc_is_hidden_from_the_desk(
+    token: str, desk_token: str, other_client: Any, grpc_call: Callable[..., Any]
+) -> None:
+    """The same rule as every other transport, asserted through this one."""
+    group = grpc_call(
+        Stub,
+        "CreateGroup",
+        support_pb2.CreateGroupRequest(name="Ours", members=[str(other_client.pk)]),
+        token=token,
+    )
+
+    code = refusal(
+        grpc_call,
+        Stub,
+        "Get",
+        support_pb2.GetRequest(ticket_id=group.id),
+        token=desk_token,
+    )
+
+    assert code is grpc.StatusCode.NOT_FOUND
+
+
+def test_a_private_chat_over_grpc_is_the_same_thread_twice(
+    client_user: Any, other_client: Any, token: str, grpc_call: Callable[..., Any]
+) -> None:
+    from apps.support.tests.conftest import access_token
+
+    first = grpc_call(
+        Stub, "Direct", support_pb2.DirectRequest(account=str(other_client.pk)), token=token
+    )
+    second = grpc_call(
+        Stub,
+        "Direct",
+        support_pb2.DirectRequest(account=str(client_user.pk)),
+        token=access_token(other_client),
+    )
+
+    assert first.id == second.id

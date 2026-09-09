@@ -103,9 +103,15 @@ features a project chooses rather than the plumbing under them.
 | --- | --- | --- |
 | [`cms`](cms.md) | `DJANGO_CMS_ENABLED=true` | Pages, sections and typed multilingual fields, shared sections, menus, publishing with preview links, and an admin screen built for editors rather than for developers |
 | [`notifications`](notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | Stored notifications, a read API, and a WebSocket that pushes new ones — public before it is authenticated, private after |
-| [`support`](support.md) | `DJANGO_SUPPORT_ENABLED=true` | Live chat and support tickets as one app, because a ticket is a conversation: threads, staff-only notes, attachments, SLA deadlines carried by the category, a queue the desk works, and the whole surface over REST, GraphQL, gRPC and a WebSocket |
+| [`support`](support.md) | `DJANGO_SUPPORT_ENABLED=true` | Chat and support tickets as one app, because a ticket is a conversation: threads, staff-only notes, attachments, SLA deadlines, a queue the desk works — and channels, private groups and direct messages that the desk cannot read. One authenticated socket carries all of it |
 | [`shop`](shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare what their products are, several sellers per product, timed campaigns, search and merchandising lists, reviews and likes, a basket per account, and an order cycle that reserves stock and issues an invoice |
 | [`notes`](notes.md) | `manage.py startapi` | Not shipped installed: the worked example of a feature app, one model served at two API versions, built into the example project |
+
+All four ship **off** in a generated project, which is why a fresh `/api/docs`
+lists neither the shop nor the support desk: an app nobody named has no tables,
+no routes and no admin. Turn one on in `.env`, run `manage.py migrate`, restart,
+and its group appears. This repository's own `.env.example` has all four on, so
+`make run` here serves the whole API.
 
 ## The admin
 

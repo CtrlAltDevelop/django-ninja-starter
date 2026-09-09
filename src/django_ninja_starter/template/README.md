@@ -45,6 +45,12 @@ top-bar selector to switch between registered API versions, or
 has no selector, so each version is its own page -- `/api/v1/redoc` -- and
 Swagger links across to whichever one its top bar is showing.
 
+> **Not seeing the cms, notifications, shop or support groups?** They ship turned
+> **off**: a feature app that is not named has no tables, no routes and no admin,
+> and never imports its package. Set `DJANGO_CMS_ENABLED=true`,
+> `DJANGO_NOTIFICATIONS_ENABLED=true`, `DJANGO_SHOP_ENABLED=true` or
+> `DJANGO_SUPPORT_ENABLED=true` in your `.env`, run `make migrate`, and restart.
+
 Signed into the admin as staff, the page authorises itself: it trades that
 session for a bearer token and fills **Authorize** in, because the API reads
 `Authorization` and ignores cookies. The session is left alone, and

@@ -93,6 +93,7 @@ class Ticket(serializers.Serializer[dict[str, object]]):
     reference = serializers.CharField()
     kind = serializers.CharField()
     subject = serializers.CharField()
+    slug = serializers.CharField()
     status = serializers.CharField()
     priority = serializers.CharField()
     client = Account()
@@ -136,3 +137,10 @@ class CannedReply(serializers.Serializer[dict[str, object]]):
     title = serializers.CharField()
     body = serializers.CharField()
     category = serializers.CharField()
+
+
+class Channel(Ticket):
+    """A channel as the directory lists it: a thread, plus your relation to it."""
+
+    joined = serializers.BooleanField()
+    members = serializers.IntegerField()

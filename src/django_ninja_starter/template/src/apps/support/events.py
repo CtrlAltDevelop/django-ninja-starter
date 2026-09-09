@@ -150,6 +150,9 @@ def ticket_payload(ticket: Ticket, *, unread: int | None = None) -> dict[str, An
         "reference": ticket.reference,
         "kind": ticket.kind,
         "subject": ticket.subject,
+        # A channel's address, so a client can link to `#general` rather than to
+        # a uuid. Empty for every other kind, which is what has one.
+        "slug": ticket.slug or "",
         "status": ticket.status,
         "priority": ticket.priority,
         "client": author_payload(ticket.client),
@@ -245,17 +248,33 @@ def _publish_badges(ticket: Ticket, *, exclude: Any = None) -> None:
         _after_commit(user_channel(participant.user_id), frame)
 
 
-def publish_ticket(ticket: Ticket, *, reason: str = "update", to_desk: bool = False) -> None:
-    """Push a thread's current state to the thread, and optionally to the desk.
+def publish_ticket(
+    ticket: Ticket,
+    *,
+    reason: str = "update",
+    to_desk: bool = False,
+    to_members: bool = False,
+) -> None:
+    """Push a thread's current state to the thread, and optionally wider.
 
     ``to_desk`` is for the one case the thread channel cannot serve: a ticket
     that has just been opened has to reach agents who are not in it yet, and by
     definition none of them is subscribed to it.
+
+    ``to_members`` is the same problem seen from the other end, and it is what
+    makes a private chat arrive. Somebody who has just been put in a thread --
+    a new group, a direct message, an invitation -- is not on its channel yet,
+    so publishing only there would mean the conversation addressed to them
+    reached everyone except them. Their own account channel is the one place
+    they are certainly listening.
     """
     frame = {"type": TICKET_FRAME, "ticket": ticket_payload(ticket), "reason": reason}
     _after_commit(ticket_channel(ticket.pk), frame)
     if to_desk:
         _after_commit(staff_channel(), frame)
+    if to_members:
+        for account_id in ticket.participants.values_list("user_id", flat=True):
+            _after_commit(user_channel(account_id), frame)
 
 
 def publish_typing(ticket_id: Any, user: Any, *, typing: bool) -> None:

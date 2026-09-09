@@ -71,10 +71,26 @@ REFERENCE_ENTROPY = 6
 
 
 class Kind(models.TextChoices):
-    """Which of the two ways a thread is being used."""
+    """What a thread is, which decides who may see it and how one is joined.
+
+    Two families, and the difference between them is not cosmetic.
+
+    The **desk** kinds -- ``chat`` and ``ticket`` -- are a conversation between
+    somebody and the organisation. Staff can see all of them, because answering
+    them is the job.
+
+    The **room** kinds -- ``channel``, ``group`` and ``direct`` -- are people
+    talking to each other, and staff have no standing in them at all. A support
+    agent is not entitled to read a private message between two customers
+    because their account has ``is_staff`` set. :meth:`TicketQuerySet.visible_to`
+    is where that line is drawn, and it is the only place it is drawn.
+    """
 
     CHAT = "chat", "Live chat"
     TICKET = "ticket", "Support ticket"
+    CHANNEL = "channel", "Open channel"
+    GROUP = "group", "Private group"
+    DIRECT = "direct", "Direct message"
 
 
 class Status(models.TextChoices):
@@ -102,6 +118,17 @@ LIVE_STATUSES = (Status.OPEN, Status.PENDING, Status.ON_HOLD)
 #: client can disagree -- see :meth:`Ticket.reopen`.
 SETTLED_STATUSES = (Status.RESOLVED, Status.CLOSED)
 
+#: The kinds that belong to the desk: somebody talking to the organisation.
+#: Staff see every one of them, which is what makes a queue a queue.
+DESK_KINDS = (Kind.CHAT, Kind.TICKET)
+
+#: The kinds that are people talking to each other. Staff get no privileged
+#: access to any of them -- see :meth:`TicketQuerySet.visible_to`.
+ROOM_KINDS = (Kind.CHANNEL, Kind.GROUP, Kind.DIRECT)
+
+#: The kinds anybody signed in may find and join without being invited.
+PUBLIC_KINDS = (Kind.CHANNEL,)
+
 
 class Priority(models.TextChoices):
     """How far up the queue this belongs. Advisory: nothing here reorders on it."""
@@ -118,6 +145,8 @@ class Role(models.TextChoices):
     CLIENT = "client", "Client"
     AGENT = "agent", "Agent"
     OBSERVER = "observer", "Observer"
+    OWNER = "owner", "Owner"
+    MEMBER = "member", "Member"
 
 
 class MessageKind(models.TextChoices):
@@ -221,14 +250,41 @@ class TicketQuerySet(models.QuerySet["Ticket"]):
     def visible_to(self, user: Any) -> "TicketQuerySet":
         """What one account is entitled to see at all.
 
-        Staff see the desk; everybody else sees the threads they opened and the
-        ones they were added to as an observer. This is the only place the
-        distinction is made, so an endpoint cannot accidentally serve a client
-        the queue.
+        Three rules, and the second is the one to read twice.
+
+        1. Everybody sees the threads they opened and the threads they are in.
+        2. Staff additionally see **the desk** -- every chat and every ticket --
+           because working the queue is the job. Staff do **not** see rooms:
+           a channel they have not joined, somebody's group, and above all
+           somebody's direct messages are none of their business, and
+           ``is_staff`` is not a warrant. A support desk that could read its
+           customers' private conversations would be a surveillance tool with a
+           help widget attached.
+        3. A public channel is visible to anybody signed in, joined or not,
+           because a channel nobody can find is a channel nobody can join.
+
+        This is the only place the distinction is made, so no endpoint can widen
+        it by accident.
         """
+        mine = Q(client=user) | Q(participants__user=user)
+        findable = Q(kind__in=PUBLIC_KINDS)
         if getattr(user, "is_staff", False):
-            return self.all()
-        return self.filter(Q(client=user) | Q(participants__user=user)).distinct()
+            return self.filter(mine | findable | Q(kind__in=DESK_KINDS)).distinct()
+        return self.filter(mine | findable).distinct()
+
+    def listed_for(self, user: Any) -> "TicketQuerySet":
+        """What belongs in this account's own list of conversations.
+
+        :meth:`visible_to` minus discovery. A public channel you have not joined
+        is something you may *find*, and putting it in your list -- or, worse, in
+        an agent's queue -- would mean the desk's work and every open channel in
+        the building arriving in one pile. Channels are listed by their own
+        command, which is the one that knows how to say "joined" or not.
+        """
+        mine = Q(client=user) | Q(participants__user=user)
+        if getattr(user, "is_staff", False):
+            return self.filter(mine | Q(kind__in=DESK_KINDS)).distinct()
+        return self.filter(mine).distinct()
 
     def live(self) -> "TicketQuerySet":
         """Still wanting somebody's attention."""
@@ -380,6 +436,30 @@ class Ticket(models.Model):
         blank=True,
         help_text=(
             "Empty is allowed: a live chat often has no subject until it turns out to need one."
+            " For a channel or a group this is its name, and it is required."
+        ),
+    )
+    slug = models.SlugField(
+        max_length=140,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text=(
+            "A channel's address, so it can be linked to and found by name rather than by id."
+            " Null for every other kind, because only a channel is discoverable -- and null"
+            " rather than blank so that the unique index permits any number of them."
+        ),
+    )
+    direct_key = models.CharField(
+        max_length=80,
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+        help_text=(
+            "The two account ids of a direct message, smallest first. What makes opening a"
+            " private chat idempotent: the second attempt finds the first rather than"
+            " creating a parallel thread the other person is not reading."
         ),
     )
     category = models.ForeignKey(
@@ -859,6 +939,16 @@ class CannedReply(models.Model):
 # several of them touch more than one row.
 
 
+def direct_key_for(one: Any, other: Any) -> str:
+    """The dedupe key for a private chat between two accounts.
+
+    Sorted, so that whichever of the two opens it first the key is the same, and
+    the second person to try finds the conversation rather than starting a
+    parallel one the first is not reading.
+    """
+    return ":".join(sorted([str(one), str(other)]))
+
+
 def create_ticket(
     client: Any,
     *,
@@ -866,6 +956,9 @@ def create_ticket(
     subject: str = "",
     category: Category | None = None,
     priority: str = "",
+    slug: str | None = None,
+    direct_key: str | None = None,
+    role: str = str(Role.CLIENT),
     data: dict[str, Any] | None = None,
 ) -> Ticket:
     """Open a thread, and put its client in it.
@@ -885,9 +978,11 @@ def create_ticket(
                     category=category,
                     priority=priority
                     or (category.default_priority if category else Priority.NORMAL),
+                    slug=slug or None,
+                    direct_key=direct_key or None,
                     data=data or {},
                 )
-                Participant.objects.create(ticket=ticket, user=client, role=Role.CLIENT)
+                Participant.objects.create(ticket=ticket, user=client, role=role)
                 return ticket
         except IntegrityError:
             if attempt == 4:  # pragma: no cover - a five-in-a-row reference collision

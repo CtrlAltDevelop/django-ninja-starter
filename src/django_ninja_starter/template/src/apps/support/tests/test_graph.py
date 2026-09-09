@@ -440,3 +440,83 @@ def test_an_agent_can_invite_somebody_into_a_conversation(
 
     assert invited["user"]["username"] == "alan"
     assert invited["role"] == "observer"
+
+
+# -- rooms ------------------------------------------------------------------
+
+CREATE_CHANNEL = """
+mutation($name: String!, $body: String! = "") {
+  createSupportChannel(name: $name, body: $body) { id reference kind subject slug }
+}
+"""
+CHANNELS = """
+query($search: String! = "") {
+  supportChannels(search: $search) { id subject slug joined members }
+}
+"""
+JOIN = """
+mutation($id: String!) { joinSupportRoom(ticketId: $id) { role } }
+"""
+LEAVE = """
+mutation($id: String!) { leaveSupportRoom(ticketId: $id) { ticket left } }
+"""
+CREATE_GROUP = """
+mutation($name: String!, $members: [String!]!) {
+  createSupportGroup(name: $name, members: $members) { id kind subject }
+}
+"""
+DIRECT = """
+mutation($account: String!) { openSupportDirect(account: $account) { id kind reference } }
+"""
+
+
+def test_a_channel_is_opened_and_carries_its_address(client_user: Any) -> None:
+    body = graphql(CREATE_CHANNEL, client_user, name="Release notes")
+
+    channel = body["data"]["createSupportChannel"]
+    assert channel["kind"] == "channel"
+    assert channel["slug"] == "release-notes"
+
+
+def test_the_channel_directory_says_whether_you_are_in_one(
+    client_user: Any, other_client: Any
+) -> None:
+    graphql(CREATE_CHANNEL, client_user, name="Release notes")
+
+    listing = graphql(CHANNELS, other_client)["data"]["supportChannels"]
+
+    assert listing[0]["joined"] is False
+    assert listing[0]["members"] == 1
+
+
+def test_a_channel_is_joined_and_left_over_graphql(client_user: Any, other_client: Any) -> None:
+    channel = graphql(CREATE_CHANNEL, client_user, name="Release notes")["data"][
+        "createSupportChannel"
+    ]
+
+    joined = graphql(JOIN, other_client, id=channel["id"])["data"]["joinSupportRoom"]
+    left = graphql(LEAVE, other_client, id=channel["id"])["data"]["leaveSupportRoom"]
+
+    assert joined["role"] == "member"
+    assert left["left"] is True
+
+
+def test_a_group_over_graphql_is_hidden_from_the_desk(
+    client_user: Any, other_client: Any, agent: Any
+) -> None:
+    group = graphql(CREATE_GROUP, client_user, name="Ours", members=[str(other_client.pk)])["data"][
+        "createSupportGroup"
+    ]
+
+    body = graphql(TICKET, agent, id=group["id"])
+
+    assert title(body) == "NOT_FOUND"
+
+
+def test_a_private_chat_over_graphql_is_the_same_thread_twice(
+    client_user: Any, other_client: Any
+) -> None:
+    first = graphql(DIRECT, client_user, account=str(other_client.pk))["data"]["openSupportDirect"]
+    second = graphql(DIRECT, other_client, account=str(client_user.pk))["data"]["openSupportDirect"]
+
+    assert first["id"] == second["id"]

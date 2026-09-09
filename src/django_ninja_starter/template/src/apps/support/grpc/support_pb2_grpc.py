@@ -50,6 +50,11 @@ class SupportControllerStub:
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.CategoryList.FromString,
                 _registered_method=True)
+        self.Channels = channel.unary_unary(
+                '/config.support.SupportController/Channels',
+                request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.ChannelsRequest.SerializeToString,
+                response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.ChannelList.FromString,
+                _registered_method=True)
         self.Claim = channel.unary_unary(
                 '/config.support.SupportController/Claim',
                 request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.ClaimRequest.SerializeToString,
@@ -60,10 +65,25 @@ class SupportControllerStub:
                 request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.CountRequest.SerializeToString,
                 response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.CountResult.FromString,
                 _registered_method=True)
+        self.CreateChannel = channel.unary_unary(
+                '/config.support.SupportController/CreateChannel',
+                request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.CreateChannelRequest.SerializeToString,
+                response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.Ticket.FromString,
+                _registered_method=True)
+        self.CreateGroup = channel.unary_unary(
+                '/config.support.SupportController/CreateGroup',
+                request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.CreateGroupRequest.SerializeToString,
+                response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.Ticket.FromString,
+                _registered_method=True)
         self.Delete = channel.unary_unary(
                 '/config.support.SupportController/Delete',
                 request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.DeleteRequest.SerializeToString,
                 response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.DeletedMessage.FromString,
+                _registered_method=True)
+        self.Direct = channel.unary_unary(
+                '/config.support.SupportController/Direct',
+                request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.DirectRequest.SerializeToString,
+                response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.Ticket.FromString,
                 _registered_method=True)
         self.Edit = channel.unary_unary(
                 '/config.support.SupportController/Edit',
@@ -79,6 +99,16 @@ class SupportControllerStub:
                 '/config.support.SupportController/Invite',
                 request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.InviteRequest.SerializeToString,
                 response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.InvitedParticipant.FromString,
+                _registered_method=True)
+        self.Join = channel.unary_unary(
+                '/config.support.SupportController/Join',
+                request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.JoinRequest.SerializeToString,
+                response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.JoinedParticipant.FromString,
+                _registered_method=True)
+        self.Leave = channel.unary_unary(
+                '/config.support.SupportController/Leave',
+                request_serializer=apps_dot_support_dot_grpc_dot_support__pb2.LeaveRequest.SerializeToString,
+                response_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.LeaveResult.FromString,
                 _registered_method=True)
         self.List = channel.unary_unary(
                 '/config.support.SupportController/List',
@@ -173,6 +203,12 @@ class SupportControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Channels(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Claim(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -185,7 +221,25 @@ class SupportControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CreateChannel(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CreateGroup(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Delete(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Direct(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -204,6 +258,18 @@ class SupportControllerServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Invite(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Join(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Leave(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -311,6 +377,11 @@ def add_SupportControllerServicer_to_server(servicer, server):
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.CategoryList.SerializeToString,
             ),
+            'Channels': grpc.unary_unary_rpc_method_handler(
+                    servicer.Channels,
+                    request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.ChannelsRequest.FromString,
+                    response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.ChannelList.SerializeToString,
+            ),
             'Claim': grpc.unary_unary_rpc_method_handler(
                     servicer.Claim,
                     request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.ClaimRequest.FromString,
@@ -321,10 +392,25 @@ def add_SupportControllerServicer_to_server(servicer, server):
                     request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.CountRequest.FromString,
                     response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.CountResult.SerializeToString,
             ),
+            'CreateChannel': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateChannel,
+                    request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.CreateChannelRequest.FromString,
+                    response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.Ticket.SerializeToString,
+            ),
+            'CreateGroup': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateGroup,
+                    request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.CreateGroupRequest.FromString,
+                    response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.Ticket.SerializeToString,
+            ),
             'Delete': grpc.unary_unary_rpc_method_handler(
                     servicer.Delete,
                     request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.DeleteRequest.FromString,
                     response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.DeletedMessage.SerializeToString,
+            ),
+            'Direct': grpc.unary_unary_rpc_method_handler(
+                    servicer.Direct,
+                    request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.DirectRequest.FromString,
+                    response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.Ticket.SerializeToString,
             ),
             'Edit': grpc.unary_unary_rpc_method_handler(
                     servicer.Edit,
@@ -340,6 +426,16 @@ def add_SupportControllerServicer_to_server(servicer, server):
                     servicer.Invite,
                     request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.InviteRequest.FromString,
                     response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.InvitedParticipant.SerializeToString,
+            ),
+            'Join': grpc.unary_unary_rpc_method_handler(
+                    servicer.Join,
+                    request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.JoinRequest.FromString,
+                    response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.JoinedParticipant.SerializeToString,
+            ),
+            'Leave': grpc.unary_unary_rpc_method_handler(
+                    servicer.Leave,
+                    request_deserializer=apps_dot_support_dot_grpc_dot_support__pb2.LeaveRequest.FromString,
+                    response_serializer=apps_dot_support_dot_grpc_dot_support__pb2.LeaveResult.SerializeToString,
             ),
             'List': grpc.unary_unary_rpc_method_handler(
                     servicer.List,
@@ -504,6 +600,33 @@ class SupportController:
             _registered_method=True)
 
     @staticmethod
+    def Channels(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.support.SupportController/Channels',
+            apps_dot_support_dot_grpc_dot_support__pb2.ChannelsRequest.SerializeToString,
+            apps_dot_support_dot_grpc_dot_support__pb2.ChannelList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Claim(request,
             target,
             options=(),
@@ -558,6 +681,60 @@ class SupportController:
             _registered_method=True)
 
     @staticmethod
+    def CreateChannel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.support.SupportController/CreateChannel',
+            apps_dot_support_dot_grpc_dot_support__pb2.CreateChannelRequest.SerializeToString,
+            apps_dot_support_dot_grpc_dot_support__pb2.Ticket.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CreateGroup(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.support.SupportController/CreateGroup',
+            apps_dot_support_dot_grpc_dot_support__pb2.CreateGroupRequest.SerializeToString,
+            apps_dot_support_dot_grpc_dot_support__pb2.Ticket.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Delete(request,
             target,
             options=(),
@@ -574,6 +751,33 @@ class SupportController:
             '/config.support.SupportController/Delete',
             apps_dot_support_dot_grpc_dot_support__pb2.DeleteRequest.SerializeToString,
             apps_dot_support_dot_grpc_dot_support__pb2.DeletedMessage.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Direct(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.support.SupportController/Direct',
+            apps_dot_support_dot_grpc_dot_support__pb2.DirectRequest.SerializeToString,
+            apps_dot_support_dot_grpc_dot_support__pb2.Ticket.FromString,
             options,
             channel_credentials,
             insecure,
@@ -655,6 +859,60 @@ class SupportController:
             '/config.support.SupportController/Invite',
             apps_dot_support_dot_grpc_dot_support__pb2.InviteRequest.SerializeToString,
             apps_dot_support_dot_grpc_dot_support__pb2.InvitedParticipant.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Join(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.support.SupportController/Join',
+            apps_dot_support_dot_grpc_dot_support__pb2.JoinRequest.SerializeToString,
+            apps_dot_support_dot_grpc_dot_support__pb2.JoinedParticipant.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Leave(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.support.SupportController/Leave',
+            apps_dot_support_dot_grpc_dot_support__pb2.LeaveRequest.SerializeToString,
+            apps_dot_support_dot_grpc_dot_support__pb2.LeaveResult.FromString,
             options,
             channel_credentials,
             insecure,

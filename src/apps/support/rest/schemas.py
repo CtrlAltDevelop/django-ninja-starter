@@ -124,6 +124,10 @@ class TicketOut(Schema):
 
     kind: Kind
     subject: str
+    slug: str = ""
+    """A channel's address, so a client can link to `#general` rather than to a
+    uuid. Empty for every other kind, which is what has one."""
+
     status: Status
     priority: Priority
     client: AccountOut | None = None
@@ -325,3 +329,36 @@ class RatingOut(Schema):
 class TypingOut(Schema):
     ticket: UUID
     typing: bool
+
+
+# -- rooms ------------------------------------------------------------------
+
+
+class ChannelOut(TicketOut):
+    """A channel as it appears in the directory, joined or not."""
+
+    joined: bool
+    members: int
+
+
+class ChannelIn(Schema):
+    name: str
+    slug: str = ""
+    """Left empty the address is made from the name. Given, it is used as-is."""
+    body: str = ""
+
+
+class GroupIn(Schema):
+    name: str
+    members: list[UUID] = []
+    """Who is in it, named at creation: a group of one is not a group."""
+    body: str = ""
+
+
+class DirectIn(Schema):
+    account: UUID
+
+
+class LeftOut(Schema):
+    ticket: UUID
+    left: bool

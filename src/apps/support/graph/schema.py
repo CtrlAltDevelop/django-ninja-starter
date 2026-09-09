@@ -28,6 +28,8 @@ from apps.support.graph.types import (
     AssignType,
     CannedReplyType,
     CategoryType,
+    ChannelType,
+    LeftType,
     MessagePageType,
     MessageType,
     ParticipantType,
@@ -45,6 +47,7 @@ from apps.support.graph.types import (
     account_type,
     canned_reply_type,
     category_type,
+    channel_type,
     message_type,
     participant_type,
     tag_type,
@@ -185,6 +188,19 @@ class Query:
     def support_categories(self, info: Info[Any, Any]) -> list[CategoryType]:
         _caller(info)
         return [category_type(row) for row in support_service.categories()]
+
+    @strawberry.field(
+        description=(
+            "Every open channel, joined or not. The only support listing that "
+            "shows you something you are not already part of."
+        )
+    )
+    @resolver
+    def support_channels(self, info: Info[Any, Any], search: str = "") -> list[ChannelType]:
+        return [
+            channel_type(row)
+            for row in _call(support_service.channels, _caller(info), search=search)
+        ]
 
     @strawberry.field(description="The desk's own tags. Staff only.")
     @resolver
@@ -363,6 +379,49 @@ class Mutation:
         return RatingType(
             ticket=result["ticket"], rating=result["rating"], comment=result["comment"]
         )
+
+    @strawberry.mutation(description="Open a channel anybody signed in may find and join.")
+    @resolver
+    def create_support_channel(
+        self, info: Info[Any, Any], name: str, slug: str = "", body: str = ""
+    ) -> TicketType:
+        return ticket_type(
+            _call(support_service.create_channel, _caller(info), name, slug=slug, body=body)
+        )
+
+    @strawberry.mutation(
+        description="Open a private group. Invisible to everybody but its members."
+    )
+    @resolver
+    def create_support_group(
+        self, info: Info[Any, Any], name: str, members: list[str], body: str = ""
+    ) -> TicketType:
+        return ticket_type(
+            _call(
+                support_service.create_group,
+                _caller(info),
+                name,
+                [_uuid(member, "account") for member in members],
+                body=body,
+            )
+        )
+
+    @strawberry.mutation(
+        description="Open the private chat with one account, or return the existing one."
+    )
+    @resolver
+    def open_support_direct(self, info: Info[Any, Any], account: str) -> TicketType:
+        return ticket_type(_call(support_service.direct, _caller(info), _uuid(account, "account")))
+
+    @strawberry.mutation(description="Join a channel. A channel only, and idempotent.")
+    @resolver
+    def join_support_room(self, info: Info[Any, Any], ticket_id: str) -> ParticipantType:
+        return participant_type(_call(support_service.join_room, _caller(info), _uuid(ticket_id)))
+
+    @strawberry.mutation(description="Leave a channel or a group. A private chat cannot be left.")
+    @resolver
+    def leave_support_room(self, info: Info[Any, Any], ticket_id: str) -> LeftType:
+        return LeftType(**_call(support_service.leave_room, _caller(info), _uuid(ticket_id)))
 
     @strawberry.mutation(description="Say you are typing in a support conversation.")
     @resolver

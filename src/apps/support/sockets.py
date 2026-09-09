@@ -8,21 +8,21 @@ hypercorn -- runs this as it stands. ``runserver`` does not, because Django's
 development server is WSGI; the app's documentation says so, because the
 alternative is discovering it as a connection that never opens.
 
-**This socket is useless before it is authenticated, and that is deliberate.**
-The notification socket in this project accepts anonymous connections because
-it has genuinely public traffic to deliver. This one has none: every frame it
-sends belongs to a named conversation between a named client and the desk. So
-the handshake is accepted without a credential -- a page can open the socket
-while its token is still being fetched -- and every command but ``ping``,
-``authenticate``, ``whoami`` and ``deauthenticate`` is refused with
-``AUTHENTICATION_REQUIRED`` until one arrives.
+**This socket admits nobody it cannot name.** The notification socket in this
+project accepts anonymous connections because it has genuinely public traffic to
+deliver. This one has none: every frame it sends belongs to a named conversation
+-- a client and the desk, a private chat, a group, or a channel somebody joined.
+So a handshake that carries no usable credential is **closed rather than
+accepted**, and there is no signing in afterwards: no ``authenticate`` command,
+and no signed-out state for a handler to worry about.
 
-Credentials in the handshake -- ``?token=``, a bearer subprotocol, an
-``Authorization`` header, a session cookie -- are honoured too, so a client that
-knows who it is at connect time does not have to wait a round trip. See
-:mod:`apps.support.identity`.
+The credential comes from the handshake -- ``?token=``, a bearer subprotocol, an
+``Authorization`` header, or a session cookie. See :mod:`apps.support.identity`.
+A page that opens the socket before it has a token should open it after instead;
+the failure is visible either way, because the upgrade is refused rather than
+answered with a socket that never speaks.
 
-**Authenticating subscribes you to your own world.** The connection joins your
+**Connecting subscribes you to your own world.** The connection joins your
 account channel, the desk channel if you are staff, and the channels of the
 threads you are currently in -- bounded, newest first. From that moment one
 socket carries every conversation you are part of, and a client renders a list
@@ -73,7 +73,6 @@ from apps.support.identity import (
     Credentials,
     credentials_from_scope,
     user_from_credentials,
-    user_from_token,
     user_summary,
 )
 from apps.support.models import LIVE_STATUSES, Message, Ticket, Visibility
@@ -98,6 +97,13 @@ TOKEN_INVALID = "TOKEN_INVALID"
 #: otherwise open four thousand subscriptions to hear about the six that are
 #: live. Anything outside the window is reachable with `subscribe`.
 AUTO_SUBSCRIBE = 50
+
+#: What an unauthenticated handshake is closed with. 1008 is the RFC 6455 code
+#: for a policy violation, which is exactly what this is: the connection was
+#: well-formed and is not allowed. Sent before any accept, so an ASGI server
+#: answers the upgrade with an HTTP 403 and the browser reports a failure rather
+#: than opening a socket that never speaks.
+UNAUTHENTICATED_CLOSE = 1008
 
 
 class SocketError(Exception):
@@ -256,42 +262,60 @@ class SupportSocket:
     async def _send_error(self, title: str, description: str) -> None:
         await self._send_json({"type": "error", "title": title, "description": description})
 
-    async def _join(self, channel: str) -> None:
+    async def _join_channel(self, channel: str) -> None:
+        """Start hearing one broker channel on this connection.
+
+        Named apart from the ``join`` command, which is about joining a room and
+        happens to call this.
+        """
         assert self._subscription is not None
         await self._subscription.add(channel)
 
     async def _adopt(self, user: Any) -> None:
         """Attach an account to this connection and subscribe it to that account's world."""
         self._user = user
-        await self._join(user_channel(user.pk))
+        await self._join_channel(user_channel(user.pk))
         if getattr(user, "is_staff", False):
-            await self._join(staff_channel())
+            await self._join_channel(staff_channel())
         for ticket_id in await sync_to_async(_live_ticket_ids)(user):
             channel = ticket_channel(ticket_id)
             self._joined.add(channel)
-            await self._join(channel)
+            await self._join_channel(channel)
 
     # -- lifecycle --------------------------------------------------------
 
     async def run(self) -> None:
+        """Authenticate, then serve. A connection that cannot say who it is gets neither.
+
+        The handshake is refused rather than accepted-and-starved. Every frame
+        this socket carries belongs to a named conversation, so there is nothing
+        it could deliver to an anonymous connection; accepting one would buy a
+        client the ability to hold a connection open and learn nothing from it,
+        and would leave every command handler needing its own signed-out branch.
+
+        Refusing is `websocket.close` before any accept, which is what an ASGI
+        server turns into an HTTP 403 on the upgrade. A browser sees the
+        connection fail rather than open and go quiet, which is the difference
+        between a bug that is reported and a bug that is not.
+        """
         message = await self._asgi_receive()
         if message["type"] != "websocket.connect":  # pragma: no cover - server contract
             return
         credentials = credentials_from_scope(self._scope)
+        user = await sync_to_async(user_from_credentials)(credentials)
+        if user is None:
+            await self._asgi_send({"type": "websocket.close", "code": UNAUTHENTICATED_CLOSE})
+            return
         await self._accept(credentials)
         self._subscription = get_broker().subscribe()
         try:
-            user = await sync_to_async(user_from_credentials)(credentials)
-            if user is not None:
-                await self._adopt(user)
+            await self._adopt(user)
             await self._send_json(
                 {
                     "type": "ready",
-                    "authenticated": self._user is not None,
-                    "user": user_summary(self._user) if self._user else None,
-                    "unread": await sync_to_async(support_service.unread)(self._user)
-                    if self._user
-                    else {"messages": 0, "tickets": 0},
+                    "authenticated": True,
+                    "user": user_summary(self._user),
+                    "unread": await sync_to_async(support_service.unread)(self._user),
                 }
             )
             await self._pump()
@@ -413,13 +437,6 @@ class SupportSocket:
             await self._send_error(BAD_REQUEST, "Unknown command.")
             return
         try:
-            # Before the command, so a token that will not do refuses the whole
-            # frame rather than letting the command run as somebody else -- or,
-            # worse, as nobody. Compared by name rather than against the bound
-            # method, which is a new object on every attribute access and would
-            # never match itself.
-            if command != "authenticate":
-                await self._sign_in_if_offered(frame)
             await handler(frame)
         except SocketError as error:
             await self._send_error(error.title, error.description)
@@ -432,11 +449,10 @@ class SupportSocket:
     #: talking, then the desk's own. One tuple, so :meth:`commands` cannot fall
     #: behind the dispatch table -- the handler for each is ``_<name>``.
     COMMANDS = (
-        # Open to anybody
+        # Open to anybody who got in, which is everybody: the handshake
+        # already refused the connections that could not say who they were.
         "ping",
-        "authenticate",
         "whoami",
-        "deauthenticate",
         # Reading
         "tickets",
         "ticket",
@@ -460,6 +476,13 @@ class SupportSocket:
         "close",
         "reopen",
         "rate",
+        # Rooms: channels, groups and private chats
+        "channels",
+        "create_channel",
+        "create_group",
+        "direct",
+        "join",
+        "leave",
         # The desk's own
         "assign",
         "claim",
@@ -483,76 +506,21 @@ class SupportSocket:
         return cls.COMMANDS
 
     def _require_user(self) -> Any:
-        if self._user is None:
-            raise SocketError(
-                AUTHENTICATION_REQUIRED,
-                "Send an authenticate command before reading or writing anything.",
-            )
+        """The account this connection belongs to, which is never ``None``.
+
+        The handshake refuses an unauthenticated connection, so by the time any
+        handler runs there is an account. Kept as an assertion rather than
+        inlined so that a future command cannot quietly start serving nobody,
+        and so the handlers read the same as they did when it could fail.
+        """
+        assert self._user is not None, "the handshake admits nobody without an account"
         return self._user
-
-    async def _account_for(self, token: str) -> Any:
-        """The account a token names, or a refusal the client can be told about.
-
-        Shared by the ``authenticate`` command and by a token riding on any other
-        command, so the two refuse in the same words for the same reasons: a
-        token that names nobody, and a token that names somebody other than
-        whoever this connection already belongs to. The second is a conflict
-        rather than a switch, because the connection is already joined to the
-        first account's channels and there is no honest way to serve two people
-        down one socket.
-        """
-        user = await sync_to_async(user_from_token)(token)
-        if user is None:
-            raise SocketError(TOKEN_INVALID, "That token does not identify anybody.")
-        if self._user is not None and self._user.pk != user.pk:
-            raise SocketError(
-                CONFLICT, "This connection is already signed in. Open a new one instead."
-            )
-        return user
-
-    async def _welcome(self, user: Any) -> None:
-        """Adopt an account, subscribe it to its threads, and say so."""
-        await self._adopt(user)
-        await self._send_json(
-            {
-                "type": "authenticated",
-                "user": user_summary(user),
-                "unread": await sync_to_async(support_service.unread)(user),
-                "tickets": sorted(channel.rsplit(":", 1)[-1] for channel in self._joined),
-            }
-        )
-
-    async def _sign_in_if_offered(self, frame: dict[str, Any]) -> None:
-        """Honour a ``token`` carried by a command that is not ``authenticate``.
-
-        Optional, so a connection that authenticated at the handshake or in an
-        earlier frame goes on sending bare commands. Signing in this way is
-        indistinguishable from having sent ``authenticate`` first -- the client
-        gets the same ``authenticated`` frame ahead of its command's own reply --
-        so a client has one set of frames to handle however it chose to present
-        its credential.
-        """
-        token = _text(frame, "token").strip()
-        if not token:
-            return
-        user = await self._account_for(token)
-        if self._user is None:
-            await self._welcome(user)
 
     # -- open to anybody --------------------------------------------------
 
     async def _ping(self, frame: dict[str, Any]) -> None:
         """Answered so a client can keep an idle connection alive through a proxy."""
         await self._send_json({"type": "pong"})
-
-    async def _authenticate(self, frame: dict[str, Any]) -> None:
-        """Prove who you are, and start receiving your conversations.
-
-        Authenticating twice as the same account changes nothing, but is still
-        answered -- a client that refreshed its token should neither have to
-        reconnect nor be left waiting for a reply that never comes.
-        """
-        await self._welcome(await self._account_for(_text(frame, "token")))
 
     async def _whoami(self, frame: dict[str, Any]) -> None:
         """Who this connection currently belongs to, if anybody.
@@ -570,27 +538,6 @@ class SupportSocket:
                 if self._user
                 else {"messages": 0, "tickets": 0},
             }
-        )
-
-    async def _deauthenticate(self, frame: dict[str, Any]) -> None:
-        """Forget the account without dropping the connection.
-
-        A shared browser signing out should stop receiving one person's
-        conversations immediately. Only the socket's own view of the account is
-        dropped; the credential itself is the auth app's to revoke.
-
-        The channels stay subscribed underneath -- a subscription can be added
-        to but not removed from, and adding removal would mean a Redis round
-        trip on a connection whose whole safety comes from one task owning it.
-        So the filter is in :meth:`_is_for_us`, which sends nothing at all while
-        nobody is signed in. Signing out and straight back in as the same
-        account therefore costs nothing.
-        """
-        was = self._user
-        self._user = None
-        self._joined.clear()
-        await self._send_json(
-            {"type": "deauthenticated", "user": user_summary(was) if was else None}
         )
 
     # -- reading ----------------------------------------------------------
@@ -677,7 +624,7 @@ class SupportSocket:
         tail = await sync_to_async(_tail)(user, ticket_id)
         channel = ticket_channel(ticket_id)
         self._joined.add(channel)
-        await self._join(channel)
+        await self._join_channel(channel)
         await self._send_json({"type": "subscribed", **tail})
         # Presence after the tail, so the other side learns somebody arrived
         # only once this connection can actually render what they say next.
@@ -713,7 +660,7 @@ class SupportSocket:
         )
         channel = ticket_channel(ticket["id"])
         self._joined.add(channel)
-        await self._join(channel)
+        await self._join_channel(channel)
         await self._send_json({"type": "opened", "ticket": ticket})
 
     async def _send_message(self, frame: dict[str, Any], *, internal: bool) -> dict[str, Any]:
@@ -732,7 +679,7 @@ class SupportSocket:
         # second command.
         channel = ticket_channel(ticket_id)
         self._joined.add(channel)
-        await self._join(channel)
+        await self._join_channel(channel)
         return message
 
     async def _send(self, frame: dict[str, Any]) -> None:
@@ -832,6 +779,66 @@ class SupportSocket:
             _text(frame, "comment"),
         )
         await self._send_json({"type": "rated", **result})
+
+    # -- rooms ------------------------------------------------------------
+
+    async def _channels(self, frame: dict[str, Any]) -> None:
+        """Every open channel, joined or not. The only discovery this socket does."""
+        user = self._require_user()
+        found = await sync_to_async(support_service.channels)(user, search=_text(frame, "search"))
+        await self._send_json({"type": "channels", "channels": found})
+
+    async def _create_channel(self, frame: dict[str, Any]) -> None:
+        user = self._require_user()
+        room = await sync_to_async(support_service.create_channel)(
+            user, _text(frame, "name"), slug=_text(frame, "slug"), body=_text(frame, "body")
+        )
+        await self._subscribe_to(room["id"])
+        await self._send_json({"type": "created", "ticket": room})
+
+    async def _create_group(self, frame: dict[str, Any]) -> None:
+        user = self._require_user()
+        members = [_identifier(item, "account") for item in _slugs(frame, "members")]
+        room = await sync_to_async(support_service.create_group)(
+            user, _text(frame, "name"), members, body=_text(frame, "body")
+        )
+        await self._subscribe_to(room["id"])
+        await self._send_json({"type": "created", "ticket": room})
+
+    async def _direct(self, frame: dict[str, Any]) -> None:
+        """The private chat with one other account, opening it only if it is new."""
+        user = self._require_user()
+        room = await sync_to_async(support_service.direct)(
+            user, _identifier(frame.get("account"), "account")
+        )
+        await self._subscribe_to(room["id"])
+        await self._send_json({"type": "created", "ticket": room})
+
+    async def _join(self, frame: dict[str, Any]) -> None:
+        """Join a channel, and start hearing it on this connection in the same round trip."""
+        user = self._require_user()
+        ticket_id = _identifier(frame.get("ticket") or frame.get("id"))
+        participant = await sync_to_async(support_service.join_room)(user, ticket_id)
+        await self._subscribe_to(str(ticket_id))
+        await self._send_json({"type": "joined", "participant": participant})
+
+    async def _leave(self, frame: dict[str, Any]) -> None:
+        user = self._require_user()
+        ticket_id = _identifier(frame.get("ticket") or frame.get("id"))
+        result = await sync_to_async(support_service.leave_room)(user, ticket_id)
+        self._joined.discard(ticket_channel(ticket_id))
+        await self._send_json({"type": "left", **result})
+
+    async def _subscribe_to(self, ticket_id: str) -> None:
+        """Start hearing a room on this connection.
+
+        Called by every command that puts this account into one, so that opening
+        or joining is a single round trip: a client that had to subscribe
+        afterwards would miss whatever was said in between.
+        """
+        channel = ticket_channel(ticket_id)
+        self._joined.add(channel)
+        await self._join_channel(channel)
 
     # -- the desk's own ---------------------------------------------------
 

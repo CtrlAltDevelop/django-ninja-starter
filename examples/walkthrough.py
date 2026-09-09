@@ -4,9 +4,10 @@
     python examples/walkthrough.py
 
 Four login methods, four second factors, four social providers, a token mode,
-the accounts and health endpoints, all three feature apps the starter ships --
-the CMS, notifications with its socket, and the shop from catalogue to settled
-invoice -- the notes app you would write yourself, the audit trail, the
+the accounts and health endpoints, all four feature apps the starter ships --
+the CMS, notifications with its socket, the shop from catalogue to settled
+invoice, and the support desk from both sides of it -- the notes app you would
+write yourself, the audit trail, the
 generated OpenAPI documents, and every admin screen any of them registers. All
 of it printed as a transcript of the calls a real client would make.
 
@@ -300,6 +301,23 @@ class Socket:
         offered = f" {DIM}+{self._label}{OFF}" if self._label else ""
         print(f"  {CYAN}{'WS':<6}{OFF} {self._path}{offered} {GREEN}→ accepted{OFF}")
         return await self.frame("ready")
+
+    async def refused(self) -> dict[str, Any]:
+        """Shake hands expecting to be turned away, and return the close frame.
+
+        The mirror of :meth:`open`: a socket that requires a credential has to
+        be shown refusing one that has none, or the transcript only ever proves
+        the happy path.
+        """
+        self._task = asyncio.ensure_future(
+            self._application(self._scope, self._to_server.get, self._send)
+        )
+        await self._to_server.put({"type": "websocket.connect"})
+        answer = await self._next_message()
+        if answer["type"] != "websocket.close":
+            raise WalkthroughError(f"the socket at {self._path} accepted a connection as nobody")
+        print(f"  {CYAN}{'WS':<6}{OFF} {self._path} {RED}-> refused{OFF}")
+        return answer
 
     async def frame(
         self, expect: str, *, show: bool = True, patient: bool = False
@@ -688,7 +706,7 @@ def section_cms(api: Api) -> None:
         slug="standfirst",
         field_type=FieldType.TEXTAREA,
         order=2,
-        values={"en-us": "Four login methods, three feature apps, one project."},
+        values={"en-us": "Four login methods, four feature apps, one project."},
     )
     Field.objects.create(
         section=hero,
@@ -1602,6 +1620,67 @@ def section_support(api: Api) -> None:
     note("The numbers the desk runs on, which a client is not shown at all.")
     api.get("/api/v1/support/stats", token=desk)
 
+    note(
+        "-- and the same app, used the other way. A ticket is a conversation, "
+        "which is what lets the desk's threads and people talking to each "
+        "other be one socket and one table. Three more kinds, and the rule "
+        "that separates them from everything above is who may read them."
+    )
+
+    note(
+        "A channel is the one thing here anybody signed in may find. Its "
+        "address is refused if it is taken rather than suffixed into "
+        "uniqueness: somebody who asked for `general` and quietly got "
+        "`general-2` has been handed a different room from the one they meant."
+    )
+    channel = api.post(
+        "/api/v1/support/channels",
+        {"name": "Product announcements", "body": "Ship notes go here."},
+        expect=201,
+    )
+
+    note("Found by somebody who is not in it, which is what a channel is for.")
+    api.get("/api/v1/support/channels", token=desk_token(dara))
+
+    note("Joined, and left again. Both idempotent enough for a client that does not keep count.")
+    api.post(
+        f"/api/v1/support/{channel['id']}/join", token=desk_token(dara), expect=201, show=False
+    )
+    api.post(f"/api/v1/support/{channel['id']}/leave", token=desk_token(dara), show=False)
+
+    note(
+        "A group is the opposite: invisible to everybody but its members, and "
+        "the members are named now rather than invited later, because a group "
+        "of one is not a group and the first message should reach somebody."
+    )
+    group = api.post(
+        "/api/v1/support/groups",
+        {"name": "Billing escalations", "members": [str(bruno.pk), str(dara.pk)]},
+        expect=201,
+        show=False,
+    )
+    print(f"  {DIM}| {group['reference']}, 3 members{OFF}")
+
+    note(
+        "A private chat between two accounts, opened by naming the other one. "
+        "The answer is a 200 rather than a 201 because the usual answer is the "
+        "conversation you already had -- the same thread whichever of the two asks."
+    )
+    chat = api.post("/api/v1/support/direct", {"account": str(bruno.pk)}, show=False)
+    again = api.post("/api/v1/support/direct", {"account": str(bruno.pk)}, show=False)
+    print(f"  {DIM}| {chat['reference']}, and asking again returns it{OFF}")
+    if chat["id"] != again["id"]:
+        raise WalkthroughError("opening the same private chat twice made two of them")
+
+    note(
+        "And the rule the whole arrangement rests on: an agent may read every "
+        "ticket in the building, and none of these. `is_staff` answers the "
+        "desk's queue, never somebody's private conversation."
+    )
+    api.get(f"/api/v1/support/{group['id']}", token=desk, expect=404, show=False)
+    api.get(f"/api/v1/support/{chat['id']}", token=desk, expect=404, show=False)
+    print(f"  {DIM}| the group and the private chat are both 404 to the desk{OFF}")
+
     asyncio.run(_support_socket(api, desk, bruno, dara))
 
     _support_surface_covered(api)
@@ -1668,38 +1747,15 @@ async def _support_socket(api: Api, desk: str, bruno: Any, dara: Any) -> None:
     path = settings.SUPPORT_WS_PATH
 
     note(
-        "This socket is useless before it is authenticated, and that is the "
-        "design: unlike the notification one it has no public traffic to "
-        "deliver. Every frame belongs to a named conversation."
+        "This socket admits nobody it cannot name. Unlike the notification "
+        "one it has no public traffic to deliver -- every frame belongs to a "
+        "named conversation -- so a handshake with no credential is closed "
+        "rather than accepted. A page that opened a socket which then said "
+        "nothing would be a bug nobody reports; a refused upgrade is one they do."
     )
     async with Socket(path) as anonymous:
-        ready = await anonymous.open()
-        if ready["authenticated"]:
-            raise WalkthroughError("the support socket accepted a connection as somebody")
-        await anonymous.command({"command": "tickets"}, "error")
-
-        note(
-            "Naming yourself in the handshake is one way in; this is the "
-            "other, for a page that opened the socket before the sign-in "
-            "finished. `whoami` is how a client that reconnected asks which "
-            "of the two it turned out to be."
-        )
-        await anonymous.command({"command": "whoami"}, "whoami", show=False)
-        await anonymous.command(
-            {"command": "authenticate", "token": api.token}, "authenticated", show=False
-        )
-        signed_in = await anonymous.command({"command": "whoami"}, "whoami", show=False)
-        if not signed_in["authenticated"]:
-            raise WalkthroughError("the socket stayed anonymous after authenticating")
-
-        note(
-            "And back out again without dropping the connection, which is what "
-            "a shared browser signing out needs: the account is forgotten "
-            "immediately, and the credential itself stays the auth app's to "
-            "revoke."
-        )
-        await anonymous.command({"command": "deauthenticate"}, "deauthenticated", show=False)
-        await anonymous.command({"command": "tickets"}, "error", show=False)
+        refusal = await anonymous.refused()
+        print(f"  {DIM}│ closed with {refusal['code']}, before any accept{OFF}")
 
     note(
         "Two connections now, one each side of the desk, both authenticated in "
@@ -1919,6 +1975,67 @@ async def _support_socket(api: Api, desk: str, bruno: Any, dara: Any) -> None:
 
         note("-- and the proof is that the connection is still answering.")
         await client.command({"command": "ping"}, "pong", show=False, patient=True)
+
+        note(
+            "Who this connection belongs to. Worth asking after a sleep, and "
+            "now it always has an answer: there is no signed-out state left."
+        )
+        await client.command({"command": "whoami"}, "whoami", show=False, patient=True)
+        await client.command({"command": "tickets"}, "tickets", show=False, patient=True)
+
+        note(
+            "-- and the rooms, on this same connection. One socket carries the "
+            "desk's threads, the channels you are in, your groups and your "
+            "private chats, because they are one table and one subscription "
+            "model. A client renders four lists off one connection."
+        )
+        made = await client.command(
+            {"command": "create_channel", "name": "Release notes", "body": "2.0 is out."},
+            "created",
+            show=False,
+            patient=True,
+        )
+        room = made["ticket"]["id"]
+        print(f"  {DIM}| {made['ticket']['reference']} #release-notes{OFF}")
+
+        note("Creating subscribes you in the same round trip, so nothing said next is missed.")
+        await client.command(
+            {"command": "send", "ticket": room, "body": "Notes below."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+
+        note("The desk is somebody signed in like anybody else, so it can find and join one.")
+        await agent.command({"command": "channels"}, "channels", show=False, patient=True)
+        await agent.command({"command": "join", "ticket": room}, "joined", show=False, patient=True)
+
+        note("And hears what is said in it without asking for anything.")
+        await client.command(
+            {"command": "send", "ticket": room, "body": "Anyone reading?"},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        heard = await agent.frame("message", show=False, patient=True)
+        print(f"  {DIM}| the desk heard: {heard['message']['body']}{OFF}")
+        await agent.command({"command": "leave", "ticket": room}, "left", show=False, patient=True)
+
+        note(
+            "A group, made with its members, and a private chat named by the "
+            "other account. Both are invisible to everybody outside them -- "
+            "which on this socket means the frames are never published to a "
+            "connection that is not in the room."
+        )
+        await client.command(
+            {"command": "create_group", "name": "Weekend cover", "members": [str(dara.pk)]},
+            "created",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {"command": "direct", "account": str(dara.pk)}, "created", show=False, patient=True
+        )
 
 
 def section_email_code(api: Api) -> None:

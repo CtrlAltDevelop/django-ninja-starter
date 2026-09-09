@@ -23,6 +23,7 @@ from apps.support.grpc.serializers import (
     Account,
     CannedReply,
     Category,
+    Channel,
     Message,
     Participant,
     Tag,
@@ -135,6 +136,7 @@ def _ticket_fields(row: dict[str, Any]) -> dict[str, Any]:
         "reference": row["reference"],
         "kind": row["kind"],
         "subject": row["subject"],
+        "slug": row.get("slug", ""),
         "status": row["status"],
         "priority": row["priority"],
         "client": _account(row["client"]),
@@ -725,6 +727,111 @@ class SupportService(generics.GenericService):
             support_service.typing, user, _identifier(request.ticket_id), request.typing
         )
         return _pb2().TypingResult(**result)
+
+    # -- rooms ------------------------------------------------------------
+
+    @grpc_action(
+        request=[{"name": "search", "type": "string"}],
+        request_name="ChannelsRequest",
+        response=[{"name": "channels", "cardinality": "repeated", "type": Channel}],
+        response_name="ChannelList",
+    )
+    @action
+    async def Channels(self, request: Any, context: Any) -> Any:
+        """Every open channel, joined or not. The one listing that shows you a
+        room you are not already in."""
+        user = require_caller(await grpc_caller(context))
+        rows = await _call(support_service.channels, user, search=request.search)
+        return _pb2().ChannelList(
+            channels=[
+                _pb2().Channel(**_ticket_fields(row), joined=row["joined"], members=row["members"])
+                for row in rows
+            ]
+        )
+
+    @grpc_action(
+        request=[
+            {"name": "name", "type": "string"},
+            {"name": "slug", "type": "string"},
+            {"name": "body", "type": "string"},
+        ],
+        request_name="CreateChannelRequest",
+        response=Ticket,
+        response_name="Ticket",
+    )
+    @action
+    async def CreateChannel(self, request: Any, context: Any) -> Any:
+        user = require_caller(await grpc_caller(context))
+        row = await _call(
+            support_service.create_channel,
+            user,
+            request.name,
+            slug=request.slug,
+            body=request.body,
+        )
+        return _ticket(row)
+
+    @grpc_action(
+        request=[
+            {"name": "name", "type": "string"},
+            {"name": "members", "cardinality": "repeated", "type": "string"},
+            {"name": "body", "type": "string"},
+        ],
+        request_name="CreateGroupRequest",
+        response=Ticket,
+        response_name="Ticket",
+    )
+    @action
+    async def CreateGroup(self, request: Any, context: Any) -> Any:
+        user = require_caller(await grpc_caller(context))
+        row = await _call(
+            support_service.create_group,
+            user,
+            request.name,
+            [_identifier(member, "account") for member in request.members],
+            body=request.body,
+        )
+        return _ticket(row)
+
+    @grpc_action(
+        request=[{"name": "account", "type": "string"}],
+        request_name="DirectRequest",
+        response=Ticket,
+        response_name="Ticket",
+    )
+    @action
+    async def Direct(self, request: Any, context: Any) -> Any:
+        """The private chat with one account, or the one that already existed."""
+        user = require_caller(await grpc_caller(context))
+        row = await _call(support_service.direct, user, _identifier(request.account, "account"))
+        return _ticket(row)
+
+    @grpc_action(
+        request=TICKET_REQUEST,
+        request_name="JoinRequest",
+        response=Participant,
+        response_name="JoinedParticipant",
+    )
+    @action
+    async def Join(self, request: Any, context: Any) -> Any:
+        user = require_caller(await grpc_caller(context))
+        row = await _call(support_service.join_room, user, _identifier(request.ticket_id))
+        return _pb2().JoinedParticipant(**_participant(row))
+
+    @grpc_action(
+        request=TICKET_REQUEST,
+        request_name="LeaveRequest",
+        response=[
+            {"name": "ticket", "type": "string"},
+            {"name": "left", "type": "bool"},
+        ],
+        response_name="LeaveResult",
+    )
+    @action
+    async def Leave(self, request: Any, context: Any) -> Any:
+        user = require_caller(await grpc_caller(context))
+        result = await _call(support_service.leave_room, user, _identifier(request.ticket_id))
+        return _pb2().LeaveResult(**result)
 
 
 GRPC_SERVICES = [SupportService]

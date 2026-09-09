@@ -353,6 +353,139 @@ class CategoryRefResponse(_message.Message):
 Global___CategoryRefResponse: _TypeAlias = CategoryRefResponse  # noqa: Y015
 
 @_typing.final
+class Channel(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ID_FIELD_NUMBER: _builtins.int
+    REFERENCE_FIELD_NUMBER: _builtins.int
+    KIND_FIELD_NUMBER: _builtins.int
+    SUBJECT_FIELD_NUMBER: _builtins.int
+    SLUG_FIELD_NUMBER: _builtins.int
+    STATUS_FIELD_NUMBER: _builtins.int
+    PRIORITY_FIELD_NUMBER: _builtins.int
+    CLIENT_FIELD_NUMBER: _builtins.int
+    ASSIGNEE_FIELD_NUMBER: _builtins.int
+    CATEGORY_FIELD_NUMBER: _builtins.int
+    TAGS_FIELD_NUMBER: _builtins.int
+    DATA_JSON_FIELD_NUMBER: _builtins.int
+    CREATED_AT_FIELD_NUMBER: _builtins.int
+    UPDATED_AT_FIELD_NUMBER: _builtins.int
+    LAST_MESSAGE_AT_FIELD_NUMBER: _builtins.int
+    RESOLVED_AT_FIELD_NUMBER: _builtins.int
+    CLOSED_AT_FIELD_NUMBER: _builtins.int
+    RATING_FIELD_NUMBER: _builtins.int
+    RATING_COMMENT_FIELD_NUMBER: _builtins.int
+    SLA_FIELD_NUMBER: _builtins.int
+    UNREAD_FIELD_NUMBER: _builtins.int
+    PARTICIPANTS_FIELD_NUMBER: _builtins.int
+    JOINED_FIELD_NUMBER: _builtins.int
+    MEMBERS_FIELD_NUMBER: _builtins.int
+    id: _builtins.str
+    reference: _builtins.str
+    kind: _builtins.str
+    subject: _builtins.str
+    slug: _builtins.str
+    status: _builtins.str
+    priority: _builtins.str
+    data_json: _builtins.str
+    created_at: _builtins.str
+    updated_at: _builtins.str
+    last_message_at: _builtins.str
+    resolved_at: _builtins.str
+    closed_at: _builtins.str
+    rating: _builtins.int
+    rating_comment: _builtins.str
+    unread: _builtins.int
+    joined: _builtins.bool
+    members: _builtins.int
+    @_builtins.property
+    def client(self) -> Global___Account: ...
+    @_builtins.property
+    def assignee(self) -> Global___Account: ...
+    @_builtins.property
+    def category(self) -> Global___CategoryRef: ...
+    @_builtins.property
+    def tags(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]: ...
+    @_builtins.property
+    def sla(self) -> Global___Sla: ...
+    @_builtins.property
+    def participants(self) -> _containers.RepeatedCompositeFieldContainer[Global___Participant]: ...
+    def __init__(
+        self,
+        *,
+        id: _builtins.str = ...,
+        reference: _builtins.str = ...,
+        kind: _builtins.str = ...,
+        subject: _builtins.str = ...,
+        slug: _builtins.str = ...,
+        status: _builtins.str = ...,
+        priority: _builtins.str = ...,
+        client: Global___Account | None = ...,
+        assignee: Global___Account | None = ...,
+        category: Global___CategoryRef | None = ...,
+        tags: _abc.Iterable[_builtins.str] | None = ...,
+        data_json: _builtins.str = ...,
+        created_at: _builtins.str = ...,
+        updated_at: _builtins.str = ...,
+        last_message_at: _builtins.str = ...,
+        resolved_at: _builtins.str = ...,
+        closed_at: _builtins.str = ...,
+        rating: _builtins.int = ...,
+        rating_comment: _builtins.str = ...,
+        sla: Global___Sla | None = ...,
+        unread: _builtins.int = ...,
+        participants: _abc.Iterable[Global___Participant] | None = ...,
+        joined: _builtins.bool = ...,
+        members: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "sla", b"sla"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "closed_at", b"closed_at", "created_at", b"created_at", "data_json", b"data_json", "id", b"id", "joined", b"joined", "kind", b"kind", "last_message_at", b"last_message_at", "members", b"members", "participants", b"participants", "priority", b"priority", "rating", b"rating", "rating_comment", b"rating_comment", "reference", b"reference", "resolved_at", b"resolved_at", "sla", b"sla", "slug", b"slug", "status", b"status", "subject", b"subject", "tags", b"tags", "unread", b"unread", "updated_at", b"updated_at"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___Channel: _TypeAlias = Channel  # noqa: Y015
+
+@_typing.final
+class ChannelList(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    CHANNELS_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def channels(self) -> _containers.RepeatedCompositeFieldContainer[Global___Channel]: ...
+    def __init__(
+        self,
+        *,
+        channels: _abc.Iterable[Global___Channel] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["channels", b"channels"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ChannelList: _TypeAlias = ChannelList  # noqa: Y015
+
+@_typing.final
+class ChannelsRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SEARCH_FIELD_NUMBER: _builtins.int
+    search: _builtins.str
+    def __init__(
+        self,
+        *,
+        search: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["search", b"search"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ChannelsRequest: _TypeAlias = ChannelsRequest  # noqa: Y015
+
+@_typing.final
 class ClaimRequest(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
@@ -462,6 +595,57 @@ class CountResult(_message.Message):
 Global___CountResult: _TypeAlias = CountResult  # noqa: Y015
 
 @_typing.final
+class CreateChannelRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NAME_FIELD_NUMBER: _builtins.int
+    SLUG_FIELD_NUMBER: _builtins.int
+    BODY_FIELD_NUMBER: _builtins.int
+    name: _builtins.str
+    slug: _builtins.str
+    body: _builtins.str
+    def __init__(
+        self,
+        *,
+        name: _builtins.str = ...,
+        slug: _builtins.str = ...,
+        body: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["body", b"body", "name", b"name", "slug", b"slug"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___CreateChannelRequest: _TypeAlias = CreateChannelRequest  # noqa: Y015
+
+@_typing.final
+class CreateGroupRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NAME_FIELD_NUMBER: _builtins.int
+    MEMBERS_FIELD_NUMBER: _builtins.int
+    BODY_FIELD_NUMBER: _builtins.int
+    name: _builtins.str
+    body: _builtins.str
+    @_builtins.property
+    def members(self) -> _containers.RepeatedScalarFieldContainer[_builtins.str]: ...
+    def __init__(
+        self,
+        *,
+        name: _builtins.str = ...,
+        members: _abc.Iterable[_builtins.str] | None = ...,
+        body: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["body", b"body", "members", b"members", "name", b"name"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___CreateGroupRequest: _TypeAlias = CreateGroupRequest  # noqa: Y015
+
+@_typing.final
 class DeleteRequest(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
@@ -530,6 +714,25 @@ class DeletedMessage(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___DeletedMessage: _TypeAlias = DeletedMessage  # noqa: Y015
+
+@_typing.final
+class DirectRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ACCOUNT_FIELD_NUMBER: _builtins.int
+    account: _builtins.str
+    def __init__(
+        self,
+        *,
+        account: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["account", b"account"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___DirectRequest: _TypeAlias = DirectRequest  # noqa: Y015
 
 @_typing.final
 class EditRequest(_message.Message):
@@ -679,6 +882,98 @@ class InvitedParticipant(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___InvitedParticipant: _TypeAlias = InvitedParticipant  # noqa: Y015
+
+@_typing.final
+class JoinRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    TICKET_ID_FIELD_NUMBER: _builtins.int
+    ticket_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        ticket_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["ticket_id", b"ticket_id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___JoinRequest: _TypeAlias = JoinRequest  # noqa: Y015
+
+@_typing.final
+class JoinedParticipant(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    USER_FIELD_NUMBER: _builtins.int
+    ROLE_FIELD_NUMBER: _builtins.int
+    JOINED_AT_FIELD_NUMBER: _builtins.int
+    LAST_READ_AT_FIELD_NUMBER: _builtins.int
+    NOTIFY_FIELD_NUMBER: _builtins.int
+    role: _builtins.str
+    joined_at: _builtins.str
+    last_read_at: _builtins.str
+    notify: _builtins.bool
+    @_builtins.property
+    def user(self) -> Global___AccountResponse: ...
+    def __init__(
+        self,
+        *,
+        user: Global___AccountResponse | None = ...,
+        role: _builtins.str = ...,
+        joined_at: _builtins.str = ...,
+        last_read_at: _builtins.str = ...,
+        notify: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["user", b"user"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["joined_at", b"joined_at", "last_read_at", b"last_read_at", "notify", b"notify", "role", b"role", "user", b"user"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___JoinedParticipant: _TypeAlias = JoinedParticipant  # noqa: Y015
+
+@_typing.final
+class LeaveRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    TICKET_ID_FIELD_NUMBER: _builtins.int
+    ticket_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        ticket_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["ticket_id", b"ticket_id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___LeaveRequest: _TypeAlias = LeaveRequest  # noqa: Y015
+
+@_typing.final
+class LeaveResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    TICKET_FIELD_NUMBER: _builtins.int
+    LEFT_FIELD_NUMBER: _builtins.int
+    ticket: _builtins.str
+    left: _builtins.bool
+    def __init__(
+        self,
+        *,
+        ticket: _builtins.str = ...,
+        left: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["left", b"left", "ticket", b"ticket"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___LeaveResult: _TypeAlias = LeaveResult  # noqa: Y015
 
 @_typing.final
 class ListRequest(_message.Message):
@@ -910,6 +1205,7 @@ class OpenedTicket(_message.Message):
     SLA_FIELD_NUMBER: _builtins.int
     UNREAD_FIELD_NUMBER: _builtins.int
     PARTICIPANTS_FIELD_NUMBER: _builtins.int
+    SLUG_FIELD_NUMBER: _builtins.int
     id: _builtins.str
     reference: _builtins.str
     kind: _builtins.str
@@ -925,6 +1221,7 @@ class OpenedTicket(_message.Message):
     rating: _builtins.int
     rating_comment: _builtins.str
     unread: _builtins.int
+    slug: _builtins.str
     @_builtins.property
     def client(self) -> Global___AccountResponse: ...
     @_builtins.property
@@ -961,10 +1258,11 @@ class OpenedTicket(_message.Message):
         sla: Global___SlaResponse | None = ...,
         unread: _builtins.int = ...,
         participants: _abc.Iterable[Global___ParticipantResponse] | None = ...,
+        slug: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "sla", b"sla"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "closed_at", b"closed_at", "created_at", b"created_at", "data_json", b"data_json", "id", b"id", "kind", b"kind", "last_message_at", b"last_message_at", "participants", b"participants", "priority", b"priority", "rating", b"rating", "rating_comment", b"rating_comment", "reference", b"reference", "resolved_at", b"resolved_at", "sla", b"sla", "status", b"status", "subject", b"subject", "tags", b"tags", "unread", b"unread", "updated_at", b"updated_at"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "closed_at", b"closed_at", "created_at", b"created_at", "data_json", b"data_json", "id", b"id", "kind", b"kind", "last_message_at", b"last_message_at", "participants", b"participants", "priority", b"priority", "rating", b"rating", "rating_comment", b"rating_comment", "reference", b"reference", "resolved_at", b"resolved_at", "sla", b"sla", "slug", b"slug", "status", b"status", "subject", b"subject", "tags", b"tags", "unread", b"unread", "updated_at", b"updated_at"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -1550,6 +1848,7 @@ class Ticket(_message.Message):
     SLA_FIELD_NUMBER: _builtins.int
     UNREAD_FIELD_NUMBER: _builtins.int
     PARTICIPANTS_FIELD_NUMBER: _builtins.int
+    SLUG_FIELD_NUMBER: _builtins.int
     id: _builtins.str
     reference: _builtins.str
     kind: _builtins.str
@@ -1565,6 +1864,7 @@ class Ticket(_message.Message):
     rating: _builtins.int
     rating_comment: _builtins.str
     unread: _builtins.int
+    slug: _builtins.str
     @_builtins.property
     def client(self) -> Global___AccountResponse: ...
     @_builtins.property
@@ -1601,10 +1901,11 @@ class Ticket(_message.Message):
         sla: Global___SlaResponse | None = ...,
         unread: _builtins.int = ...,
         participants: _abc.Iterable[Global___ParticipantResponse] | None = ...,
+        slug: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "sla", b"sla"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "closed_at", b"closed_at", "created_at", b"created_at", "data_json", b"data_json", "id", b"id", "kind", b"kind", "last_message_at", b"last_message_at", "participants", b"participants", "priority", b"priority", "rating", b"rating", "rating_comment", b"rating_comment", "reference", b"reference", "resolved_at", b"resolved_at", "sla", b"sla", "status", b"status", "subject", b"subject", "tags", b"tags", "unread", b"unread", "updated_at", b"updated_at"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["assignee", b"assignee", "category", b"category", "client", b"client", "closed_at", b"closed_at", "created_at", b"created_at", "data_json", b"data_json", "id", b"id", "kind", b"kind", "last_message_at", b"last_message_at", "participants", b"participants", "priority", b"priority", "rating", b"rating", "rating_comment", b"rating_comment", "reference", b"reference", "resolved_at", b"resolved_at", "sla", b"sla", "slug", b"slug", "status", b"status", "subject", b"subject", "tags", b"tags", "unread", b"unread", "updated_at", b"updated_at"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

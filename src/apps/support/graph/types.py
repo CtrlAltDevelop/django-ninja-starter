@@ -16,6 +16,7 @@ build a schema with two types of one name. The Python names stay short because
 inside this package there is nothing to collide with.
 """
 
+import dataclasses
 from typing import Any
 
 import strawberry
@@ -112,6 +113,7 @@ class TicketType:
     reference: str
     kind: str
     subject: str
+    slug: str
     status: str
     priority: str
     client: AccountType | None
@@ -129,6 +131,20 @@ class TicketType:
     sla: SlaType
     unread: int
     participants: list[ParticipantType]
+
+
+@strawberry.type(name="SupportChannel")
+class ChannelType(TicketType):
+    """A channel as it appears in the directory: a thread, plus your relation to it."""
+
+    joined: bool
+    members: int
+
+
+@strawberry.type(name="SupportLeft")
+class LeftType:
+    ticket: str
+    left: bool
 
 
 @strawberry.type(name="SupportTicketPage")
@@ -305,6 +321,7 @@ def ticket_type(row: dict[str, Any]) -> TicketType:
         reference=row["reference"],
         kind=row["kind"],
         subject=row["subject"],
+        slug=row.get("slug", ""),
         status=row["status"],
         priority=row["priority"],
         client=account_type(row["client"]),
@@ -322,6 +339,16 @@ def ticket_type(row: dict[str, Any]) -> TicketType:
         sla=sla_type(row["sla"]),
         unread=row.get("unread", 0),
         participants=[participant_type(item) for item in row.get("participants", [])],
+    )
+
+
+def channel_type(row: dict[str, Any]) -> ChannelType:
+    """A directory row, built off the ordinary ticket one so the two cannot drift."""
+    base = ticket_type(row)
+    return ChannelType(
+        **{field.name: getattr(base, field.name) for field in dataclasses.fields(base)},
+        joined=row["joined"],
+        members=row["members"],
     )
 
 

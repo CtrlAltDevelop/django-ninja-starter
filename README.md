@@ -92,6 +92,15 @@ top bar lets you select any registered API version, and
 ReDoc has no selector, so each version is its own page -- `/api/v1/redoc` -- and
 Swagger links across to whichever one its top bar is showing.
 
+> **Four groups are missing from that page on purpose.** A generated project ships
+> the feature apps — `cms`, `notifications`, `shop`, `support` — turned **off**, so
+> none of them has tables, routes or an admin until you name it. Set
+> `DJANGO_CMS_ENABLED=true`, `DJANGO_NOTIFICATIONS_ENABLED=true`,
+> `DJANGO_SHOP_ENABLED=true` or `DJANGO_SUPPORT_ENABLED=true` in your `.env`, run
+> `make migrate`, and restart — the group appears in `/api/docs`. This repository's
+> own `.env.example` has all four on, because reading the starter means seeing all
+> of it.
+
 If you are signed into the admin as a staff user, the page authorises itself:
 under every token mode but `none` the API reads `Authorization` and ignores
 cookies, so an admin session would otherwise get a `401` from **Try it out**. The
@@ -151,9 +160,11 @@ generates it.
 
 ```text
 src/
-├── apps/                   # Feature applications: yours, and the two that ship
+├── apps/                   # Feature applications: yours, and the four that ship
 │   ├── cms/                # Pages, sections and typed multilingual content
-│   └── notifications/      # Stored notifications, a read API, and a WebSocket
+│   ├── notifications/      # Stored notifications, a read API, and a WebSocket
+│   ├── shop/               # Catalogue, basket, orders, invoices and payments
+│   └── support/            # Live chat and tickets as one conversation
 ├── infrastructure/
 │   ├── common/             # Project-owned foundation application
 │   ├── accounts/           # The user model and the profile attached to it
@@ -379,7 +390,7 @@ another Django project or deleted from this one without leaving a hole.
 | --- | --- | --- |
 | [`cms`](docs/cms.md) | `DJANGO_CMS_ENABLED=true` | Pages made of sections made of typed, translatable fields; a library of shared sections; menus; drafts, schedules and signed preview links; export/import for moving content between environments; and a content-editing admin screen separate from the structural one |
 | [`notifications`](docs/notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | A notification table addressed to one account or to everybody; per-account read and dismiss receipts, so a broadcast is read and cleared by each person separately; a scoped read API with the same surface over REST, GraphQL, gRPC and a WebSocket that pushes new ones on save and keeps a second device in step; and a retention command |
-| [`support`](docs/support.md) | `DJANGO_SUPPORT_ENABLED=true` | Live chat and support tickets as one thing, because a ticket is a conversation: threads either side can open, staff-only notes in the same thread, attachments, categories that carry the SLA the ticket is held to, a queue with assignment, priorities and tags, read state per participant, and the whole surface over REST, GraphQL, gRPC and a WebSocket that carries every conversation an account is in |
+| [`support`](docs/support.md) | `DJANGO_SUPPORT_ENABLED=true` | Chat and support tickets as one thing, because a ticket is a conversation: live chat and filed tickets with staff-only notes, attachments, SLA-carrying categories, a queue with assignment, priorities and tags — plus open **channels**, private **groups** and one-to-one **direct messages** that staff have no more right to read than anyone else. Read state per participant, and one authenticated WebSocket carrying every conversation an account is in |
 | [`shop`](docs/shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare the attributes their products answer; products, variants and stock; timed discount campaigns; search, filters and named listings; reviews and likes; a basket per account; a saved address book and delivery options costed against that basket; and an order, coupon and payment cycle that reserves stock when the order is placed |
 
 All four are toured end to end by `python examples/walkthrough.py`, which calls

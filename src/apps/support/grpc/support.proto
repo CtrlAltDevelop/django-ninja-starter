@@ -8,12 +8,18 @@ service SupportController {
     rpc Assign(AssignRequest) returns (AssignResult) {}
     rpc Canned(CannedRequest) returns (CannedList) {}
     rpc Categories(google.protobuf.Empty) returns (CategoryList) {}
+    rpc Channels(ChannelsRequest) returns (ChannelList) {}
     rpc Claim(ClaimRequest) returns (ClaimResult) {}
     rpc Count(CountRequest) returns (CountResult) {}
+    rpc CreateChannel(CreateChannelRequest) returns (Ticket) {}
+    rpc CreateGroup(CreateGroupRequest) returns (Ticket) {}
     rpc Delete(DeleteRequest) returns (DeletedMessage) {}
+    rpc Direct(DirectRequest) returns (Ticket) {}
     rpc Edit(EditRequest) returns (EditedMessage) {}
     rpc Get(GetRequest) returns (Ticket) {}
     rpc Invite(InviteRequest) returns (InvitedParticipant) {}
+    rpc Join(JoinRequest) returns (JoinedParticipant) {}
+    rpc Leave(LeaveRequest) returns (LeaveResult) {}
     rpc List(ListRequest) returns (TicketList) {}
     rpc Messages(MessagesRequest) returns (MessageList) {}
     rpc Open(OpenRequest) returns (OpenedTicket) {}
@@ -110,6 +116,41 @@ message CategoryRefResponse {
     string slug = 3;
 }
 
+message Channel {
+    string id = 1;
+    string reference = 2;
+    string kind = 3;
+    string subject = 4;
+    string slug = 5;
+    string status = 6;
+    string priority = 7;
+    Account client = 8;
+    Account assignee = 9;
+    CategoryRef category = 10;
+    repeated string tags = 11;
+    string data_json = 12;
+    string created_at = 13;
+    string updated_at = 14;
+    string last_message_at = 15;
+    string resolved_at = 16;
+    string closed_at = 17;
+    int32 rating = 18;
+    string rating_comment = 19;
+    Sla sla = 20;
+    int32 unread = 21;
+    repeated Participant participants = 22;
+    bool joined = 23;
+    int32 members = 24;
+}
+
+message ChannelList {
+    repeated Channel channels = 1;
+}
+
+message ChannelsRequest {
+    string search = 1;
+}
+
 message ClaimRequest {
     string ticket_id = 1;
 }
@@ -136,6 +177,18 @@ message CountResult {
     int32 count = 1;
 }
 
+message CreateChannelRequest {
+    string name = 1;
+    string slug = 2;
+    string body = 3;
+}
+
+message CreateGroupRequest {
+    string name = 1;
+    repeated string members = 2;
+    string body = 3;
+}
+
 message DeleteRequest {
     string message_id = 1;
 }
@@ -152,6 +205,10 @@ message DeletedMessage {
     string created_at = 9;
     string edited_at = 10;
     bool deleted = 11;
+}
+
+message DirectRequest {
+    string account = 1;
 }
 
 message EditRequest {
@@ -189,6 +246,27 @@ message InvitedParticipant {
     string joined_at = 3;
     string last_read_at = 4;
     bool notify = 5;
+}
+
+message JoinRequest {
+    string ticket_id = 1;
+}
+
+message JoinedParticipant {
+    AccountResponse user = 1;
+    string role = 2;
+    string joined_at = 3;
+    string last_read_at = 4;
+    bool notify = 5;
+}
+
+message LeaveRequest {
+    string ticket_id = 1;
+}
+
+message LeaveResult {
+    string ticket = 1;
+    bool left = 2;
 }
 
 message ListRequest {
@@ -266,6 +344,7 @@ message OpenedTicket {
     SlaResponse sla = 19;
     int32 unread = 20;
     repeated ParticipantResponse participants = 21;
+    string slug = 22;
 }
 
 message Participant {
@@ -428,6 +507,7 @@ message Ticket {
     SlaResponse sla = 19;
     int32 unread = 20;
     repeated ParticipantResponse participants = 21;
+    string slug = 22;
 }
 
 message TicketList {

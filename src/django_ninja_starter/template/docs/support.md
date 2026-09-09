@@ -17,21 +17,45 @@ That one decision is the whole design, and it is what lets live chat and a
 formal support ticket be one app rather than two that have to be kept in step.
 
 A **ticket** is a thread. A **message** is something somebody said in it. `kind`
-says which of the two ways the thread is being used:
+says what the thread is, and there are five of them in two families:
 
-| `kind` | What it means | What it has |
+| `kind` | What it means | Who can see it |
 | --- | --- | --- |
-| `chat` | Somebody opened a widget and expects an answer now | Usually no subject, no category, no deadline |
-| `ticket` | A filed problem with a paper trail | A subject, a category, and the deadlines that category promised |
+| `chat` | Somebody opened a widget and expects an answer now | The people in it, and all staff |
+| `ticket` | A filed problem with a paper trail | The people in it, and all staff |
+| `channel` | An open room anybody signed in may find and join | Anybody signed in |
+| `group` | A private room created with its members | Its members only |
+| `direct` | A private chat between exactly two accounts | Those two only |
 
 Nothing about the storage differs between them. A chat that turns out to be a
 real problem is **promoted** by giving it a subject and a category — not by
 copying rows into another table, which is the version of this that goes wrong.
 
-There are two sides, and the difference between them is `is_staff`. A client
-sees the conversations they are in and nothing else; the desk sees the queue.
-Every rule about who may do what is decided once, in `services.py`, so the four
-transports cannot disagree about who may close a ticket or read a note.
+### The desk, and the rooms
+
+The first two are **desk kinds**: somebody talking to the organisation. Staff
+see every one of them, because working the queue is the job, and that is what
+`is_staff` buys.
+
+The last three are **rooms**: people talking to each other. Staff have no
+standing in them whatsoever. A support agent is not entitled to read a private
+message between two customers because their account has a flag set — a desk that
+could do that would be a surveillance tool with a help widget attached. So:
+
+- a group and a direct message are visible to their members and to nobody else,
+  staff included, and an id somebody guessed is answered with a 404;
+- a channel is visible to anybody signed in, because a room nobody can find is
+  a room nobody can join;
+- the desk's own verbs — claim, assign, prioritise, tag, rate — refuse a room
+  outright, so a channel can never land in an agent's queue;
+- the queue and your own thread list never include a channel you have not
+  joined. `GET /support/channels` is the only listing in the app that shows you
+  something you are not already part of.
+
+`TicketQuerySet.visible_to` is the single place this line is drawn, and
+`listed_for` the single place the narrower "what is in my list" question is
+answered. Every rule about who may do what is decided once, in `services.py`, so
+the transports cannot disagree about who may close a ticket or read a note.
 
 ## Routes
 
@@ -42,6 +66,10 @@ transports cannot disagree about who may close a ticket or read a note.
 | `POST` | `/api/v1/support` | Bearer | Open a conversation |
 | `GET` | `/api/v1/support/canned-replies` | Bearer | List the desk's saved replies |
 | `GET` | `/api/v1/support/categories` | Bearer | List what a ticket can be about |
+| `GET` | `/api/v1/support/channels` | Bearer | List the open channels |
+| `POST` | `/api/v1/support/channels` | Bearer | Open a channel |
+| `POST` | `/api/v1/support/direct` | Bearer | Open a private chat |
+| `POST` | `/api/v1/support/groups` | Bearer | Open a private group |
 | `DELETE` | `/api/v1/support/messages/{message_id}` | Bearer | Retract a message |
 | `PATCH` | `/api/v1/support/messages/{message_id}` | Bearer | Rewrite your own message |
 | `GET` | `/api/v1/support/stats` | Bearer | The numbers the desk runs on |
@@ -52,6 +80,8 @@ transports cannot disagree about who may close a ticket or read a note.
 | `POST` | `/api/v1/support/{ticket_id}/assign` | Bearer | Give a conversation to an agent |
 | `POST` | `/api/v1/support/{ticket_id}/claim` | Bearer | Take a conversation yourself |
 | `POST` | `/api/v1/support/{ticket_id}/close` | Bearer | Close a conversation |
+| `POST` | `/api/v1/support/{ticket_id}/join` | Bearer | Join a channel |
+| `POST` | `/api/v1/support/{ticket_id}/leave` | Bearer | Leave a room |
 | `GET` | `/api/v1/support/{ticket_id}/messages` | Bearer | Read a conversation's messages |
 | `POST` | `/api/v1/support/{ticket_id}/messages` | Bearer | Say something in a conversation |
 | `POST` | `/api/v1/support/{ticket_id}/notes` | Bearer | Leave a staff-only note |
@@ -74,7 +104,13 @@ The same surface is published four ways — these endpoints, the
 [socket](#the-socket-protocol), GraphQL and gRPC — under the same names, with
 the same arguments and the same replies, and refusals carry the same titles
 everywhere, so a client that has learned what `NOT_FOUND` means from one
-transport does not learn it again from another.
+transport does not learn it again from another. That includes the rooms:
+`channels`, `create_channel`, `create_group`, `direct`, `join` and `leave` exist
+on all four, as `supportChannels` / `createSupportChannel` / `createSupportGroup`
+/ `openSupportDirect` / `joinSupportRoom` / `leaveSupportRoom` in GraphQL and as
+`Channels` / `CreateChannel` / `CreateGroup` / `Direct` / `Join` / `Leave` in
+gRPC. The visibility rules live in `services.py`, so a group is a 404 to the
+desk whichever door it knocks on.
 
 ### An API walkthrough
 
@@ -228,21 +264,27 @@ socket that was never mounted.
 
 ## The socket protocol
 
-**This socket is useless before it is authenticated, and that is deliberate.**
-The notification socket accepts anonymous connections because it has genuinely
-public traffic to deliver. This one has none: every frame it sends belongs to a
-named conversation between a named client and the desk. So the handshake is
-accepted without a credential — a page can open the socket while its token is
-still being fetched — and every command but `ping`, `authenticate`, `whoami` and
-`deauthenticate` is refused with `AUTHENTICATION_REQUIRED` until one arrives.
+**This socket admits nobody it cannot name.** The notification socket accepts
+anonymous connections because it has genuinely public traffic to deliver. This
+one has none: every frame it sends belongs to a named conversation — a client
+and the desk, a private chat, a group, or a channel somebody joined. So a
+handshake carrying no usable credential is **closed rather than accepted**, with
+close code `1008`, before any accept. An ASGI server turns that into an HTTP 403
+on the upgrade, so the client sees a failure instead of a socket that opens and
+never speaks.
 
-Credentials in the handshake are honoured in the same four places, and in the
-same order, as [the notification socket](notifications.md#the-socket-protocol):
+There is therefore no signing in over the socket and no signed-out state: no
+`authenticate` command, no `deauthenticate`, and no handler that has to wonder
+whether anybody is there. A page that opens the socket before it has a token
+should open it afterwards instead. A connection belongs to one account for its
+whole life; serving two people down one socket was the thing mid-connection
+sign-in made possible and nothing wanted.
+
+Credentials in the handshake are read from the same four places, and in the same
+order, as [the notification socket](notifications.md#the-socket-protocol):
 `?token=`, a bearer subprotocol, an `Authorization` header, a session cookie.
-Any command may carry a `token` too, so a client that has just been handed one
-signs in and runs its first command in a single frame.
 
-**Authenticating subscribes you to your own world.** The connection joins your
+**Connecting subscribes you to your own world.** The connection joins your
 account channel, the desk channel if you are staff, and the channels of the
 threads you are currently in — bounded, newest first. From that moment one socket
 carries every conversation you are part of, and a client renders a list of
@@ -261,14 +303,13 @@ a protocol limit rather than a choice: a file has to be uploaded over HTTP.
 
 ### What the client sends
 
-Every frame is a JSON object with a `command`. Four need no account:
+Every frame is a JSON object with a `command`. Every connection has an account
+— the handshake saw to that — so none of them has a signed-out case:
 
 | Command | Answered with |
 | --- | --- |
-| `{"command": "ping"}` | `pong` |
-| `{"command": "authenticate", "token": "…"}` | `authenticated` |
-| `{"command": "whoami"}` | `whoami` — answered, not refused, when nobody is signed in |
-| `{"command": "deauthenticate"}` | `deauthenticated` — a shared browser stops receiving one person's conversations immediately |
+| `{"command": "ping"}` | `pong` — for holding an idle connection open through a proxy |
+| `{"command": "whoami"}` | `whoami` — still worth asking after a sleep |
 
 Reading:
 
@@ -290,7 +331,29 @@ Talking:
 | `typing`, `presence` | `typing_ack`, `presence_ack` |
 
 Either side: `status`, `close`, `reopen`, `rate`. The desk's own: `assign`,
-`claim`, `priority`, `tag`, `invite`, `tags`, `canned`, `stats`.
+`claim`, `priority`, `tag`, `invite`, `tags`, `canned`, `stats` — and every one
+of those refuses a room, because none of it is queue work.
+
+Rooms, on the same connection:
+
+| Command | Answered with |
+| --- | --- |
+| `channels` (optional `search`) | `channels` — every open channel, each flagged `joined` or not |
+| `create_channel` (`name`, optional `slug`, `body`) | `created` — and this connection is subscribed in the same round trip |
+| `create_group` (`name`, `members`, optional `body`) | `created` |
+| `direct` (`account`) | `created` — the chat you already had, if there was one |
+| `join` (`ticket`) | `joined` — a channel only, and idempotent |
+| `leave` (`ticket`) | `left` — a channel or a group; a private chat cannot be left |
+
+One connection therefore carries all four lists — the desk's threads, the
+channels you are in, your groups and your private chats — because they are one
+table and one subscription model. A client renders the lot without opening a
+second socket.
+
+Somebody put into a room they were not in is told on their **own account
+channel**, not the room's, because they are not subscribed to the room yet. That
+frame is a `ticket` with `reason: "invited"`, and the client answers it by
+sending `subscribe`.
 
 Sending into a thread this connection had not joined subscribes it, so an agent
 answering out of a queue starts hearing the reply without a second command.
@@ -299,12 +362,14 @@ answering out of a queue starts hearing the reply without a second command.
 
 | Frame | When |
 | --- | --- |
-| `ready` | On connect, saying whether the handshake credential was accepted |
+| `ready` | On connect, with the account the connection belongs to and its badge |
 | `message` | Somebody said something in a thread this connection is in |
 | `ticket` | A thread changed — status, assignee, priority, tags |
 | `read` | Somebody's watermark moved, so a second device can grey out the badge |
 | `typing`, `presence` | Somebody started typing, or arrived in or left a thread |
 | `unread` | This account's badge changed |
+| `created`, `joined`, `left` | A room was opened, joined or left |
+| `channels` | The channel directory |
 | `error` | A refusal. **A frame, not a close** — a mistyped id should cost one message, not the conversation flowing over the connection |
 
 Error titles are the same vocabulary the HTTP API answers with —
@@ -411,6 +476,8 @@ One conversation between a client and the desk.
 | `kind` | Char |  |
 | `client` | ForeignKey | → `accounts.User` |
 | `subject` | Char |  |
+| `slug` | Slug | unique, nullable |
+| `direct_key` | Char | unique, not editable, nullable |
 | `category` | ForeignKey | → `support.Category`, nullable |
 | `status` | Char |  |
 | `priority` | Char |  |

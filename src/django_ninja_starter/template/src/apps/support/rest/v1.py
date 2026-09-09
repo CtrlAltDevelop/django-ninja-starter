@@ -27,8 +27,13 @@ from apps.support.rest.schemas import (
     AssignOut,
     CannedReplyOut,
     CategoryOut,
+    ChannelIn,
+    ChannelOut,
+    DirectIn,
     EditIn,
+    GroupIn,
     InviteIn,
+    LeftOut,
     MessageIn,
     MessageOut,
     MessagePage,
@@ -190,6 +195,54 @@ def categories(request: HttpRequest) -> list[dict[str, Any]]:
     where to file something is entitled to know what the desk has committed to.
     """
     return support_service.categories()
+
+
+@router.get("/channels", response=list[ChannelOut], summary="List the open channels")
+def channels(request: HttpRequest, search: str = "") -> list[dict[str, Any]]:
+    """Every channel anybody signed in may join, whether or not you are in it.
+
+    The only listing in this app that shows you something you are not already
+    part of, because discovery is what a channel is for. Groups and private
+    chats are deliberately absent: they are yours or they are invisible.
+    """
+    return _call(support_service.channels, request.user, search=search)
+
+
+@router.post("/channels", response={201: TicketDetailOut}, summary="Open a channel")
+def create_channel(request: HttpRequest, payload: ChannelIn) -> tuple[int, dict[str, Any]]:
+    """Anybody signed in may open one. The address is refused if it is taken,
+    never suffixed into uniqueness: `general-2` is a different channel from the
+    one whoever asked meant."""
+    return 201, _call(
+        support_service.create_channel,
+        request.user,
+        payload.name,
+        slug=payload.slug,
+        body=payload.body,
+    )
+
+
+@router.post("/groups", response={201: TicketDetailOut}, summary="Open a private group")
+def create_group(request: HttpRequest, payload: GroupIn) -> tuple[int, dict[str, Any]]:
+    """Invisible to everybody but its members, staff included. Members are named
+    now rather than invited later, because the first message should reach
+    somebody and a group of one is not a group."""
+    return 201, _call(
+        support_service.create_group,
+        request.user,
+        payload.name,
+        payload.members,
+        body=payload.body,
+    )
+
+
+@router.post("/direct", response=TicketDetailOut, summary="Open a private chat")
+def direct(request: HttpRequest, payload: DirectIn) -> dict[str, Any]:
+    """The conversation between you and one other account, created only if it is
+    new. A 200 rather than a 201 because the usual answer is the chat you
+    already had -- calling this is how a client opens a DM, not how it counts
+    them."""
+    return _call(support_service.direct, request.user, payload.account)
 
 
 @router.get("/tags", response=list[TagOut], summary="List the desk's tags")
@@ -382,6 +435,23 @@ def invite(request: HttpRequest, ticket_id: UUID, payload: InviteIn) -> tuple[in
     return 201, _call(
         support_service.invite, request.user, ticket_id, payload.account, payload.role
     )
+
+
+@router.post("/{ticket_id}/join", response={201: ParticipantOut}, summary="Join a channel")
+def join_room(request: HttpRequest, ticket_id: UUID) -> tuple[int, dict[str, Any]]:
+    """A channel only. A group and a private chat are joined by being put in one.
+
+    Idempotent, so a client that does not track its own membership may call it
+    before opening the room every time.
+    """
+    return 201, _call(support_service.join_room, request.user, ticket_id)
+
+
+@router.post("/{ticket_id}/leave", response=LeftOut, summary="Leave a room")
+def leave_room(request: HttpRequest, ticket_id: UUID) -> dict[str, Any]:
+    """A channel or a group. A private chat cannot be left, only muted: half a
+    private conversation is a state neither person can reason about."""
+    return _call(support_service.leave_room, request.user, ticket_id)
 
 
 @router.post("/{ticket_id}/rating", response=RatingOut, summary="Rate a settled conversation")

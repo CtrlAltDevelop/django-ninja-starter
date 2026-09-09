@@ -556,3 +556,65 @@ def test_typing_over_http_is_scoped_to_a_thread_you_can_see(
 ) -> None:
     assert _post(http, client_user, f"{SUPPORT}/{ticket.pk}/typing").status_code == 200
     assert _post(http, other_client, f"{SUPPORT}/{ticket.pk}/typing").status_code == 404
+
+
+# -- rooms over HTTP --------------------------------------------------------
+
+
+def test_a_channel_is_opened_and_then_found_by_somebody_else(
+    http: Client, client_user: Any, other_client: Any
+) -> None:
+    created = _post(http, client_user, f"{SUPPORT}/channels", {"name": "General"})
+    assert created.status_code == 201
+
+    found = _data(http.get(f"{SUPPORT}/channels", **auth(other_client)))
+
+    assert [row["subject"] for row in found] == ["General"]
+    assert found[0]["joined"] is False
+
+
+def test_a_channel_is_joined_and_left_over_http(
+    http: Client, client_user: Any, other_client: Any
+) -> None:
+    channel = _data(_post(http, client_user, f"{SUPPORT}/channels", {"name": "General"}))
+
+    joined = _post(http, other_client, f"{SUPPORT}/{channel['id']}/join")
+    left = _post(http, other_client, f"{SUPPORT}/{channel['id']}/leave")
+
+    assert joined.status_code == 201
+    assert _data(left)["left"] is True
+
+
+def test_a_group_is_invisible_to_an_agent_over_http(
+    http: Client, client_user: Any, other_client: Any, agent: Any
+) -> None:
+    """The same rule the service enforces, asserted through the door clients use."""
+    group = _data(
+        _post(
+            http,
+            client_user,
+            f"{SUPPORT}/groups",
+            {"name": "Ours", "members": [str(other_client.pk)]},
+        )
+    )
+
+    assert http.get(f"{SUPPORT}/{group['id']}", **auth(agent)).status_code == 404
+
+
+def test_a_private_chat_over_http_is_the_same_thread_both_times(
+    http: Client, client_user: Any, other_client: Any
+) -> None:
+    first = _post(http, client_user, f"{SUPPORT}/direct", {"account": str(other_client.pk)})
+    second = _post(http, other_client, f"{SUPPORT}/direct", {"account": str(client_user.pk)})
+
+    assert first.status_code == 200
+    assert _data(first)["id"] == _data(second)["id"]
+
+
+def test_an_agent_cannot_claim_a_channel_over_http(
+    http: Client, client_user: Any, agent: Any
+) -> None:
+    """A channel is not queue work, and must never land in somebody's queue."""
+    channel = _data(_post(http, client_user, f"{SUPPORT}/channels", {"name": "General"}))
+
+    assert _post(http, agent, f"{SUPPORT}/{channel['id']}/claim").status_code == 404

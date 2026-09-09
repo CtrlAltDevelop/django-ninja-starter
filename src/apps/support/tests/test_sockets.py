@@ -15,7 +15,7 @@ import pytest
 from asgiref.sync import sync_to_async
 
 from apps.support.models import Kind, Ticket, post_message
-from apps.support.sockets import SupportSocket, support_socket
+from apps.support.sockets import UNAUTHENTICATED_CLOSE, SupportSocket, support_socket
 from apps.support.tests.conftest import SocketClient, access_token
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -52,23 +52,31 @@ async def reply(client: SocketClient, frame: dict[str, Any], wanted: str) -> dic
 # -- connecting -------------------------------------------------------------
 
 
-def test_a_connection_with_no_credential_is_accepted_and_told_it_is_nobody() -> None:
-    """The handshake is cheap so a page can open it before its token arrives."""
+def test_a_connection_with_no_credential_is_closed_not_accepted() -> None:
+    """The socket admits nobody it cannot name, and says so at the handshake.
+
+    Closed before any accept, which an ASGI server turns into a 403 on the
+    upgrade: the client learns it failed instead of holding a socket that never
+    speaks.
+    """
 
     async def scenario() -> dict[str, Any]:
         client = socket()
-        assert (await client.open())["type"] == "websocket.accept"
-        ready = await client.next_frame()
-        await client.close()
-        return ready
+        return await client.open()
 
-    ready = run(scenario())
-    assert ready == {
-        "type": "ready",
-        "authenticated": False,
-        "user": None,
-        "unread": {"messages": 0, "tickets": 0},
-    }
+    answer = run(scenario())
+    assert answer["type"] == "websocket.close"
+    assert answer["code"] == UNAUTHENTICATED_CLOSE
+
+
+def test_a_bad_token_in_the_handshake_is_closed_the_same_way() -> None:
+    """A token that names nobody is no better than no token at all."""
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query="token=not-a-real-token")
+        return await client.open()
+
+    assert run(scenario())["type"] == "websocket.close"
 
 
 def test_a_token_in_the_query_string_is_honoured_at_connect_time(client_user: Any) -> None:
@@ -100,27 +108,14 @@ def test_an_offered_subprotocol_is_echoed_back(client_user: Any) -> None:
     assert run(scenario())["subprotocol"] == "bearer"
 
 
-def test_a_bad_token_in_the_handshake_leaves_the_connection_as_nobody() -> None:
-    """Refused rather than closed: the client can authenticate again over the socket."""
+# -- the commands every connection may send ---------------------------------
+
+
+def test_ping_is_answered(client_user: Any) -> None:
+    """Kept so a client can hold an idle connection open through a proxy."""
 
     async def scenario() -> dict[str, Any]:
-        client = socket(query="token=not-a-token")
-        await client.open()
-        ready = await client.next_frame()
-        await client.close()
-        return ready
-
-    assert run(scenario())["authenticated"] is False
-
-
-# -- the four commands that need no account ---------------------------------
-
-
-def test_ping_is_answered_without_a_credential() -> None:
-    async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
+        client = await signed_in(client_user)
         answer = await client.command({"command": "ping"})
         await client.close()
         return answer
@@ -128,103 +123,36 @@ def test_ping_is_answered_without_a_credential() -> None:
     assert run(scenario()) == {"type": "pong"}
 
 
-def test_authenticate_says_who_you_now_are(client_user: Any) -> None:
-    async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
-        token = await sync_to_async(access_token)(client_user)
-        answer = await client.command({"command": "authenticate", "token": token})
-        await client.close()
-        return answer
+def test_there_is_no_signing_in_over_the_socket(client_user: Any) -> None:
+    """The commands mid-connection sign-in needed are gone, not merely refused.
 
-    answer = run(scenario())
-    assert answer["type"] == "authenticated"
-    assert answer["user"]["username"] == "clara"
+    A connection is one account's for its whole life. Serving two people down
+    one socket was the thing `authenticate` made possible and nothing wanted.
+    """
+    assert "authenticate" not in SupportSocket.commands()
+    assert "deauthenticate" not in SupportSocket.commands()
 
 
-def test_authenticating_with_a_bad_token_is_refused_not_closed() -> None:
-    async def scenario() -> tuple[dict[str, Any], dict[str, Any]]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
-        refusal = await client.command({"command": "authenticate", "token": "nonsense"})
-        still_there = await client.command({"command": "ping"})
-        await client.close()
-        return refusal, still_there
-
-    refusal, still_there = run(scenario())
-    assert refusal["title"] == "TOKEN_INVALID"
-    assert still_there == {"type": "pong"}
-
-
-def test_whoami_answers_nobody_rather_than_refusing() -> None:
-    """A client reconnecting after a sleep asks precisely because it does not know."""
+def test_whoami_says_who_the_connection_belongs_to(client_user: Any) -> None:
+    """Still worth asking after a sleep, and now it always has an answer."""
 
     async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
+        client = await signed_in(client_user)
         answer = await client.command({"command": "whoami"})
         await client.close()
         return answer
 
     answer = run(scenario())
-    assert answer["authenticated"] is False
-    assert answer["user"] is None
-
-
-def test_deauthenticate_forgets_the_account_without_dropping_the_connection(
-    client_user: Any,
-) -> None:
-    async def scenario() -> tuple[dict[str, Any], dict[str, Any]]:
-        client = await signed_in(client_user)
-        gone = await client.command({"command": "deauthenticate"})
-        after = await client.command({"command": "whoami"})
-        await client.close()
-        return gone, after
-
-    gone, after = run(scenario())
-    assert gone["user"]["username"] == "clara"
-    assert after["authenticated"] is False
-
-
-def test_a_command_is_refused_until_the_connection_has_an_account() -> None:
-    async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
-        refusal = await client.command({"command": "tickets"})
-        await client.close()
-        return refusal
-
-    assert run(scenario())["title"] == "AUTHENTICATION_REQUIRED"
-
-
-def test_a_token_on_any_frame_signs_the_connection_in(client_user: Any) -> None:
-    """One round trip instead of two, for a client that has just been handed a token."""
-
-    async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
-        token = await sync_to_async(access_token)(client_user)
-        await client.send({"command": "unread", "token": token})
-        answer = await client.frame_of_type("unread")
-        await client.close()
-        return answer
-
-    assert run(scenario())["messages"] == 0
+    assert answer["authenticated"] is True
+    assert answer["user"]["username"] == "clara"
 
 
 # -- malformed frames -------------------------------------------------------
 
 
-def test_a_binary_frame_is_refused() -> None:
+def test_a_binary_frame_is_refused(client_user: Any) -> None:
     async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
+        client = await signed_in(client_user)
         await client._to_server.put({"type": "websocket.receive", "bytes": b"\x00"})
         refusal = await client.next_frame()
         await client.close()
@@ -233,11 +161,9 @@ def test_a_binary_frame_is_refused() -> None:
     assert run(scenario())["title"] == "BAD_REQUEST"
 
 
-def test_a_frame_that_is_not_json_is_refused() -> None:
+def test_a_frame_that_is_not_json_is_refused(client_user: Any) -> None:
     async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
+        client = await signed_in(client_user)
         await client.send_text("{oh no")
         refusal = await client.next_frame()
         await client.close()
@@ -246,11 +172,9 @@ def test_a_frame_that_is_not_json_is_refused() -> None:
     assert run(scenario())["description"] == "That was not JSON."
 
 
-def test_a_json_frame_that_is_not_an_object_is_refused() -> None:
+def test_a_json_frame_that_is_not_an_object_is_refused(client_user: Any) -> None:
     async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
+        client = await signed_in(client_user)
         await client.send_text("[1, 2, 3]")
         refusal = await client.next_frame()
         await client.close()
@@ -259,11 +183,9 @@ def test_a_json_frame_that_is_not_an_object_is_refused() -> None:
     assert run(scenario())["title"] == "BAD_REQUEST"
 
 
-def test_an_unknown_command_is_refused() -> None:
+def test_an_unknown_command_is_refused(client_user: Any) -> None:
     async def scenario() -> dict[str, Any]:
-        client = socket()
-        await client.open()
-        await client.next_frame()
+        client = await signed_in(client_user)
         refusal = await client.command({"command": "sudo"})
         await client.close()
         return refusal
@@ -639,3 +561,138 @@ def _reply_as_staff(ticket_id: str, agent: Any = None) -> None:
             username="andy", email="andy@example.test", is_staff=True
         )
     post_message(Ticket.objects.get(id=ticket_id), agent, "We are looking into it.")
+
+
+# -- rooms over the socket --------------------------------------------------
+
+
+def test_a_channel_is_created_and_heard_on_the_same_connection(client_user: Any) -> None:
+    """Creating subscribes you in the same round trip.
+
+    A client that had to subscribe afterwards would miss whatever was said in
+    the gap, which for the person who just opened the room is every first reply.
+    """
+
+    async def scenario() -> dict[str, Any]:
+        client = await signed_in(client_user)
+        created = await reply(client, {"command": "create_channel", "name": "General"}, "created")
+        await client.close()
+        return created
+
+    created = run(scenario())
+    assert created["ticket"]["subject"] == "General"
+
+
+def test_a_channel_is_discoverable_by_somebody_who_is_not_in_it(
+    client_user: Any, other_client: Any
+) -> None:
+    async def scenario() -> dict[str, Any]:
+        owner = await signed_in(client_user)
+        await reply(owner, {"command": "create_channel", "name": "General"}, "created")
+        await owner.close()
+
+        stranger = await signed_in(other_client)
+        listing = await reply(stranger, {"command": "channels"}, "channels")
+        await stranger.close()
+        return listing
+
+    listing = run(scenario())
+    assert [row["subject"] for row in listing["channels"]] == ["General"]
+    assert listing["channels"][0]["joined"] is False
+
+
+def test_joining_a_channel_starts_delivering_it(client_user: Any, other_client: Any) -> None:
+    """The point of joining: what is said next arrives without asking for it."""
+
+    async def scenario() -> dict[str, Any]:
+        owner = await signed_in(client_user)
+        created = await reply(owner, {"command": "create_channel", "name": "General"}, "created")
+        room = created["ticket"]["id"]
+
+        joiner = await signed_in(other_client)
+        await reply(joiner, {"command": "join", "ticket": room}, "joined")
+
+        await reply(owner, {"command": "send", "ticket": room, "body": "Morning"}, "sent")
+        heard = await joiner.frame_of_type("message")
+        await owner.close()
+        await joiner.close()
+        return heard
+
+    assert run(scenario())["message"]["body"] == "Morning"
+
+
+def test_a_private_chat_reaches_the_other_person(client_user: Any, other_client: Any) -> None:
+    async def scenario() -> dict[str, Any]:
+        one = await signed_in(client_user)
+        two = await signed_in(other_client)
+        opened = await reply(one, {"command": "direct", "account": str(other_client.pk)}, "created")
+        chat = opened["ticket"]["id"]
+        # The other side is not on the new thread's channel yet, so it learns of
+        # it on its own account channel and joins -- which is what a client does
+        # when a conversation it did not start appears.
+        announced = await two.frame_of_type("ticket")
+        assert announced["reason"] == "invited"
+        await reply(two, {"command": "subscribe", "ticket": chat}, "subscribed")
+
+        await reply(one, {"command": "send", "ticket": chat, "body": "Are you free?"}, "sent")
+        heard = await two.frame_of_type("message")
+        await one.close()
+        await two.close()
+        return heard
+
+    assert run(scenario())["message"]["body"] == "Are you free?"
+
+
+def test_a_group_is_created_with_its_members(client_user: Any, other_client: Any) -> None:
+    async def scenario() -> dict[str, Any]:
+        client = await signed_in(client_user)
+        created = await reply(
+            client,
+            {"command": "create_group", "name": "Ours", "members": [str(other_client.pk)]},
+            "created",
+        )
+        await client.close()
+        return created
+
+    created = run(scenario())
+    assert created["ticket"]["subject"] == "Ours"
+
+
+def test_a_group_cannot_be_joined_by_a_stranger_over_the_socket(
+    client_user: Any, other_client: Any, agent: Any
+) -> None:
+    """Refused as "no such room": an id somebody guessed earns them nothing."""
+
+    async def scenario() -> dict[str, Any]:
+        owner = await signed_in(client_user)
+        created = await reply(
+            owner,
+            {"command": "create_group", "name": "Ours", "members": [str(other_client.pk)]},
+            "created",
+        )
+        await owner.close()
+
+        stranger = await signed_in(agent)
+        refusal = await reply(
+            stranger, {"command": "join", "ticket": created["ticket"]["id"]}, "error"
+        )
+        await stranger.close()
+        return refusal
+
+    assert run(scenario())["title"] == "NOT_FOUND"
+
+
+def test_leaving_a_channel_stops_delivering_it(client_user: Any, other_client: Any) -> None:
+    async def scenario() -> dict[str, Any]:
+        owner = await signed_in(client_user)
+        created = await reply(owner, {"command": "create_channel", "name": "General"}, "created")
+        room = created["ticket"]["id"]
+
+        joiner = await signed_in(other_client)
+        await reply(joiner, {"command": "join", "ticket": room}, "joined")
+        left = await reply(joiner, {"command": "leave", "ticket": room}, "left")
+        await owner.close()
+        await joiner.close()
+        return left
+
+    assert run(scenario())["left"] is True

@@ -35,12 +35,18 @@ class SupportControllerStub:
     Assign: _grpc.UnaryUnaryMultiCallable[_support_pb2.AssignRequest, _support_pb2.AssignResult]
     Canned: _grpc.UnaryUnaryMultiCallable[_support_pb2.CannedRequest, _support_pb2.CannedList]
     Categories: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _support_pb2.CategoryList]
+    Channels: _grpc.UnaryUnaryMultiCallable[_support_pb2.ChannelsRequest, _support_pb2.ChannelList]
     Claim: _grpc.UnaryUnaryMultiCallable[_support_pb2.ClaimRequest, _support_pb2.ClaimResult]
     Count: _grpc.UnaryUnaryMultiCallable[_support_pb2.CountRequest, _support_pb2.CountResult]
+    CreateChannel: _grpc.UnaryUnaryMultiCallable[_support_pb2.CreateChannelRequest, _support_pb2.Ticket]
+    CreateGroup: _grpc.UnaryUnaryMultiCallable[_support_pb2.CreateGroupRequest, _support_pb2.Ticket]
     Delete: _grpc.UnaryUnaryMultiCallable[_support_pb2.DeleteRequest, _support_pb2.DeletedMessage]
+    Direct: _grpc.UnaryUnaryMultiCallable[_support_pb2.DirectRequest, _support_pb2.Ticket]
     Edit: _grpc.UnaryUnaryMultiCallable[_support_pb2.EditRequest, _support_pb2.EditedMessage]
     Get: _grpc.UnaryUnaryMultiCallable[_support_pb2.GetRequest, _support_pb2.Ticket]
     Invite: _grpc.UnaryUnaryMultiCallable[_support_pb2.InviteRequest, _support_pb2.InvitedParticipant]
+    Join: _grpc.UnaryUnaryMultiCallable[_support_pb2.JoinRequest, _support_pb2.JoinedParticipant]
+    Leave: _grpc.UnaryUnaryMultiCallable[_support_pb2.LeaveRequest, _support_pb2.LeaveResult]
     List: _grpc.UnaryUnaryMultiCallable[_support_pb2.ListRequest, _support_pb2.TicketList]
     Messages: _grpc.UnaryUnaryMultiCallable[_support_pb2.MessagesRequest, _support_pb2.MessageList]
     Open: _grpc.UnaryUnaryMultiCallable[_support_pb2.OpenRequest, _support_pb2.OpenedTicket]
@@ -62,12 +68,18 @@ class SupportControllerAsyncStub(SupportControllerStub):
     Assign: _aio.UnaryUnaryMultiCallable[_support_pb2.AssignRequest, _support_pb2.AssignResult]  # type: ignore[assignment]
     Canned: _aio.UnaryUnaryMultiCallable[_support_pb2.CannedRequest, _support_pb2.CannedList]  # type: ignore[assignment]
     Categories: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _support_pb2.CategoryList]  # type: ignore[assignment]
+    Channels: _aio.UnaryUnaryMultiCallable[_support_pb2.ChannelsRequest, _support_pb2.ChannelList]  # type: ignore[assignment]
     Claim: _aio.UnaryUnaryMultiCallable[_support_pb2.ClaimRequest, _support_pb2.ClaimResult]  # type: ignore[assignment]
     Count: _aio.UnaryUnaryMultiCallable[_support_pb2.CountRequest, _support_pb2.CountResult]  # type: ignore[assignment]
+    CreateChannel: _aio.UnaryUnaryMultiCallable[_support_pb2.CreateChannelRequest, _support_pb2.Ticket]  # type: ignore[assignment]
+    CreateGroup: _aio.UnaryUnaryMultiCallable[_support_pb2.CreateGroupRequest, _support_pb2.Ticket]  # type: ignore[assignment]
     Delete: _aio.UnaryUnaryMultiCallable[_support_pb2.DeleteRequest, _support_pb2.DeletedMessage]  # type: ignore[assignment]
+    Direct: _aio.UnaryUnaryMultiCallable[_support_pb2.DirectRequest, _support_pb2.Ticket]  # type: ignore[assignment]
     Edit: _aio.UnaryUnaryMultiCallable[_support_pb2.EditRequest, _support_pb2.EditedMessage]  # type: ignore[assignment]
     Get: _aio.UnaryUnaryMultiCallable[_support_pb2.GetRequest, _support_pb2.Ticket]  # type: ignore[assignment]
     Invite: _aio.UnaryUnaryMultiCallable[_support_pb2.InviteRequest, _support_pb2.InvitedParticipant]  # type: ignore[assignment]
+    Join: _aio.UnaryUnaryMultiCallable[_support_pb2.JoinRequest, _support_pb2.JoinedParticipant]  # type: ignore[assignment]
+    Leave: _aio.UnaryUnaryMultiCallable[_support_pb2.LeaveRequest, _support_pb2.LeaveResult]  # type: ignore[assignment]
     List: _aio.UnaryUnaryMultiCallable[_support_pb2.ListRequest, _support_pb2.TicketList]  # type: ignore[assignment]
     Messages: _aio.UnaryUnaryMultiCallable[_support_pb2.MessagesRequest, _support_pb2.MessageList]  # type: ignore[assignment]
     Open: _aio.UnaryUnaryMultiCallable[_support_pb2.OpenRequest, _support_pb2.OpenedTicket]  # type: ignore[assignment]
@@ -106,6 +118,13 @@ class SupportControllerServicer(metaclass=_abc_1.ABCMeta):
     ) -> _typing.Union[_support_pb2.CategoryList, _abc.Awaitable[_support_pb2.CategoryList]]: ...
 
     @_abc_1.abstractmethod
+    def Channels(
+        self,
+        request: _support_pb2.ChannelsRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_support_pb2.ChannelList, _abc.Awaitable[_support_pb2.ChannelList]]: ...
+
+    @_abc_1.abstractmethod
     def Claim(
         self,
         request: _support_pb2.ClaimRequest,
@@ -120,11 +139,32 @@ class SupportControllerServicer(metaclass=_abc_1.ABCMeta):
     ) -> _typing.Union[_support_pb2.CountResult, _abc.Awaitable[_support_pb2.CountResult]]: ...
 
     @_abc_1.abstractmethod
+    def CreateChannel(
+        self,
+        request: _support_pb2.CreateChannelRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_support_pb2.Ticket, _abc.Awaitable[_support_pb2.Ticket]]: ...
+
+    @_abc_1.abstractmethod
+    def CreateGroup(
+        self,
+        request: _support_pb2.CreateGroupRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_support_pb2.Ticket, _abc.Awaitable[_support_pb2.Ticket]]: ...
+
+    @_abc_1.abstractmethod
     def Delete(
         self,
         request: _support_pb2.DeleteRequest,
         context: _ServicerContext,
     ) -> _typing.Union[_support_pb2.DeletedMessage, _abc.Awaitable[_support_pb2.DeletedMessage]]: ...
+
+    @_abc_1.abstractmethod
+    def Direct(
+        self,
+        request: _support_pb2.DirectRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_support_pb2.Ticket, _abc.Awaitable[_support_pb2.Ticket]]: ...
 
     @_abc_1.abstractmethod
     def Edit(
@@ -146,6 +186,20 @@ class SupportControllerServicer(metaclass=_abc_1.ABCMeta):
         request: _support_pb2.InviteRequest,
         context: _ServicerContext,
     ) -> _typing.Union[_support_pb2.InvitedParticipant, _abc.Awaitable[_support_pb2.InvitedParticipant]]: ...
+
+    @_abc_1.abstractmethod
+    def Join(
+        self,
+        request: _support_pb2.JoinRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_support_pb2.JoinedParticipant, _abc.Awaitable[_support_pb2.JoinedParticipant]]: ...
+
+    @_abc_1.abstractmethod
+    def Leave(
+        self,
+        request: _support_pb2.LeaveRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_support_pb2.LeaveResult, _abc.Awaitable[_support_pb2.LeaveResult]]: ...
 
     @_abc_1.abstractmethod
     def List(
