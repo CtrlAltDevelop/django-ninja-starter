@@ -4,16 +4,19 @@ A WebSocket handshake is an HTTP request, so a browser will send cookies on it
 and a native client can set headers -- but neither is available to the two
 places people actually put a token: ``?token=`` on the URL, because the browser
 ``WebSocket`` constructor cannot set headers at all, and the subprotocol field,
-because it is the one header the constructor *can* set. All four are accepted
-here, and the socket also takes a token in a message after connecting.
+because it is the one header the constructor *can* set. All four are read here,
+and the handshake is the only place any of them is read.
 
 Unlike the notification socket, **this one is useless before it is
-authenticated**, and says so by refusing every command but a handful until a
-credential arrives. There is no public support traffic: every frame this app
-sends belongs to a named conversation between a named client and the desk, and
-a channel anybody could join would be a channel anybody could read. The
-connection is still accepted without one, so that a client can open the socket
-as the page loads and authenticate when its token arrives.
+authenticated**, and it answers that by not opening at all: a handshake
+carrying nothing usable is closed with 1008 before any accept, and there is no
+signing in afterwards -- no ``authenticate`` command and no token sniffed off a
+later frame. There is no public support traffic: every frame this app sends
+belongs to a named conversation between a named client and the desk, and a
+channel anybody could join would be a channel anybody could read. So a
+connection belongs to one account for its whole life, and a client that cannot
+name itself yet waits for its token before opening the socket rather than
+opening one it cannot use. See :mod:`apps.support.sockets`.
 
 Nothing here decides what a token means. That is
 ``infrastructure.auth.core.sessions``, which already knows which credential the
@@ -127,7 +130,15 @@ def user_from_session(session_key: str) -> Any | None:
 
 
 def user_from_credentials(credentials: Credentials) -> Any | None:
-    """A token if there is one, the session cookie if there is not."""
+    """The token's account, falling back to the cookie's.
+
+    The fallback is on the token *failing*, not merely on it being absent: a
+    handshake carrying an expired token and a live session cookie is admitted as
+    the account the cookie names. That is deliberate and costs nothing -- both
+    credentials belong to the same browser, and the alternative is refusing
+    somebody who is signed in because a token they were not asked for went
+    stale.
+    """
     return user_from_token(credentials.token) or user_from_session(credentials.session_key)
 
 
