@@ -205,6 +205,34 @@ def test_staff_still_see_every_ticket(client_user: Any, agent: Any) -> None:
     assert len(support_service.tickets(agent)) == 1
 
 
+def test_the_row_predicate_agrees_with_the_queryset(
+    client_user: Any, other_client: Any, agent: Any
+) -> None:
+    """`readable_by` is the row-at-a-time `visible_to` and must never disagree.
+
+    Two ways of asking the same question is two places for the answer to drift,
+    and the drift that costs something is the one where the predicate is the
+    more generous of the two: an agent handed a private chat because the
+    queryset was never consulted.
+    """
+    chat = support_service.direct(client_user, other_client.pk)
+    group = support_service.create_group(client_user, "Ours", [other_client.pk])
+    channel = support_service.create_channel(client_user, "General")
+    desk = support_service.open(client_user, subject="Charged twice", body="Two charges.")
+
+    for user in (client_user, other_client, agent):
+        visible = set(Ticket.objects.visible_to(user).values_list("pk", flat=True))
+        for row in Ticket.objects.all():
+            assert row.readable_by(user) is (row.pk in visible), (row.kind, user.pk)
+
+    # And spelled out, so a regression names itself rather than arriving as a
+    # set comparison somebody has to reconstruct.
+    assert Ticket.objects.get(pk=chat["id"]).readable_by(agent) is False
+    assert Ticket.objects.get(pk=group["id"]).readable_by(agent) is False
+    assert Ticket.objects.get(pk=channel["id"]).readable_by(agent) is True
+    assert Ticket.objects.get(pk=desk["id"]).readable_by(agent) is True
+
+
 # -- the desk's verbs do not reach into rooms -------------------------------
 
 

@@ -644,10 +644,20 @@ class Ticket(models.Model):
         return self.participants.filter(user=user).first()
 
     def readable_by(self, user: Any) -> bool:
-        """Whether one account may see this thread at all."""
-        if getattr(user, "is_staff", False):
-            return True
+        """Whether one account may see this thread at all.
+
+        The row-at-a-time answer to :meth:`TicketQuerySet.visible_to`, and it has
+        to agree with it in every case: a rule that is one thing in a queryset
+        and another in a predicate is a rule with a hole in it. So ``is_staff``
+        buys the desk and the desk only -- an agent is no more entitled to a
+        group they were not added to, or to a private chat between two
+        customers, here than they are there.
+        """
         if self.client_id == getattr(user, "pk", None):
+            return True
+        if getattr(user, "is_staff", False) and self.kind in DESK_KINDS:
+            return True
+        if self.kind in PUBLIC_KINDS:
             return True
         return self.participants.filter(user=user).exists()
 
