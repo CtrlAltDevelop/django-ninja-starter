@@ -265,3 +265,69 @@ def test_support_alone_carries_a_conversation(tmp_path: Path) -> None:
     """
     _drive("support_alone", {"DJANGO_SUPPORT_ENABLED": "true"}, tmp_path / "db.sqlite3")
 
+
+# -- transports ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_an_app_can_be_installed_for_one_transport_only(app: str, tmp_path: Path) -> None:
+    """Enabling an app should not oblige a deployment to serve all four of them.
+
+    The narrowest configuration is the one worth checking, because it is the one
+    where a surface that ignored the setting would still be up: REST only, on an
+    app that also speaks GraphQL, gRPC and -- for two of them -- a socket.
+    """
+    result = _check(
+        {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_transport_the_app_does_not_speak_is_refused_at_startup(app: str, tmp_path: Path) -> None:
+    """Ignored would be worse than refused.
+
+    A deployment that asked for a transport it does not get, and was not told,
+    finds out from a client that cannot reach it.
+    """
+    result = _check(
+        {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest,telepathy"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode != 0
+    assert "telepathy" in result.stdout + result.stderr
+
+
+def test_a_socket_is_refused_for_an_app_that_has_none(tmp_path: Path) -> None:
+    """`ws` on the CMS means somebody believes the CMS has a socket. Say so."""
+    result = _check(
+        {"DJANGO_CMS_ENABLED": "true", "DJANGO_CMS_TRANSPORTS": "ws"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode != 0
+    assert "does not publish" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("app", ["notifications", "support"])
+def test_dropping_ws_unmounts_that_app_socket(app: str, tmp_path: Path) -> None:
+    """The socket is a transport like the others and comes off with the rest."""
+    script = (
+        "import django; django.setup();"
+        "from config.sockets import websocket_routes;"
+        "print(sorted(path for path, _ in websocket_routes()))"
+    )
+    with_ws = _run(["-c", script], {_enabled(app): "true"}, tmp_path / "db.sqlite3")
+    without = _run(
+        ["-c", script],
+        {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert with_ws.returncode == 0, with_ws.stdout + with_ws.stderr
+    assert without.returncode == 0, without.stdout + without.stderr
+    assert app in with_ws.stdout, with_ws.stdout
+    assert app not in without.stdout, without.stdout

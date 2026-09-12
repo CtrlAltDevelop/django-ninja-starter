@@ -347,12 +347,60 @@ AUTH_JWT_ISSUER = os.getenv("DJANGO_AUTH_JWT_ISSUER", "{{ project_name }}")
 AUTH_JWT_AUDIENCE = os.getenv("DJANGO_AUTH_JWT_AUDIENCE", "")
 AUTH_JWT_LEEWAY_SECONDS = int(os.getenv("DJANGO_AUTH_JWT_LEEWAY_SECONDS", "30"))
 
+# -- which transports a feature app publishes --------------------------------
+#
+# Enabling an app installs its tables and, by default, every transport it knows
+# how to speak. That default is right for development and wasteful for a
+# deployment that only ever calls one of them: a project whose clients speak
+# REST pays for the GraphQL schema and the gRPC service registry of every app it
+# turned on, in import time at boot and in surface area for the rest of the
+# deployment's life.
+#
+# So each app also takes a list. `DJANGO_SUPPORT_TRANSPORTS=rest,ws` serves the
+# support desk's endpoints and its socket and publishes neither its GraphQL
+# fields nor its gRPC services. Unset means all of them, which is what keeps
+# this invisible to anybody who does not want it.
+#
+# A list rather than a boolean per transport because the alternative is four
+# environment variables per app, and because adding a transport later should not
+# mean inventing a variable for every app that speaks it.
+TRANSPORTS = ("rest", "graph", "grpc", "ws")
+
+
+def app_transports(app: str, published: tuple[str, ...]) -> tuple[str, ...]:
+    """Which of one app's transports this deployment serves.
+
+    Unset serves everything the app publishes. A name the app does not publish
+    is refused rather than ignored: asking for `ws` from the CMS means somebody
+    believes the CMS has a socket, and a deployment that quietly served three of
+    the four transports they listed would leave them to find out from a client.
+    """
+    raw = os.getenv(f"DJANGO_{app.upper()}_TRANSPORTS", "").strip()
+    if not raw:
+        return published
+    chosen = tuple(dict.fromkeys(part.strip().lower() for part in raw.split(",") if part.strip()))
+    unknown = [name for name in chosen if name not in TRANSPORTS]
+    if unknown:
+        raise ImproperlyConfigured(
+            f"Unknown DJANGO_{app.upper()}_TRANSPORTS: {', '.join(sorted(unknown))}. "
+            f"One or more of: {', '.join(TRANSPORTS)}."
+        )
+    unpublished = [name for name in chosen if name not in published]
+    if unpublished:
+        raise ImproperlyConfigured(
+            f"DJANGO_{app.upper()}_TRANSPORTS names {', '.join(sorted(unpublished))}, "
+            f"which `apps.{app}` does not publish. It speaks: {', '.join(published)}."
+        )
+    return chosen
+
+
 # The content app. Optional in the same way every login method is: naming it is
 # what installs it, and a project that does not name it carries no CMS tables,
 # publishes no CMS routes and never imports the package.
 CMS_ENABLED = os.getenv("DJANGO_CMS_ENABLED", "false").lower() == "true"
 CMS_APP = "apps.cms.apps.CmsConfig"
 CMS_INSTALLED_APPS = [CMS_APP] if CMS_ENABLED else []
+CMS_TRANSPORTS = app_transports("cms", ("rest", "graph", "grpc")) if CMS_ENABLED else ()
 CMS_ROUTERS = (
     [
         {
@@ -366,7 +414,7 @@ CMS_ROUTERS = (
             ),
         }
     ]
-    if CMS_ENABLED
+    if "rest" in CMS_TRANSPORTS
     else []
 )
 # The languages content may be written in. Deliberately not Django's LANGUAGES,
@@ -397,6 +445,11 @@ CMS_MAX_UPLOAD_BYTES = CMS_MAX_UPLOAD_MB * 1024 * 1024
 NOTIFICATIONS_ENABLED = os.getenv("DJANGO_NOTIFICATIONS_ENABLED", "false").lower() == "true"
 NOTIFICATIONS_APP = "apps.notifications.apps.NotificationsConfig"
 NOTIFICATIONS_INSTALLED_APPS = [NOTIFICATIONS_APP] if NOTIFICATIONS_ENABLED else []
+NOTIFICATIONS_TRANSPORTS = (
+    app_transports("notifications", ("rest", "graph", "grpc", "ws"))
+    if NOTIFICATIONS_ENABLED
+    else ()
+)
 # Where the WebSocket is mounted. A setting rather than a constant because it is
 # the one part of this app a reverse proxy has to be told about, and a proxy is
 # usually easier to point at the app than the other way round. Declared above the
@@ -452,7 +505,7 @@ NOTIFICATIONS_ROUTERS = (
             ),
         }
     ]
-    if NOTIFICATIONS_ENABLED
+    if "rest" in NOTIFICATIONS_TRANSPORTS
     else []
 )
 # How a notification created in one process reaches sockets held open by another.
@@ -481,6 +534,7 @@ NOTIFICATIONS_RETENTION_DAYS = int(os.getenv("DJANGO_NOTIFICATIONS_RETENTION_DAY
 SHOP_ENABLED = os.getenv("DJANGO_SHOP_ENABLED", "false").lower() == "true"
 SHOP_APP = "apps.shop.apps.ShopConfig"
 SHOP_INSTALLED_APPS = [SHOP_APP] if SHOP_ENABLED else []
+SHOP_TRANSPORTS = app_transports("shop", ("rest", "graph", "grpc")) if SHOP_ENABLED else ()
 SHOP_ROUTERS = (
     [
         {
@@ -497,7 +551,7 @@ SHOP_ROUTERS = (
             ),
         }
     ]
-    if SHOP_ENABLED
+    if "rest" in SHOP_TRANSPORTS
     else []
 )
 # The one currency every price is quoted in. A catalogue priced in several needs
@@ -518,6 +572,9 @@ SHOP_MAX_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_MAX_PAGE_SIZE", "100"))
 SUPPORT_ENABLED = os.getenv("DJANGO_SUPPORT_ENABLED", "false").lower() == "true"
 SUPPORT_APP = "apps.support.apps.SupportConfig"
 SUPPORT_INSTALLED_APPS = [SUPPORT_APP] if SUPPORT_ENABLED else []
+SUPPORT_TRANSPORTS = (
+    app_transports("support", ("rest", "graph", "grpc", "ws")) if SUPPORT_ENABLED else ()
+)
 # Where the WebSocket is mounted. A setting rather than a constant because it is
 # the one part of this app a reverse proxy has to be told about, and a proxy is
 # usually easier to point at the app than the other way round. Declared above
@@ -588,7 +645,7 @@ SUPPORT_ROUTERS = (
             ),
         }
     ]
-    if SUPPORT_ENABLED
+    if "rest" in SUPPORT_TRANSPORTS
     else []
 )
 # How a message posted in one process reaches sockets held open by another. The
@@ -644,6 +701,19 @@ OAUTH_USER_RESOLVER = os.getenv("DJANGO_OAUTH_USER_RESOLVER", "")
 # publishes all three off one service class, so these switches decide which
 # *doors* are open, never what is behind them: turning either off unpublishes an
 # endpoint and changes no behaviour.
+# What each installed feature app is allowed to publish, keyed by the module name
+# `AppConfig.name` carries. `config/graph.py` and `config/grpc.py` discover their
+# contributions by walking the installed apps, so this is how they learn that an
+# app was installed to serve REST only. An app absent from this mapping -- every
+# infrastructure app -- publishes whatever it has, because the transports there
+# are the project's own and are turned off by the global flags below.
+APP_TRANSPORTS = {
+    "apps.cms": CMS_TRANSPORTS,
+    "apps.notifications": NOTIFICATIONS_TRANSPORTS,
+    "apps.shop": SHOP_TRANSPORTS,
+    "apps.support": SUPPORT_TRANSPORTS,
+}
+
 GRAPHQL_ENABLED = os.getenv("DJANGO_GRAPHQL_ENABLED", "true").lower() == "true"
 # The in-browser query editor. Handy in development, and an unauthenticated
 # schema browser in production, so it is off here and turned on by the
@@ -704,8 +774,8 @@ GRPC_FRAMEWORK = {
 # each of them asks a question only the running project can answer: which apps
 # are installed, whether this is production, and what the numbers are today.
 UNFOLD = {
-    "SITE_TITLE": "{{ project_title }}",
-    "SITE_HEADER": "{{ project_title }}",
+    "SITE_TITLE": "Django Ninja Starter",
+    "SITE_HEADER": "Django Ninja Starter",
     "SITE_SUBHEADER": "Content, accounts and credentials",
     "SITE_SYMBOL": "rocket_launch",
     "SITE_URL": "/api/docs",

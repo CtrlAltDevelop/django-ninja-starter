@@ -19,6 +19,8 @@ import strawberry
 from django.apps import apps
 from django.core.exceptions import ImproperlyConfigured
 
+from config.transports import serves
+
 
 def _app_graph_module(app_name: str) -> ModuleType | None:
     """Import one app's ``graph.schema``, or return ``None`` if it has none.
@@ -45,6 +47,8 @@ def graph_contributions(attribute: str) -> list[tuple[str, type]]:
     """
     contributions: list[tuple[str, type]] = []
     for config in apps.get_app_configs():
+        if not serves(config.name, "graph"):
+            continue
         module = _app_graph_module(config.name)
         part = getattr(module, attribute, None) if module else None
         if part is not None:

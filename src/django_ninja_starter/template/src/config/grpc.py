@@ -21,6 +21,8 @@ from django_socio_grpc.protobuf import RegistrySingleton
 from django_socio_grpc.request_transformer.grpc_internal_container import GRPCRequestContainer
 from django_socio_grpc.services.app_handler_registry import AppHandlerRegistry
 
+from config.transports import serves
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,6 +81,11 @@ def grpc_app_services(*, serving: bool = True) -> list[tuple[AppConfig, list[typ
         if module is None:
             continue
         if serving and not getattr(module, "GRPC_SERVED", True):
+            continue
+        # Only when serving: `generateproto` wants every app's document, so that
+        # a deployment which stopped serving an app's gRPC does not start
+        # rewriting its `.proto` to empty.
+        if serving and not serves(config.name, "grpc"):
             continue
         services = list(getattr(module, "GRPC_SERVICES", ()))
         if services:

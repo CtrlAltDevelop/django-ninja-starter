@@ -29,11 +29,11 @@ NO_SUCH_ROUTE = 4404
 def websocket_routes() -> list[tuple[str, str]]:
     """``(path, dotted path to an ASGI application)`` for each mounted socket."""
     routes = []
-    if settings.NOTIFICATIONS_ENABLED:
+    if settings.NOTIFICATIONS_ENABLED and "ws" in settings.NOTIFICATIONS_TRANSPORTS:
         routes.append(
             (settings.NOTIFICATIONS_WS_PATH, "apps.notifications.sockets.notifications_socket")
         )
-    if settings.SUPPORT_ENABLED:
+    if settings.SUPPORT_ENABLED and "ws" in settings.SUPPORT_TRANSPORTS:
         routes.append((settings.SUPPORT_WS_PATH, "apps.support.sockets.support_socket"))
     return routes
 
