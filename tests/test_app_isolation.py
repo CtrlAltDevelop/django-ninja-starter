@@ -35,6 +35,9 @@ BASE_ENV = {
     "DJANGO_AUTH_MAGIC_LINK_BASE_URL": "https://example.test/link",
 }
 METHODS = ["password", "email_code", "sms_code", "magic_link"]
+#: The optional apps, each of which has to install, work and be removable on its
+#: own. Adding an app here is what gives it isolation coverage.
+FEATURE_APPS = ["cms", "notifications", "shop", "support"]
 TOKEN_MODES = ["sliding", "session", "rotation"]
 PROVIDERS = {
     "google": {
@@ -86,6 +89,11 @@ def _run(
             "DJANGO_DB_NAME": str(database),
         },
     )
+
+
+def _enabled(app: str) -> str:
+    """The environment variable that turns one feature app on."""
+    return f"DJANGO_{app.upper()}_ENABLED"
 
 
 def _check(environment: dict[str, str], database: Path) -> subprocess.CompletedProcess[str]:
@@ -193,21 +201,67 @@ def test_a_token_mode_can_be_chosen_without_any_oauth_provider(tmp_path: Path) -
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_the_notification_app_installs_with_no_authentication_at_all(tmp_path: Path) -> None:
-    """It is a feature app, not part of the login story.
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_one_feature_app_installs_with_no_authentication_at_all(app: str, tmp_path: Path) -> None:
+    """A feature app is not part of the login story and must not require one.
 
-    Its API asks the project's own bearer auth who the caller is, and its socket
-    asks the same question of a token -- both behind an ImportError guard, so a
-    project that enabled notifications and nothing else has to boot rather than
-    fail on an import of apps it never turned on.
+    Each of these asks the project's own bearer auth who the caller is, and
+    support's socket asks the same question of a token -- all behind an
+    ImportError guard, so a project that enabled one feature app and nothing
+    else has to boot rather than fail importing apps it never turned on.
+
+    Parametrised rather than written out per app, because the interesting case
+    is always the app somebody adds next: a new entry in ``FEATURE_APPS`` is
+    covered by this file the day it is added, rather than the day somebody
+    remembers to copy a test.
     """
-    result = _check({"DJANGO_NOTIFICATIONS_ENABLED": "true"}, tmp_path / "db.sqlite3")
+    result = _check({_enabled(app): "true"}, tmp_path / "db.sqlite3")
 
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_notifications_left_unnamed_cost_no_tables(tmp_path: Path) -> None:
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_feature_app_left_unnamed_costs_no_tables(app: str, tmp_path: Path) -> None:
+    """Deleting the directory has to be as available as never enabling it.
+
+    Which means an app nobody named leaves nothing behind in the schema -- no
+    table, and so nothing to migrate away from later.
+    """
     result = _run(["manage.py", "migrate", "--plan"], {}, tmp_path / "db.sqlite3")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "notifications" not in result.stdout
+    assert app not in result.stdout
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_feature_app_installs_its_own_tables_and_no_others(app: str, tmp_path: Path) -> None:
+    """Turning one on brings one in.
+
+    The cheap failure this catches is a feature app importing another feature
+    app's models at module scope: the project would still boot, and a developer
+    who enabled the shop would quietly get the support desk's tables too.
+    """
+    result = _run(
+        ["manage.py", "migrate", "--plan"], {_enabled(app): "true"}, tmp_path / "db.sqlite3"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert app in result.stdout, f"enabling {app} installed none of its own tables"
+    for other in FEATURE_APPS:
+        if other != app:
+            assert other not in result.stdout, f"enabling {app} dragged in {other}"
+
+
+def test_support_alone_carries_a_conversation(tmp_path: Path) -> None:
+    """Booting is not the claim. The claim is that the app works.
+
+    Support gets this deeper treatment because it is the app with the most ways
+    to fail quietly in a bare project: a router whose auth comes from the login
+    apps, a socket that resolves a credential through them, and an optional
+    hand-off to the notification app. So this opens a ticket over HTTP and then
+    a socket over the same Django session, in a project that installed no login
+    app and no notification app -- the configuration the main suite, which turns
+    everything on, can never reach.
+    """
+    _drive("support_alone", {"DJANGO_SUPPORT_ENABLED": "true"}, tmp_path / "db.sqlite3")
+
