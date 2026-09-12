@@ -59,9 +59,104 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "All of it" is checked rather than claimed: the section asks the router and
   the socket's command tuple what exists and fails the tour if it left anything
   out, so a route added without being shown here stops the suite.
+- **Channels, private groups and direct messages**, on the same thread,
+  participant and read-state machinery, because a ticket was already a
+  conversation. `Kind` now has two families: the **desk** kinds -- `chat` and
+  `ticket` -- which staff see every one of, because working the queue is the
+  job, and the **room** kinds -- `channel`, `group` and `direct` -- which staff
+  have no standing in at all. A channel is discoverable and anybody signed in
+  may join it; its address is refused when taken rather than suffixed, since
+  `general-2` is a different room from the one somebody asked for. A group is
+  created with its members and is invisible to everyone else. A private chat is
+  exactly two accounts, deduped by a sorted key, so both people opening it at
+  once land in one conversation rather than in two halves of one. All of it on
+  all four transports under the same names, and `slug` is on the shared payload
+  so a client can link to `#general` rather than to a uuid.
+- **`is_staff` buys nothing in a room.** `TicketQuerySet.visible_to` is the one
+  place the line is drawn, and it grants staff the desk and only the desk. An
+  agent cannot read a group they were not added to or a private chat between two
+  customers, and `test_rooms.py` spends most of its length on an agent being
+  told no -- because a support desk that could read its customers' private
+  conversations would be a surveillance tool with a help widget attached.
+
+### Changed
+
+- **A feature app no longer has to serve all four transports.** Each takes
+  `DJANGO_<APP>_TRANSPORTS`, a list drawn from `rest`, `graph`, `grpc` and `ws`
+  -- so `DJANGO_SUPPORT_TRANSPORTS=rest,ws` serves the desk's endpoints and its
+  socket and publishes neither its GraphQL fields nor its gRPC services. Unset
+  means everything the app speaks, so nothing changes for anybody who does not
+  want this. A list rather than a boolean per transport, because the alternative
+  is four variables per app and a fifth invented for every app the day a
+  transport is added. A name the app does not publish -- `ws` on the CMS -- is
+  refused at startup rather than ignored, since a deployment that quietly served
+  three of the four somebody listed would leave them to find out from a client.
+- **The `.env` guard can no longer be blind to the settings most likely to be
+  undocumented.** It matched `os.getenv("DJANGO_...")` as text, so it saw only
+  the names spelled as literals -- and reported success over any name the
+  settings module *builds*, which is exactly what the new per-app transport
+  lists do. It now executes `base.py` with `os.getenv` recording what it is
+  asked for, so every key the project actually reads has to appear in all three
+  samples however its name was spelled.
+- **`DJANGO_GRPC_ENABLED=false` now actually stops serving gRPC.** The setting
+  was read into `settings` and then read by nothing, so a deployment that turned
+  gRPC off still registered every service against the server. It is honoured
+  when serving and deliberately still ignored on the generation pass, because
+  `manage.py protos` has to keep the `.proto` files in step in a project that
+  never serves them.
+- **The support app's README no longer claims to be self-contained.** It said it
+  imported nothing from the project it could not degrade without; in fact it
+  imports `infrastructure.common` unguarded in six places and will not load at
+  all without it. The README now names what copying the directory really means:
+  two directories, `apps/support` and `infrastructure/common`, and a list of
+  what is genuinely optional.
+- **The support socket admits nobody it cannot name.** A handshake carrying no
+  usable credential is now closed with 1008 before any accept, which an ASGI
+  server turns into a 403 on the upgrade, so a client sees a failure rather than
+  a socket that opens and never speaks. There is no signing in afterwards: the
+  `authenticate` and `deauthenticate` commands and the token-sniffing on every
+  frame are **removed** rather than refused, and with them the signed-out branch
+  every handler carried. A connection belongs to one account for its whole life.
+  A client that used to connect anonymously and authenticate in a frame has to
+  present its credential in the handshake instead.
+- **The desk's verbs reach desk threads only.** Claim, assign, prioritise, tag
+  and rate went through `visible_to`, so an agent could claim a channel into a
+  queue where it was neither answerable nor closable. They go through
+  `_desk_ticket` now.
+- **Your list is what you are in, not what you can find.** `listed_for` is
+  `visible_to` minus discovery, so the queue and a client's own thread list no
+  longer carry every open channel in the building. `GET /support/channels` is
+  the one listing that shows you a room you have not joined.
 
 ### Fixed
 
+- **`Ticket.readable_by` no longer hands staff a room.** It is the
+  row-at-a-time answer to `TicketQuerySet.visible_to` and predated the line that
+  method draws, so it still returned true for any staff account on any thread --
+  a private group, a direct message between two customers, anything -- and in
+  the other direction refused a non-staff account the public channel the
+  queryset offers for discovery. Nothing calls it, so this was a latent trap
+  rather than a live leak; in an app meant to be copied out, a helper whose
+  answer is more generous than the queryset beside it is a trap wherever it
+  lands. A test now asserts the two against each other for every kind and every
+  account.
+- **Being put into a thread now reaches the person it concerns.**
+  `publish_ticket` only ever published to the thread's own channel, so somebody
+  added to a thread they were not already in -- an invitation, and now every new
+  group and private chat -- was the one person who never heard about it.
+  `to_members` sends it to their account channel, which is where they are
+  certainly listening.
+- **Every feature app is now proven to work on its own**, not only alongside all
+  the others. `tests/test_app_isolation.py` had covered one of the four; it is
+  now parametrised over `cms`, `notifications`, `shop` and `support`, and each
+  has to boot with no login app installed, install its own tables and none of
+  its neighbours', and leave nothing in the schema when nobody names it. Adding
+  an app to `FEATURE_APPS` is what gives it that coverage, so the app somebody
+  adds next is covered the day it is added rather than the day somebody
+  remembers to copy a test. Support additionally opens a ticket over HTTP and a
+  socket over the same Django session in a project with no login app and no
+  notification app -- the guards that make that possible were already there, and
+  a guard nobody exercises is a comment.
 - **The unread count is no longer permanently stuck at what you had missed.**
   The correlated subquery that annotates a thread's unread count read its
   watermark with a single `OuterRef`, which one level deep resolves against the
