@@ -14,8 +14,12 @@ documented nowhere is found by reading the source, which is the thing these
 files exist to save somebody from.
 """
 
+import importlib.util
+import os
 import re
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -63,17 +67,69 @@ def test_the_example_project_turns_every_feature_app_on(app: str) -> None:
     assert flag(EXAMPLE_SAMPLE, app) == "true"
 
 
+def settings_read_from_the_environment() -> set[str]:
+    """Every `DJANGO_*` key `base.py` actually asks the environment for.
+
+    Executed rather than pattern-matched. A regex over the source can only find
+    the names spelled as literals, and the moment one is built -- as the
+    per-app transport lists are, from `f"DJANGO_{app.upper()}_TRANSPORTS"` --
+    it becomes a setting the project reads and this file cannot see. A guard
+    with a blind spot is worse than no guard, because it reports success over
+    exactly the settings most likely to be undocumented.
+
+    So the module is run with `os.getenv` recording what it is asked for, in a
+    fresh namespace and against an environment that turns every feature app on:
+    an app left off would take its own settings out of the answer.
+    """
+    asked: set[str] = set()
+    real_getenv = os.getenv
+
+    def recording_getenv(key: str, default: Any = None) -> Any:
+        asked.add(key)
+        return real_getenv(key, default)
+
+    environment = {
+        # No `.env` file: this has to see the settings module's own defaults
+        # rather than whatever the developer running the suite has configured.
+        "DJANGO_ENV_FILE": "",
+        "DJANGO_SECRET_KEY": "env-sample-secret-key-long-enough-for-hs256",
+        **{f"DJANGO_{app}_ENABLED": "true" for app in FEATURE_APPS},
+    }
+
+    specification = importlib.util.spec_from_file_location("_env_probe_settings", SETTINGS)
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+
+    with (
+        mock.patch.dict(os.environ, environment, clear=True),
+        mock.patch("os.getenv", recording_getenv),
+    ):
+        specification.loader.exec_module(module)
+
+    return {key for key in asked if key.startswith("DJANGO_")}
+
+
+def test_the_guard_can_see_settings_whose_names_are_built() -> None:
+    """The blind spot this file used to have, asserted so it cannot come back.
+
+    `DJANGO_SUPPORT_TRANSPORTS` is never written down in `base.py`; it is built
+    from the app's name. If the collector ever goes back to reading the source
+    as text, this is the test that says so.
+    """
+    assert "DJANGO_SUPPORT_TRANSPORTS" in settings_read_from_the_environment()
+
+
 @pytest.mark.parametrize(
     "sample", [STARTER_SAMPLE, TEMPLATE_SAMPLE, EXAMPLE_SAMPLE], ids=lambda p: p.name
 )
 def test_every_setting_the_project_reads_is_named_in_every_sample(sample: Path) -> None:
-    """Read off `base.py` rather than listed here, so a new setting fails this.
+    """Read off what `base.py` asks for, so a new setting fails this.
 
     Only the feature apps' own settings: the auth and OAuth apps are configured
     per deployment and their samples are curated on purpose.
     """
-    pattern = rf'os\.getenv\(\s*"(DJANGO_(?:{"|".join(FEATURE_APPS)})_\w+)"'
-    declared = set(re.findall(pattern, SETTINGS.read_text()))
+    prefixes = tuple(f"DJANGO_{app}_" for app in FEATURE_APPS)
+    declared = {key for key in settings_read_from_the_environment() if key.startswith(prefixes)}
     assert declared, "no feature-app settings found -- has base.py moved?"
 
     named = set(re.findall(r"^#?\s*(DJANGO_\w+)=", sample.read_text(), re.MULTILINE))
