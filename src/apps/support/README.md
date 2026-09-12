@@ -3,11 +3,20 @@
 Live chat and support tickets between a client and the desk, over four
 transports at once: HTTP, a WebSocket, GraphQL and gRPC.
 
-This directory is self-contained. It imports nothing from the project around it
-except things it degrades gracefully without: `unfold` for the admin theme, and
-`infrastructure.auth.core.sessions` for "which account does this bearer token
-belong to?". Both are wrapped in `try/except ImportError` with a Django default
-behind them, so the app can be copied into another project as it stands.
+This directory holds the whole feature -- models, services, all four transports,
+admin, migrations and tests -- and no other feature app reaches into it. What it
+needs from outside is one package and two optional ones:
+
+| What | Needed | If it is missing |
+| --- | --- | --- |
+| `infrastructure/common` | **Required** | The app will not import at all. It supplies the error envelope, the response titles, the caller helpers the GraphQL and gRPC layers use, and the settings contract in `apps.py`. Copy this directory alongside `apps/support`. |
+| `infrastructure.auth.core.sessions` | Optional | Guarded by `try/except ImportError`. Without it the router falls back to Django's own `django_auth` and the socket authenticates by session cookie, so the app still works -- it just stops accepting bearer tokens. |
+| `unfold` | Optional | Only the admin theme. |
+
+So "copy the directory" means copying **two**: `apps/support` and
+`infrastructure/common`. There is no third. The app reads no project setting it
+does not default for itself, and imports no other feature app except one guarded
+hand-off to `apps.notifications` that is skipped when it is not installed.
 
 ## Dropping it into another Django project
 
