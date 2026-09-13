@@ -819,12 +819,12 @@ request needs a way to.
 <!-- generated:settings -->
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
-| `DJANGO_SHOP_ENABLED` | **Yes** | Installs the app, its migrations, its routes and its admin. Unset, a project carries no shop at all. |
-| `DJANGO_SHOP_CURRENCY` | Optional | The ISO 4217 code every price is quoted in. Defaults to `USD`. |
-| `DJANGO_SHOP_REVIEW_MODERATION` | Optional | Whether a review waits for a moderator before anybody can read it. Defaults to on. |
-| `DJANGO_SHOP_MAX_ITEM_QUANTITY` | Optional | The most of one product a single cart line may hold. Defaults to 99. |
-| `DJANGO_SHOP_PAGE_SIZE` | Optional | How many products a listing returns when the caller does not say. Defaults to 24. |
-| `DJANGO_SHOP_MAX_PAGE_SIZE` | Optional | The ceiling on `limit`, so one request cannot ask for the catalogue. Defaults to 100. |
+| `DJANGO_SHOP_ENABLED` | **Yes** | whether this deployment carries the shop at all -- its tables, its routes and its admin. |
+| `DJANGO_SHOP_CURRENCY` | **Yes** | the ISO 4217 code every price in the catalogue is quoted in. |
+| `DJANGO_SHOP_REVIEW_MODERATION` | Recommended | whether a review waits for a moderator before anybody can read it. |
+| `DJANGO_SHOP_MAX_ITEM_QUANTITY` | Optional | the most of one product a single cart line may hold. Range 1–10000. |
+| `DJANGO_SHOP_PAGE_SIZE` | Optional | how many products a listing returns when the caller does not say. Range 1–200. |
+| `DJANGO_SHOP_MAX_PAGE_SIZE` | Optional | the ceiling on `limit`, so one request cannot ask for the catalogue. Range 1–1000. |
 <!-- /generated:settings -->
 
 ```bash

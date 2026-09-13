@@ -14,9 +14,10 @@ from django.conf import settings
 from django.core.checks import Error, Warning
 from django.test import override_settings
 
-from infrastructure.common.appsettings import MISSING, AppSettings, Requirement
+from infrastructure.common.appsettings import MISSING, AppSettings, Requirement, Rule
 from infrastructure.common.checks import (
     _check,
+    _check_rule,
     check_declared_app_settings,
     installed_specs,
 )
@@ -187,6 +188,8 @@ def test_the_apps_this_suite_enables_all_declare_a_contract() -> None:
         "oauth_rotation",
         "notifications",
         "support",
+        "cms",
+        "shop",
     }
 
 
@@ -289,3 +292,163 @@ def test_a_provider_credential_the_suite_blanks_out_is_reported() -> None:
         }
 
     assert errors == {"oauth_github.OAUTH_PROVIDER_CONFIG.github.client_secret"}
+
+
+# -- the shape of a value, and relationships between several -------------------
+
+
+def test_a_value_of_the_wrong_shape_is_an_error() -> None:
+    with override_settings(SHOP_CURRENCY="dollars"):
+        messages = _messages(
+            Requirement(
+                "SHOP_CURRENCY",
+                purpose="the currency",
+                pattern=r"[A-Z]{3}",
+                pattern_description="be a three-letter ISO 4217 code, such as USD",
+            )
+        )
+
+    assert [message.id for message in messages] == ["thing.SHOP_CURRENCY"]
+    assert "three-letter ISO 4217 code" in messages[0].msg
+
+
+def test_a_pattern_has_to_match_the_whole_value() -> None:
+    """`USDollar` starts with three capitals, and is not a currency code."""
+    with override_settings(SHOP_CURRENCY="USDollar"):
+        assert _ids(Requirement("SHOP_CURRENCY", purpose="p", pattern=r"[A-Z]{3}")) == {
+            "thing.SHOP_CURRENCY"
+        }
+
+
+def test_a_value_of_the_right_shape_passes() -> None:
+    with override_settings(SHOP_CURRENCY="EUR"):
+        assert _ids(Requirement("SHOP_CURRENCY", purpose="p", pattern=r"[A-Z]{3}")) == set()
+
+
+def test_a_requirement_its_condition_rules_out_is_not_checked_at_all() -> None:
+    """A deployment nagged about a setting its own configuration made irrelevant
+    learns to ignore the checker."""
+    requirement = Requirement(
+        "NOT_A_REAL_SETTING",
+        purpose="nothing",
+        required=True,
+        applies_when=lambda: False,
+    )
+
+    assert _messages(requirement) == []
+
+
+def test_a_requirement_its_condition_admits_is_checked_as_usual() -> None:
+    requirement = Requirement(
+        "NOT_A_REAL_SETTING",
+        purpose="nothing",
+        required=True,
+        applies_when=lambda: True,
+    )
+
+    assert _ids(requirement) == {"thing.NOT_A_REAL_SETTING"}
+
+
+def test_a_rule_that_holds_reports_nothing() -> None:
+    assert _check_rule("thing", SPEC, Rule(holds=lambda: True, message="never said")) == []
+
+
+def test_a_rule_that_fails_is_an_error_against_its_first_setting() -> None:
+    messages = _check_rule(
+        "shop",
+        AppSettings(title="Shop"),
+        Rule(
+            holds=lambda: False,
+            message="the ceiling is below the default",
+            settings=("SHOP_MAX_PAGE_SIZE", "SHOP_PAGE_SIZE"),
+        ),
+    )
+
+    assert [message.id for message in messages] == ["shop.SHOP_MAX_PAGE_SIZE"]
+    assert "the ceiling is below the default" in messages[0].msg
+
+
+# -- every feature app, not only the ones that had a contract first ------------
+
+
+@pytest.mark.parametrize("label", ["cms", "notifications", "shop", "support"])
+def test_a_feature_app_declares_the_flag_that_installs_it(label: str) -> None:
+    """Installing an app without turning it on migrates its tables and publishes
+    none of its routes, which is worth being told rather than discovering."""
+    spec = dict(installed_specs())[label]
+
+    assert f"{label.upper()}_ENABLED" in {requirement.setting for requirement in spec.requirements}
+
+
+@pytest.mark.parametrize(
+    ("label", "setting"),
+    [
+        ("cms", "CMS_UPLOAD_PATH"),
+        ("cms", "CMS_MAX_UPLOAD_MB"),
+        ("notifications", "NOTIFICATIONS_WS_PATH"),
+        ("notifications", "NOTIFICATIONS_CHANNEL_PREFIX"),
+        ("shop", "SHOP_CURRENCY"),
+        ("shop", "SHOP_MAX_PAGE_SIZE"),
+        ("support", "SUPPORT_WS_PATH"),
+        ("support", "SUPPORT_REFERENCE_PREFIX"),
+        ("support", "SUPPORT_UPLOAD_PATH"),
+    ],
+)
+def test_each_feature_app_declares_the_settings_it_reads(label: str, setting: str) -> None:
+    spec = dict(installed_specs())[label]
+
+    assert setting in {requirement.setting for requirement in spec.requirements}
+
+
+def test_every_setting_a_feature_app_declares_is_one_the_project_defines() -> None:
+    """The same guarantee the infrastructure apps get: a typo in a path would
+    otherwise be a permanent error nobody can clear."""
+    for label in ("cms", "notifications", "shop", "support"):
+        spec = dict(installed_specs())[label]
+        for requirement in spec.requirements:
+            assert requirement.resolve() is not MISSING, f"{label}.{requirement.setting}"
+
+
+def test_an_app_installed_but_not_enabled_is_an_error() -> None:
+    """`DJANGO_SHOP_ENABLED` is what installs the shop, so the two cannot
+    disagree unless somebody edited INSTALLED_APPS by hand -- and then the tables
+    migrate and no route is published."""
+    with override_settings(SHOP_ENABLED=False):
+        errors = {
+            message.id for message in check_declared_app_settings() if isinstance(message, Error)
+        }
+
+    assert "shop.SHOP_ENABLED" in errors
+
+
+def test_a_currency_that_is_not_a_code_stops_the_shop() -> None:
+    with override_settings(SHOP_CURRENCY="dollars"):
+        errors = {
+            message.id for message in check_declared_app_settings() if isinstance(message, Error)
+        }
+
+    assert "shop.SHOP_CURRENCY" in errors
+
+
+def test_a_page_ceiling_below_the_default_page_size_is_an_error() -> None:
+    """Two individually reasonable numbers in the wrong order: no requirement on
+    its own can see it."""
+    with override_settings(SHOP_PAGE_SIZE=50, SHOP_MAX_PAGE_SIZE=10):
+        errors = {
+            message.id for message in check_declared_app_settings() if isinstance(message, Error)
+        }
+
+    assert "shop.SHOP_MAX_PAGE_SIZE" in errors
+
+
+def test_the_redis_url_is_only_required_once_the_broker_is_the_redis_one() -> None:
+    memory = "apps.support.broadcast.MemoryBroker"
+    redis = "apps.support.broadcast.RedisBroker"
+
+    with override_settings(SUPPORT_BROKER=memory, SUPPORT_REDIS_URL=""):
+        quiet = {message.id for message in check_declared_app_settings()}
+    with override_settings(SUPPORT_BROKER=redis, SUPPORT_REDIS_URL=""):
+        loud = {message.id for message in check_declared_app_settings()}
+
+    assert "support.SUPPORT_REDIS_URL" not in quiet
+    assert "support.SUPPORT_REDIS_URL" in loud

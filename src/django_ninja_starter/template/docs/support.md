@@ -542,6 +542,13 @@ showing it as open forever.
 <!-- generated:settings -->
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
+| `DJANGO_SUPPORT_ENABLED` | **Yes** | whether this deployment carries the support desk at all -- its tables, its routes, its admin and its socket. |
+| `DJANGO_SUPPORT_WS_PATH` | **Yes** | where the live conversation is mounted, which a reverse proxy has to be told about. |
+| `DJANGO_SUPPORT_REFERENCE_PREFIX` | **Yes** | the letters in front of a ticket reference, as in SUP-3F7A2B. |
+| `DJANGO_SUPPORT_CHANNEL_PREFIX` | **Yes** | what this deployment's broadcast channels are named, so two deployments sharing a Redis do not deliver each other's messages. |
+| `DJANGO_SUPPORT_REDIS_URL` | **Yes** | the Redis the broker fans out through. |
+| `DJANGO_SUPPORT_UPLOAD_PATH` | **Yes** | where a file attached to a message is written inside STORAGES["default"]. |
+| `DJANGO_SUPPORT_UPLOAD_EXTENSIONS` | Recommended | what the desk accepts, as an allowlist of extensions. |
 | `DJANGO_SUPPORT_BROKER` | Recommended | how a message posted in one process reaches sockets held by another. |
 | `DJANGO_SUPPORT_RETENTION_DAYS` | Optional | how long a closed ticket is kept before `manage.py support_prune` deletes it. 0 or more. |
 | `DJANGO_SUPPORT_MAX_UPLOAD_MB` | Optional | the largest file a client may attach to a message. 0 or more. |

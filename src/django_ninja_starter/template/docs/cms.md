@@ -578,11 +578,11 @@ flag because that is not what anybody wants by accident.
 <!-- generated:settings -->
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
-| `DJANGO_CMS_ENABLED` | **Yes** | Installs the app, its migrations, its routes and its admin. Unset, a project carries no CMS at all. |
-| `DJANGO_CMS_LANGUAGES` | Optional | The languages content may be written in, most preferred first. Defaults to `LANGUAGE_CODE`. |
-| `DJANGO_CMS_PREVIEW_TTL_SECONDS` | Optional | How long a preview link opens a draft for. Defaults to a day. |
-| `DJANGO_CMS_UPLOAD_PATH` | Optional | Where a file uploaded on the content screen is written inside `STORAGES["default"]`. Defaults to `cms/uploads`. |
-| `DJANGO_CMS_MAX_UPLOAD_MB` | Optional | The largest file the content screen accepts. Defaults to 20; `0` means no limit, for a deployment whose proxy imposes one already. |
+| `DJANGO_CMS_ENABLED` | **Yes** | whether this deployment carries the CMS at all -- its tables, its routes and its admin. |
+| `DJANGO_CMS_LANGUAGES` | Optional | the languages content may be written in, most preferred first. |
+| `DJANGO_CMS_PREVIEW_TTL_SECONDS` | Optional | how long a preview link opens a draft for. Range 1–2592000. |
+| `DJANGO_CMS_UPLOAD_PATH` | **Yes** | where a file uploaded on the content screen is written inside STORAGES["default"]. |
+| `DJANGO_CMS_MAX_UPLOAD_MB` | Optional | the largest file the content screen accepts, in megabytes. Range 0–1024. |
 <!-- /generated:settings -->
 
 ```bash

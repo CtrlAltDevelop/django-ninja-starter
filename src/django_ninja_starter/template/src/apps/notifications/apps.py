@@ -1,4 +1,5 @@
 from django.apps import AppConfig
+from django.conf import settings
 
 from infrastructure.common.appsettings import AppSettings, Requirement
 
@@ -13,6 +14,49 @@ class NotificationsConfig(AppConfig):
         title="Notifications",
         summary="Stored notifications, a read API, and a WebSocket that pushes new ones.",
         requirements=(
+            Requirement(
+                "NOTIFICATIONS_ENABLED",
+                env="DJANGO_NOTIFICATIONS_ENABLED",
+                purpose=(
+                    "whether this deployment carries notifications at all -- their "
+                    "tables, their routes and their socket"
+                ),
+                required=True,
+                hint=(
+                    "The app is installed, so something put it in INSTALLED_APPS while "
+                    "DJANGO_NOTIFICATIONS_ENABLED was off. Set it to true, or drop the "
+                    "app: half enabled, it migrates its tables and publishes none of "
+                    "its routes."
+                ),
+            ),
+            Requirement(
+                "NOTIFICATIONS_WS_PATH",
+                env="DJANGO_NOTIFICATIONS_WS_PATH",
+                purpose="where the live feed is mounted, which a reverse proxy has to be told",
+                required=True,
+                pattern=r"/\S*",
+                pattern_description="be a path beginning with a slash, such as /ws/notifications",
+            ),
+            Requirement(
+                "NOTIFICATIONS_CHANNEL_PREFIX",
+                env="DJANGO_NOTIFICATIONS_CHANNEL_PREFIX",
+                purpose=(
+                    "what this deployment's broadcast channels are named, so two "
+                    "deployments sharing a Redis do not deliver each other's notifications"
+                ),
+                required=True,
+            ),
+            Requirement(
+                "NOTIFICATIONS_REDIS_URL",
+                env="DJANGO_NOTIFICATIONS_REDIS_URL",
+                purpose="the Redis the broker fans out through",
+                required=True,
+                applies_when=lambda: "Redis" in settings.NOTIFICATIONS_BROKER,
+                hint=(
+                    "The broker is the Redis one, and it has nothing to connect to. Set "
+                    "this, or DJANGO_AUTH_REDIS_URL, which it falls back to."
+                ),
+            ),
             Requirement(
                 "NOTIFICATIONS_BROKER",
                 env="DJANGO_NOTIFICATIONS_BROKER",

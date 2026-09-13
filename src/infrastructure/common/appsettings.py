@@ -27,6 +27,7 @@ exactly what the apps *it turned on* still need, and never nagged about the rest
         )
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,10 +61,35 @@ class Requirement:
     maximum: float | None = None
     choices: tuple[str, ...] = ()
 
+    pattern: str = ""
+    """A regular expression the value has to match whole.
+
+    For the settings whose acceptable values are a shape rather than a list: a
+    currency is any three letters, a mount path is anything starting with a
+    slash. ``choices`` would have to enumerate the world to say the same thing.
+    """
+
+    pattern_description: str = ""
+    """The pattern said in words, because a regex in an error message helps nobody."""
+
     unsafe_defaults: tuple[str, ...] = ()
     """Values that are fine locally and wrong once real users arrive."""
 
     hint: str = ""
+
+    applies_when: Callable[[], bool] | None = None
+    """Whether this requirement is live at all, given the rest of the settings.
+
+    Some settings only matter once another one has a particular value: a Redis
+    URL is nothing to nag about until the broker is the Redis one, and a
+    deployment told to fill in a setting its own configuration has made
+    irrelevant learns to ignore the checker. Called with no arguments, at check
+    time, so it reads the settings as they finally are.
+    """
+
+    def applies(self) -> bool:
+        """Whether this requirement should be validated in this configuration."""
+        return self.applies_when is None or self.applies_when()
 
     @property
     def check_id(self) -> str:
@@ -82,9 +108,36 @@ class Requirement:
 
 
 @dataclass(frozen=True)
+class Rule:
+    """A condition across several of an app's settings at once.
+
+    A requirement can only judge one value on its own, and some misconfigurations
+    are relationships: a default page size above the ceiling that clamps it is
+    two individually reasonable numbers in the wrong order. ``holds`` is called
+    with no arguments at check time and returns whether the configuration is
+    sound.
+    """
+
+    holds: Callable[[], bool]
+    message: str
+    """What is wrong, in the deployment's terms rather than the code's."""
+
+    settings: tuple[str, ...] = ()
+    """The settings involved, first one naming the check so it can be silenced."""
+
+    hint: str = ""
+
+    @property
+    def check_id(self) -> str:
+        return self.settings[0] if self.settings else "settings"
+
+
+@dataclass(frozen=True)
 class AppSettings:
     """The settings contract for one app."""
 
     title: str
     summary: str = ""
     requirements: tuple[Requirement, ...] = field(default_factory=tuple)
+    rules: tuple[Rule, ...] = field(default_factory=tuple)
+    """Conditions no single requirement can express, checked once all are filled."""

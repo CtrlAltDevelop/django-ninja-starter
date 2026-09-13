@@ -437,6 +437,10 @@ broadcasts being the case every caller forgets.
 <!-- generated:settings -->
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
+| `DJANGO_NOTIFICATIONS_ENABLED` | **Yes** | whether this deployment carries notifications at all -- their tables, their routes and their socket. |
+| `DJANGO_NOTIFICATIONS_WS_PATH` | **Yes** | where the live feed is mounted, which a reverse proxy has to be told. |
+| `DJANGO_NOTIFICATIONS_CHANNEL_PREFIX` | **Yes** | what this deployment's broadcast channels are named, so two deployments sharing a Redis do not deliver each other's notifications. |
+| `DJANGO_NOTIFICATIONS_REDIS_URL` | **Yes** | the Redis the broker fans out through. |
 | `DJANGO_NOTIFICATIONS_BROKER` | Recommended | how a notification created in one process reaches sockets held by another. |
 | `DJANGO_NOTIFICATIONS_RETENTION_DAYS` | Optional | how long notifications are kept before `manage.py notifications_prune` deletes them. 0 or more. |
 | `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG` | Optional | how many unread notifications a client is caught up with on connect. Range 0–500. |

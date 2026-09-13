@@ -1,4 +1,5 @@
 from django.apps import AppConfig
+from django.conf import settings
 
 from infrastructure.common.appsettings import AppSettings, Requirement
 
@@ -16,6 +17,83 @@ class SupportConfig(AppConfig):
             "gRPC and a WebSocket."
         ),
         requirements=(
+            Requirement(
+                "SUPPORT_ENABLED",
+                env="DJANGO_SUPPORT_ENABLED",
+                purpose=(
+                    "whether this deployment carries the support desk at all -- its "
+                    "tables, its routes, its admin and its socket"
+                ),
+                required=True,
+                hint=(
+                    "The app is installed, so something put it in INSTALLED_APPS while "
+                    "DJANGO_SUPPORT_ENABLED was off. Set it to true, or drop the app: "
+                    "half enabled, it migrates its tables and publishes none of its "
+                    "routes."
+                ),
+            ),
+            Requirement(
+                "SUPPORT_WS_PATH",
+                env="DJANGO_SUPPORT_WS_PATH",
+                purpose=(
+                    "where the live conversation is mounted, which a reverse proxy has "
+                    "to be told about"
+                ),
+                required=True,
+                pattern=r"/\S*",
+                pattern_description="be a path beginning with a slash, such as /ws/support",
+            ),
+            Requirement(
+                "SUPPORT_REFERENCE_PREFIX",
+                env="DJANGO_SUPPORT_REFERENCE_PREFIX",
+                purpose="the letters in front of a ticket reference, as in SUP-3F7A2B",
+                required=True,
+                pattern=r"[A-Za-z0-9]{1,8}",
+                pattern_description="be one to eight letters or digits, with no separator",
+            ),
+            Requirement(
+                "SUPPORT_CHANNEL_PREFIX",
+                env="DJANGO_SUPPORT_CHANNEL_PREFIX",
+                purpose=(
+                    "what this deployment's broadcast channels are named, so two "
+                    "deployments sharing a Redis do not deliver each other's messages"
+                ),
+                required=True,
+            ),
+            Requirement(
+                "SUPPORT_REDIS_URL",
+                env="DJANGO_SUPPORT_REDIS_URL",
+                purpose="the Redis the broker fans out through",
+                required=True,
+                applies_when=lambda: "Redis" in settings.SUPPORT_BROKER,
+                hint=(
+                    "The broker is the Redis one, and it has nothing to connect to. Set "
+                    "this, or DJANGO_AUTH_REDIS_URL, which it falls back to."
+                ),
+            ),
+            Requirement(
+                "SUPPORT_UPLOAD_PATH",
+                env="DJANGO_SUPPORT_UPLOAD_PATH",
+                purpose=(
+                    'where a file attached to a message is written inside STORAGES["default"]'
+                ),
+                required=True,
+                hint=(
+                    "A prefix, not a filesystem path. Empty would write strangers' "
+                    "attachments to the root of the store, beside everything else."
+                ),
+            ),
+            Requirement(
+                "SUPPORT_UPLOAD_EXTENSIONS",
+                env="DJANGO_SUPPORT_UPLOAD_EXTENSIONS",
+                purpose="what the desk accepts, as an allowlist of extensions",
+                recommended=True,
+                hint=(
+                    "A support desk is a place strangers send you files, which is the "
+                    "worst place to accept any of them. Left empty the app applies no "
+                    "extension check at all."
+                ),
+            ),
             Requirement(
                 "SUPPORT_BROKER",
                 env="DJANGO_SUPPORT_BROKER",

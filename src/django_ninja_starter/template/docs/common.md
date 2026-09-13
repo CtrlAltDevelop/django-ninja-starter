@@ -131,10 +131,27 @@ told what the apps *it turned on* still need and nagged about nothing else.
 Message ids are the app label plus the setting, so `SILENCED_SYSTEM_CHECKS` can
 turn off exactly one.
 
-An app meant to be copied into other projects — the [CMS](cms.md) is the one
-here — cannot import `AppSettings` without dragging this project along, so it may
-declare `settings_docs` on its `AppConfig` instead: plain rows that document its
-settings without validating them.
+A requirement can say more than "not empty". `minimum`/`maximum` bound a number,
+`choices` enumerates the acceptable values and `pattern` describes their shape
+where enumerating them is hopeless — a currency is any three capitals. Some
+settings only matter once another has a particular value, and `applies_when`
+gates them: a Redis URL is nothing to nag about until the broker is the Redis
+one. What no single requirement can see is a *relationship* — a default page
+size above the ceiling meant to clamp it is two reasonable numbers in the wrong
+order — so `AppSettings.rules` takes those, and reports them against the first
+setting named.
+
+Every optional app declares one, including its own `*_ENABLED` flag: that flag is
+what installs the app, so an installed app whose flag is off means somebody
+edited `INSTALLED_APPS` by hand, and the result migrates tables and publishes no
+routes. Saying so out loud is cheaper than discovering it.
+
+An app meant to be copied into other projects may instead declare `settings_docs`
+on its `AppConfig`: plain rows that document its settings without validating
+them. Nothing here uses it — all five feature apps already import from
+`infrastructure.common`, so the contract costs them nothing they had not already
+spent.
+
 
 ### Keeping these pages honest
 
