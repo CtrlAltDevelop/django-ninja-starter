@@ -152,6 +152,20 @@ them. Nothing here uses it — all five feature apps already import from
 `infrastructure.common`, so the contract costs them nothing they had not already
 spent.
 
+### Refusing to serve
+
+`manage.py` runs the system checks before it runs a command, which is why a
+missing setting stops `runserver` and `migrate`. Nothing ran them when Gunicorn
+or Uvicorn imported `config/wsgi.py` or `config/asgi.py` — so in the one
+environment where a wrong setting matters most, the process started cleanly and
+failed later, one request at a time, in whichever worker took it.
+
+Both entry points now call `config.preflight.verify_configuration()` once the
+app registry is populated and before anything is served. Errors stop the boot;
+warnings do not, because refusing to start over an opinion would make the
+warning level useless, and `SILENCED_SYSTEM_CHECKS` means the same thing here as
+it does to `manage.py check`. `DJANGO_SKIP_PREFLIGHT=true` serves anyway, and is
+deliberately not the default.
 
 ### Keeping these pages honest
 

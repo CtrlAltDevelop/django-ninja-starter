@@ -16,9 +16,16 @@ from typing import Any
 
 from django.core.asgi import get_asgi_application
 
+from config.preflight import verify_configuration
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.production")
 
-django_application = get_asgi_application()
+django_application: Any = get_asgi_application()
+
+# After the application is built, because that is what runs `django.setup()`
+# and populates the app registry the checks walk; before a single request is
+# served, because that is the point.
+verify_configuration()
 
 
 async def application(scope: dict[str, Any], receive: Any, send: Any) -> None:
