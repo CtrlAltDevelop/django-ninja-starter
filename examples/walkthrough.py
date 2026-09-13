@@ -1345,14 +1345,25 @@ def section_shop(api: Api) -> None:
     api.get(f"/api/v1/shop/orders/{order['number']}/invoice")
 
     note(
-        "This starter wires up no gateway. Payments are created against the "
-        "`manual` provider, and this is the seam a real callback is pointed at."
+        "Nothing the shopper holds can mark this order paid. There is no such "
+        "endpoint, because every credential this API accepts belongs to the "
+        "person who owes the money -- and one who could say it arrived would be "
+        "checking out for nothing."
     )
     api.post(
         f"/api/v1/shop/orders/{order['number']}/payment/confirm",
         {"reference": "bank-statement-4417"},
+        expect=404,
         show=False,
     )
+
+    note(
+        "It is settled the way a deployment settles it: by an operator reading a "
+        "bank statement, or by a gateway callback the project verifies a "
+        "signature on. Both land on the same service method the admin action "
+        "calls, so an order becomes paid in one place however that was decided."
+    )
+    _settle_as_the_desk(order["number"], reference="bank-statement-4417")
     api.get(f"/api/v1/shop/orders/{order['number']}", show=False)
 
     note("And the whole shelf of them, newest first, which is what an account page shows.")
@@ -1363,6 +1374,20 @@ def section_shop(api: Api) -> None:
 
     note("And somebody else's order number is a 404, not a 403.")
     api.get("/api/v1/shop/orders/S00000000XXXX0000", expect=404, show=False)
+
+
+def _settle_as_the_desk(number: str, *, reference: str = "") -> None:
+    """Settle an order the way the back office does, not the way a shopper cannot.
+
+    Straight through the service, because that is the honest depiction: the two
+    callers allowed to say an order was paid are an operator in the admin and a
+    gateway callback a project verifies for itself, and neither of them is an
+    HTTP request carrying the shopper's token.
+    """
+    from apps.shop.models import Order
+    from apps.shop.services import shop_service
+
+    shop_service.settle_order(Order.objects.get(number=number), reference=reference)
 
 
 def section_support(api: Api) -> None:

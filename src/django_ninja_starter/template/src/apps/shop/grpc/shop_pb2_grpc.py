@@ -90,11 +90,6 @@ class ShopControllerStub:
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.FromString,
                 _registered_method=True)
-        self.ConfirmPayment = channel.unary_unary(
-                '/config.shop.ShopController/ConfirmPayment',
-                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.SerializeToString,
-                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.FromString,
-                _registered_method=True)
         self.DeleteReview = channel.unary_unary(
                 '/config.shop.ShopController/DeleteReview',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewRequest.SerializeToString,
@@ -296,12 +291,6 @@ class ShopControllerServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Collections(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def ConfirmPayment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -526,11 +515,6 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     servicer.Collections,
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.SerializeToString,
-            ),
-            'ConfirmPayment': grpc.unary_unary_rpc_method_handler(
-                    servicer.ConfirmPayment,
-                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.FromString,
-                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.SerializeToString,
             ),
             'DeleteReview': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteReview,
@@ -965,33 +949,6 @@ class ShopController:
             '/config.shop.ShopController/Collections',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ConfirmPayment(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/config.shop.ShopController/ConfirmPayment',
-            apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.SerializeToString,
-            apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.FromString,
             options,
             channel_credentials,
             insecure,

@@ -57,7 +57,6 @@ it, and an id belonging to somebody else's basket is a 404 rather than a 403.
 | `GET` | `/api/v1/shop/orders/{number}` | Bearer | Read one of your orders |
 | `POST` | `/api/v1/shop/orders/{number}/cancel` | Bearer | Cancel an unpaid order |
 | `GET` | `/api/v1/shop/orders/{number}/invoice` | Bearer | Read an order's invoice |
-| `POST` | `/api/v1/shop/orders/{number}/payment/confirm` | Bearer | Confirm a payment |
 | `GET` | `/api/v1/shop/products` | None | Search and filter the catalogue |
 | `GET` | `/api/v1/shop/products/{slug}` | None | Read one product |
 | `DELETE` | `/api/v1/shop/products/{slug}/like` | Bearer | Unlike a product |
@@ -245,12 +244,31 @@ declined tries another, and releasing the stock underneath them would mean the
 retry oversells. Cancelling the order is the separate act that puts the stock
 back.
 
-`POST /api/v1/shop/orders/{number}/payment/confirm` is the seam a real gateway's
-callback is pointed at when a project has one. It settles the order through the
-same service method the admin action calls, so there is one place an order
-becomes paid however that was decided — and it is idempotent, because a provider
-that retries its webhook must settle the same order rather than selling the stock
-twice.
+### Nothing a shopper holds settles an order
+
+There is no endpoint, mutation or RPC that marks an order paid. The verb exists —
+`ShopService.settle_order` — and the two callers that may reach it are the admin
+action above and a payment gateway's callback, which a project mounts itself once
+it has a gateway whose signature it can verify.
+
+It is deliberately not published on any of the three transports, because all
+three authenticate the *shopper*, and the shopper is the one party who must not
+be able to assert that they paid. An endpoint scoped to `request.user` reads like
+a callback seam and behaves like a way to check out for nothing.
+
+The line between the two order verbs a shopper does hold and the ones they do not
+is what each asserts about the world. Cancelling an unpaid order asserts nothing
+outside this app, so it stays theirs. Settling asserts that money arrived
+somewhere this app cannot see — the gateway's statement, or an operator's reading
+a bank statement.
+
+When a project wires a real gateway, `ShopService.confirm_payment(user, number)`
+is the method to call from the verified callback: it is scoped to the account the
+order belongs to, so a callback naming an order number alone cannot settle by
+guessable identifier, and it settles through the same path the admin does, so
+there is one place an order becomes paid however that was decided. It is
+idempotent, because a provider that retries its webhook must settle the same
+order rather than selling the stock twice.
 
 ## Reviews and likes
 

@@ -1065,10 +1065,21 @@ class ShopService:
     def confirm_payment(self, user: Any, number: str, *, reference: str = "") -> Order:
         """The provider-webhook seam, scoped to the account whose order it is.
 
+        **Deliberately not published on any transport.** Settling an order is a
+        statement that money arrived somewhere this app cannot see, and the
+        account that owes the money is the one party who cannot be trusted to
+        make it -- a shopper who could call this would be marking their own
+        basket paid. The two callers that may are an operator in the admin, which
+        goes through :meth:`settle_order` directly, and a gateway callback, which
+        a project mounts itself once it has a gateway to verify a signature from.
+
+        Kept scoped to ``user`` for that second caller: a callback names an order
+        and the account it belongs to, and a lookup that took the number alone
+        would settle by guessable identifier.
+
         There is no gateway wired up in this starter -- the default provider is
-        ``manual`` and the working path is the admin -- so this is the endpoint a
-        project points its callback at once it has one, and the reason the
-        settling itself lives in :meth:`settle_order` rather than here.
+        ``manual`` and the working path is the admin -- which is why the settling
+        itself lives in :meth:`settle_order` rather than here.
         """
         return self.settle_order(self._order_row(user, number), reference=reference)
 

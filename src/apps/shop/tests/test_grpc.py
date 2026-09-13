@@ -1133,75 +1133,30 @@ class TestTheAddressBookOverGrpc:
         assert refusal.value.code() is grpc.StatusCode.NOT_FOUND
 
 
-class TestSettlingAnOrderOverGrpc:
-    """The callback seam. This starter ships no gateway, so `manual` payments
-    are settled by somebody reading a bank statement -- and this is what a real
-    provider's callback is pointed at once there is one."""
+class TestSettlingAnOrderIsNotPublishedOverGrpc:
+    """There is no RPC for it, and that is the security property.
 
-    @pytest.fixture
-    def placed(self, transactional_db: None, alice: Any, laptop: Product) -> Any:
-        from apps.shop.models import Address, ShippingMethod
-        from apps.shop.services import shop_service
+    Settling an order asserts that money arrived somewhere this app cannot see.
+    The account that owes it is the one caller who must not make that assertion,
+    and a credential-scoped RPC would hand it to exactly them -- so the verb is
+    reachable from the admin and from a gateway callback a project verifies for
+    itself, and from nowhere a shopper holds a token for.
+    """
 
-        address = Address.objects.create(
-            user=alice,
-            full_name="Alice Example",
-            phone="+441234567890",
-            country="GB",
-            city="Bristol",
-            postal_code="BS1 4ST",
-            line1="1 Example Street",
-        )
-        shipping = ShippingMethod.objects.create(name="Standard", price=Decimal("5.00"))
-        shop_service.add_to_cart(alice, "featherbook-14")
-        return shop_service.checkout(alice, address_id=address.pk, shipping_method_id=shipping.pk)
+    def test_no_rpc_settles_an_order(self) -> None:
+        service = shop_pb2.DESCRIPTOR.services_by_name["ShopController"]
+        published = set(service.methods_by_name)
 
-    def test_confirming_the_payment_settles_the_order(
-        self, placed: Any, alice: Any, grpc_call: Callable[..., Any]
-    ) -> None:
-        reply = grpc_call(
-            Stub,
-            "ConfirmPayment",
-            shop_pb2.ConfirmPaymentRequest(number=placed.number, reference="bank-ref-1"),
-            token=access_token(alice),
-        )
+        assert "ConfirmPayment" not in published
+        # The neighbouring verb the account *does* own is still published, so
+        # this says which verb was withheld rather than that the service was
+        # emptied.
+        assert "CancelOrder" in published
 
-        assert reply.order.payment_status == "succeeded"
-        assert reply.order.status != "pending"
+    def test_the_proto_carries_no_settlement_message(self) -> None:
+        """Gone from the contract too, not merely unrouted.
 
-    def test_a_settled_order_can_no_longer_be_cancelled(
-        self, placed: Any, alice: Any, grpc_call: Callable[..., Any]
-    ) -> None:
-        token = access_token(alice)
-        grpc_call(
-            Stub,
-            "ConfirmPayment",
-            shop_pb2.ConfirmPaymentRequest(number=placed.number),
-            token=token,
-        )
-
-        with pytest.raises(grpc.aio.AioRpcError) as refusal:
-            grpc_call(
-                Stub, "CancelOrder", shop_pb2.CancelOrderRequest(number=placed.number), token=token
-            )
-
-        assert refusal.value.code() is grpc.StatusCode.INVALID_ARGUMENT
-
-    def test_another_accounts_order_cannot_be_settled(
-        self, placed: Any, bob: Any, grpc_call: Callable[..., Any]
-    ) -> None:
-        with pytest.raises(grpc.aio.AioRpcError) as refusal:
-            grpc_call(
-                Stub,
-                "ConfirmPayment",
-                shop_pb2.ConfirmPaymentRequest(number=placed.number),
-                token=access_token(bob),
-            )
-
-        assert refusal.value.code() is grpc.StatusCode.NOT_FOUND
-
-    def test_settling_needs_a_credential(self, placed: Any, grpc_call: Callable[..., Any]) -> None:
-        with pytest.raises(grpc.aio.AioRpcError) as refusal:
-            grpc_call(Stub, "ConfirmPayment", shop_pb2.ConfirmPaymentRequest(number=placed.number))
-
-        assert refusal.value.code() is grpc.StatusCode.UNAUTHENTICATED
+        A generated client builds from the `.proto`; leaving the message in it
+        would keep advertising a call the server no longer answers.
+        """
+        assert not hasattr(shop_pb2, "ConfirmPaymentRequest")

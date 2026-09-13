@@ -272,7 +272,7 @@ With a bearer token, and only ever about the caller:
 | `GET /api/v1/shop/cart` | Empty afterwards — what was in it is on the order now |
 | `GET /api/v1/shop/orders` | Every order this account has placed, newest first |
 | `GET /api/v1/shop/orders/{number}/invoice` | A document, not a view of the order: address, prices and totals are copied, so editing either afterwards cannot rewrite what somebody was charged |
-| `POST /api/v1/shop/orders/{number}/payment/confirm` | The seam a real gateway's callback is pointed at. This starter wires up none, so payments are `manual` and settled here or in the admin |
+| _(no endpoint)_ | Nothing a shopper holds marks an order paid. Every credential this API takes belongs to the person who owes the money, so settling is the admin's or a verified gateway callback's — `ShopService.settle_order` |
 | `POST /api/v1/shop/orders/{number}/cancel` | Refused once it is paid for |
 | `GET /api/v1/shop/orders/S00000000XXXX0000` | Somebody else's number is a **404**, not a 403 |
 

@@ -43,7 +43,6 @@ class ShopControllerStub:
     ClearCart: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.ClearCartResult]
     Collection: _grpc.UnaryUnaryMultiCallable[_shop_pb2.CollectionRequest, _shop_pb2.CollectionResult]
     Collections: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.CollectionList]
-    ConfirmPayment: _grpc.UnaryUnaryMultiCallable[_shop_pb2.ConfirmPaymentRequest, _shop_pb2.ConfirmPaymentResult]
     DeleteReview: _grpc.UnaryUnaryMultiCallable[_shop_pb2.DeleteReviewRequest, _shop_pb2.DeleteReviewResult]
     Favourites: _grpc.UnaryUnaryMultiCallable[_shop_pb2.FavouritesRequest, _shop_pb2.FavouritesResult]
     GetAddress: _grpc.UnaryUnaryMultiCallable[_shop_pb2.GetAddressRequest, _shop_pb2.GetAddressResult]
@@ -86,7 +85,6 @@ class ShopControllerAsyncStub(ShopControllerStub):
     ClearCart: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.ClearCartResult]  # type: ignore[assignment]
     Collection: _aio.UnaryUnaryMultiCallable[_shop_pb2.CollectionRequest, _shop_pb2.CollectionResult]  # type: ignore[assignment]
     Collections: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.CollectionList]  # type: ignore[assignment]
-    ConfirmPayment: _aio.UnaryUnaryMultiCallable[_shop_pb2.ConfirmPaymentRequest, _shop_pb2.ConfirmPaymentResult]  # type: ignore[assignment]
     DeleteReview: _aio.UnaryUnaryMultiCallable[_shop_pb2.DeleteReviewRequest, _shop_pb2.DeleteReviewResult]  # type: ignore[assignment]
     Favourites: _aio.UnaryUnaryMultiCallable[_shop_pb2.FavouritesRequest, _shop_pb2.FavouritesResult]  # type: ignore[assignment]
     GetAddress: _aio.UnaryUnaryMultiCallable[_shop_pb2.GetAddressRequest, _shop_pb2.GetAddressResult]  # type: ignore[assignment]
@@ -192,13 +190,6 @@ class ShopControllerServicer(metaclass=_abc_1.ABCMeta):
         request: _empty_pb2.Empty,
         context: _ServicerContext,
     ) -> _typing.Union[_shop_pb2.CollectionList, _abc.Awaitable[_shop_pb2.CollectionList]]: ...
-
-    @_abc_1.abstractmethod
-    def ConfirmPayment(
-        self,
-        request: _shop_pb2.ConfirmPaymentRequest,
-        context: _ServicerContext,
-    ) -> _typing.Union[_shop_pb2.ConfirmPaymentResult, _abc.Awaitable[_shop_pb2.ConfirmPaymentResult]]: ...
 
     @_abc_1.abstractmethod
     def DeleteReview(

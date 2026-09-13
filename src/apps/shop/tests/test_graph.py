@@ -588,17 +588,6 @@ class TestSellersOverGraphql:
         assert refusal(body)["status"] == 404
 
 
-CONFIRM_PAYMENT = """
-mutation($number: String!, $reference: String!) {
-  shopConfirmPayment(number: $number, reference: $reference) {
-    number
-    status
-    paymentStatus
-  }
-}
-"""
-
-
 class TestOrdersOverGraphql:
     @pytest.fixture
     def placed(self, alice: Any, laptop: Product) -> Any:
@@ -649,22 +638,43 @@ class TestOrdersOverGraphql:
     def test_another_accounts_invoice_is_a_refusal(self, placed: Any, bob: Any) -> None:
         assert refusal(graphql(INVOICE, bob, number=placed.number))["status"] == 404
 
-    def test_confirming_the_payment_settles_the_order(self, placed: Any, alice: Any) -> None:
-        """The callback seam. This starter ships no gateway, so a `manual`
-        payment is settled here exactly the way the admin settles it."""
-        order = graphql(CONFIRM_PAYMENT, alice, number=placed.number, reference="bank-ref-1")[
-            "data"
-        ]["shopConfirmPayment"]
+    def test_no_mutation_settles_an_order(self, placed: Any, alice: Any) -> None:
+        """The schema has no field for it, and that is the security property.
 
-        assert order["paymentStatus"] == "succeeded"
-        assert order["status"] != "pending"
+        Settling asserts money arrived somewhere this app cannot see. A
+        credential-scoped mutation would hand that assertion to the account that
+        owes the money, so the verb lives in the admin and in a gateway callback
+        a project verifies for itself.
+        """
+        answer = graphql(
+            """
+            mutation($number: String!) {
+              shopConfirmPayment(number: $number, reference: "") { number }
+            }
+            """,
+            alice,
+            number=placed.number,
+        )
 
-    def test_another_account_cannot_settle_it(self, placed: Any, bob: Any) -> None:
-        answer = graphql(CONFIRM_PAYMENT, bob, number=placed.number, reference="")
+        assert "errors" in answer
+        assert "shopConfirmPayment" in answer["errors"][0]["message"]
 
-        assert refusal(answer)["status"] == 404
+    def test_the_order_the_shopper_does_own_is_still_cancellable(
+        self, placed: Any, alice: Any
+    ) -> None:
+        """The neighbouring verb, so the test above says which one was withheld.
 
-    def test_settling_needs_a_credential(self, placed: Any) -> None:
-        answer = graphql(CONFIRM_PAYMENT, number=placed.number, reference="")
+        Giving up on a purchase you started asserts nothing about the outside
+        world, so it stays the account's to do.
+        """
+        order = graphql(
+            """
+            mutation($number: String!) {
+              shopCancelOrder(number: $number) { number status }
+            }
+            """,
+            alice,
+            number=placed.number,
+        )["data"]["shopCancelOrder"]
 
-        assert refusal(answer)["title"] == "AUTHENTICATION_REQUIRED"
+        assert order["status"] == "cancelled"

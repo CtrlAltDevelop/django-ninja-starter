@@ -16,7 +16,6 @@ service ShopController {
     rpc ClearCart(google.protobuf.Empty) returns (ClearCartResult) {}
     rpc Collection(CollectionRequest) returns (CollectionResult) {}
     rpc Collections(google.protobuf.Empty) returns (CollectionList) {}
-    rpc ConfirmPayment(ConfirmPaymentRequest) returns (ConfirmPaymentResult) {}
     rpc DeleteReview(DeleteReviewRequest) returns (DeleteReviewResult) {}
     rpc Favourites(FavouritesRequest) returns (FavouritesResult) {}
     rpc GetAddress(GetAddressRequest) returns (GetAddressResult) {}
@@ -251,15 +250,6 @@ message CollectionSummary {
     string slug = 3;
     string description = 4;
     string image = 5;
-}
-
-message ConfirmPaymentRequest {
-    string number = 1;
-    string reference = 2;
-}
-
-message ConfirmPaymentResult {
-    Order order = 1;
 }
 
 message CouponPreview {

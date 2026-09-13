@@ -870,48 +870,6 @@ class CollectionSummary(_message.Message):
 Global___CollectionSummary: _TypeAlias = CollectionSummary  # noqa: Y015
 
 @_typing.final
-class ConfirmPaymentRequest(_message.Message):
-    DESCRIPTOR: _descriptor.Descriptor
-
-    NUMBER_FIELD_NUMBER: _builtins.int
-    REFERENCE_FIELD_NUMBER: _builtins.int
-    number: _builtins.str
-    reference: _builtins.str
-    def __init__(
-        self,
-        *,
-        number: _builtins.str = ...,
-        reference: _builtins.str = ...,
-    ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["number", b"number", "reference", b"reference"]  # noqa: Y015
-    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
-
-Global___ConfirmPaymentRequest: _TypeAlias = ConfirmPaymentRequest  # noqa: Y015
-
-@_typing.final
-class ConfirmPaymentResult(_message.Message):
-    DESCRIPTOR: _descriptor.Descriptor
-
-    ORDER_FIELD_NUMBER: _builtins.int
-    @_builtins.property
-    def order(self) -> Global___Order: ...
-    def __init__(
-        self,
-        *,
-        order: Global___Order | None = ...,
-    ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["order", b"order"]  # noqa: Y015
-    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["order", b"order"]  # noqa: Y015
-    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
-    def WhichOneof(self, oneof_group: _Never) -> None: ...
-
-Global___ConfirmPaymentResult: _TypeAlias = ConfirmPaymentResult  # noqa: Y015
-
-@_typing.final
 class CouponPreview(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 

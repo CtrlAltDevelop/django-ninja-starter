@@ -426,15 +426,43 @@ class TestCheckoutOverHttp:
         assert placed.status_code == 200, placed.content
         order = placed.json()["data"]
 
+        assert order["status"] == "pending"
+        assert order["payment_status"] == "pending"
+        # Where it stays until somebody who is not the buyer says otherwise --
+        # see the settlement test below.
+
+    def test_no_endpoint_lets_a_shopper_settle_their_own_order(
+        self, client: Client, basket: Any, address: Address, shipping: ShippingMethod
+    ) -> None:
+        """The route is gone, and that is the security property.
+
+        Marking an order paid asserts that money arrived somewhere this app
+        cannot see. The account that owes it is the one caller who must not make
+        that assertion -- an endpoint scoped to `request.user` would hand a
+        shopper the power to check out for nothing.
+        """
+        order = _checkout(basket, address, shipping)
+
         paid = client.post(
-            f"{SHOP}/orders/{order['number']}/payment/confirm",
+            f"{SHOP}/orders/{order.number}/payment/confirm",
             data={"reference": "psp_2"},
             content_type="application/json",
             **bearer(basket),
         )
 
-        assert paid.status_code == 200, paid.content
-        assert paid.json()["data"]["status"] == "paid"
+        assert paid.status_code == 404
+        order.refresh_from_db()
+        assert order.status == OrderStatus.PENDING
+
+    def test_an_operator_settles_it_the_way_the_admin_does(
+        self, basket: Any, address: Address, shipping: ShippingMethod
+    ) -> None:
+        """The verb still exists; it is reached from the back office, not a token."""
+        order = _checkout(basket, address, shipping)
+
+        settled = shop_service.settle_order(order, reference="bank-statement-1")
+
+        assert settled.status == OrderStatus.PAID
 
     def test_an_order_can_be_cancelled_over_http(
         self, client: Client, basket: Any, address: Address, shipping: ShippingMethod

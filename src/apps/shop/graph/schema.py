@@ -489,25 +489,6 @@ class Mutation:
             raise _refuse(error) from None
         return order_type(shop_service.order(caller_account, order.number))
 
-    @strawberry.mutation(description="Settle a pending order's payment.")
-    @resolver
-    def shop_confirm_payment(
-        self, info: Info[Any, Any], number: str, reference: str = ""
-    ) -> OrderType:
-        """The seam a payment provider's callback is pointed at.
-
-        This starter wires up no gateway -- payments are created against the
-        `manual` provider and settled by somebody in the admin looking at a bank
-        statement. This is what a project points a real callback at once it has
-        one, and it settles the order exactly the way the admin does.
-        """
-        caller_account = _caller(info)
-        try:
-            order = shop_service.confirm_payment(caller_account, number, reference=reference)
-        except (ShopNotFound, ShopRefused) as error:
-            raise _refuse(error) from None
-        return order_type(shop_service.order(caller_account, order.number))
-
     @strawberry.mutation(description="Record that somebody looked at a product.")
     @resolver
     def shop_record_product_view(self, info: Info[Any, Any], slug: str) -> ProductViewType:
