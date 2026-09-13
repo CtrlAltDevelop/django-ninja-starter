@@ -21,8 +21,9 @@ alone is enough.
 1. Generates `example-api` with the packaged generator.
 2. Copies `env.example` in as the project's `.env` — four login methods, four
    second factors, four social providers and all three token modes installed
-   with `rotation` issuing, plus all four feature apps the template ships: the
-   **CMS**, **notifications**, the **shop** and the **support desk**.
+   with `rotation` issuing, plus all five feature apps the template ships: the
+   **CMS**, **notifications**, the **shop**, the **support desk** and the
+   **wallet**.
 3. Runs the project's own `manage.py startapi notes --api-version v1` and `v2`,
    then copies `notes/` over the scaffolding it wrote.
 4. Runs `migrate`, so `make serve` inside the built project serves the API —
@@ -55,15 +56,16 @@ tour runs them:
 | 8 | Notifications | `apps.notifications` | The stored history over HTTP, then three live sockets |
 | 9 | A shop | `apps.shop` | A public catalogue, then a basket, an order and a settled invoice that are nobody's but the caller's |
 | 10 | A support desk | `apps.support` | One conversation from both sides: a ticket, a queue, a staff-only note, and then the same thing live over a socket |
-| 11 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
-| 12 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
-| 13 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
-| 14 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
-| 15 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
-| 16 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
-| 17 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
-| 18 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
-| 19 | The admin, every app of it | all apps | Every model any installed app registered, opened as a superuser |
+| 11 | A wallet | `apps.wallet` | Payment methods an administrator configured, a priced deposit, a request applied by the back office, a crypto payout to the right chain, and a balance that survives being archived |
+| 12 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
+| 13 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
+| 14 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
+| 15 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
+| 16 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
+| 17 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
+| 18 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
+| 19 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
+| 20 | The admin, every app of it | all apps | Every model any installed app registered, opened as a superuser |
 
 The rest of this section is what each one calls, and the property it is there to
 demonstrate. Every path below is printed by the tour, and is the path a real
@@ -397,18 +399,20 @@ different configuration:
 DJANGO_AUTH_TOKEN_MODE=sliding python examples/walkthrough.py
 ```
 
-An app that is not enabled is not skipped silently: the CMS, notification, shop
-and support sections still print their heading and say which variable would have
-turned them on.
+An app that is not enabled is not skipped silently: the CMS, notification, shop,
+support and wallet sections still print their heading and say which variable
+would have turned them on.
 
-## The four feature apps that ship
+## The five feature apps that ship
 
-`cms/`, `notifications/`, `shop/` and `support/` are not in this directory. They
-come out of the generator inside every project it writes, and the `.env` above is
-the whole of what turns them on — which is the property worth seeing, so the tour
-reads their settings back before it calls them. Their full reference is
-[`docs/cms.md`](../docs/cms.md), [`docs/notifications.md`](../docs/notifications.md),
-[`docs/shop.md`](../docs/shop.md) and [`docs/support.md`](../docs/support.md).
+`cms/`, `notifications/`, `shop/`, `support/` and `wallet/` are not in this
+directory. They come out of the generator inside every project it writes, and the
+`.env` above is the whole of what turns them on — which is the property worth
+seeing, so the tour reads their settings back before it calls them. Their full
+reference is [`docs/cms.md`](../docs/cms.md),
+[`docs/notifications.md`](../docs/notifications.md),
+[`docs/shop.md`](../docs/shop.md), [`docs/support.md`](../docs/support.md) and
+[`docs/wallet.md`](../docs/wallet.md).
 
 ## The notes app
 

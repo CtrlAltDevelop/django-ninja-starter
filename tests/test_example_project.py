@@ -34,6 +34,7 @@ REPORTED_KEYS = (
     "notifications",
     "shop",
     "support",
+    "wallet",
     "socket",
 )
 
@@ -75,6 +76,7 @@ def test_the_example_project_has_every_app_on(example_project: Path) -> None:
     assert reported["notifications"] == "on"
     assert reported["shop"] == "on"
     assert reported["support"] == "on"
+    assert reported["wallet"] == "on"
     assert reported["socket"] == "/ws/notifications,/ws/support"
 
 
@@ -92,6 +94,7 @@ print("cms=" + ("on" if settings.CMS_ENABLED else "off"))
 print("notifications=" + ("on" if settings.NOTIFICATIONS_ENABLED else "off"))
 print("shop=" + ("on" if settings.SHOP_ENABLED else "off"))
 print("support=" + ("on" if settings.SUPPORT_ENABLED else "off"))
+print("wallet=" + ("on" if settings.WALLET_ENABLED else "off"))
 print("socket=" + ",".join(path for path, _ in websocket_routes()))
 """
 
@@ -149,6 +152,18 @@ def test_the_shop_ships_with_the_generated_project(example_project: Path) -> Non
     assert "no tests ran" not in result.stdout
 
 
+def test_the_wallet_ships_with_the_generated_project(example_project: Path) -> None:
+    """The wallet's own suite, run inside the project the generator wrote.
+
+    The same reason the shop's is: a feature app that passes here and not there
+    is an app the template copied incompletely, and nothing else would notice.
+    """
+    result = _run(example_project, "-m", "pytest", "-q", "--no-cov", "src/apps/wallet")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no tests ran" not in result.stdout
+
+
 def test_the_support_app_ships_with_the_generated_project(example_project: Path) -> None:
     """The socket half of it runs nowhere else, same as the notifications app's."""
     result = _run(example_project, "-m", "pytest", "-q", "--no-cov", "src/apps/support")
@@ -176,6 +191,7 @@ def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     assert "/api/v1/shop/checkout" in result.stdout, "the shop was not toured"
     assert "/api/v1/support" in result.stdout, "the support desk was not toured"
     assert "/ws/support" in result.stdout, "the support socket was not toured"
+    assert "/api/v1/wallet/deposits" in result.stdout, "the wallet was not toured"
     assert "admin pages opened" in result.stdout, "the admin was not toured"
 
 

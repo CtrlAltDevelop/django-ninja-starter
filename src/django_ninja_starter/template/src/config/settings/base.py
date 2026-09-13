@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -566,6 +567,91 @@ SHOP_MAX_ITEM_QUANTITY = int(os.getenv("DJANGO_SHOP_MAX_ITEM_QUANTITY", "99"))
 SHOP_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_PAGE_SIZE", "24"))
 SHOP_MAX_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_MAX_PAGE_SIZE", "100"))
 
+# The wallet app. Optional the same way the others are, and rather more
+# consequential to turn on: naming it installs the tables that hold people's
+# money, so a deployment that names it should mean it.
+WALLET_ENABLED = os.getenv("DJANGO_WALLET_ENABLED", "false").lower() == "true"
+WALLET_APP = "apps.wallet.apps.WalletConfig"
+WALLET_INSTALLED_APPS = [WALLET_APP] if WALLET_ENABLED else []
+WALLET_TRANSPORTS = app_transports("wallet", ("rest", "graph", "grpc")) if WALLET_ENABLED else ()
+WALLET_ROUTERS = (
+    [
+        {
+            "prefix": "/wallet",
+            "router": "apps.wallet.rest.router",
+            "tag": "Wallet",
+            "description": (
+                "One wallet per account: what is in it, what is on its way, and "
+                "every movement it has ever had. The balance is derived from the "
+                "entries rather than stored, so it is always two numbers -- what "
+                "is settled and what is merely pending -- and never one. The ways "
+                "to pay are configured by an administrator rather than compiled "
+                "in, so `/wallet/methods` is the only place a client can learn "
+                "what this deployment takes, what it charges and what it "
+                "converts at. Nothing here is scoped by a parameter: every call "
+                "resolves the wallet from the account that made it."
+            ),
+        }
+    ]
+    if "rest" in WALLET_TRANSPORTS
+    else []
+)
+# The currency every wallet is denominated in. Amounts are stored as bare
+# decimals, so this is the only record of what they mean -- changing it on a
+# deployment that already holds money redenominates every balance in it.
+WALLET_CURRENCY = os.getenv("DJANGO_WALLET_CURRENCY", "USD").upper()
+# Which rails this deployment has actually integrated. The outer gate: an
+# administrator can configure a payment method in the admin, but if its rail is
+# not named here it is never published. Empty means every rail the app knows.
+WALLET_METHODS = tuple(
+    rail.strip().lower()
+    for rail in os.getenv("DJANGO_WALLET_METHODS", "").split(",")
+    if rail.strip()
+)
+# Whether an account's first wallet request opens one for it. On by default,
+# because "every account has a wallet" is the promise the app makes, and a
+# project that has to remember to open one will forget for exactly one user.
+WALLET_AUTO_CREATE = os.getenv("DJANGO_WALLET_AUTO_CREATE", "true").lower() == "true"
+# The secret a payment rail signs its confirmations with, one per method:
+#
+#   DJANGO_WALLET_WEBHOOK_SECRETS=stripe-card:whsec_abc,coinbase:xyz
+#
+# Per method rather than per deployment because the secrets belong to different
+# companies, and a processor that leaks one should not be able to confirm
+# movements on another's rail. In the environment rather than in a column
+# because a secret in the database is a secret in every backup and on an admin
+# screen. A method named here is a method whose webhook this deployment can
+# verify; a method not named confirms nothing, which is the safe direction to
+# fail -- movements stay pending and somebody notices the queue.
+WALLET_WEBHOOK_SECRETS = {
+    pair.split(":", 1)[0].strip(): pair.split(":", 1)[1].strip()
+    for pair in os.getenv("DJANGO_WALLET_WEBHOOK_SECRETS", "").split(",")
+    if ":" in pair
+}
+# How far out of date a signed confirmation may be, in seconds. The signature
+# covers the timestamp, so this is what stops a confirmation captured off the
+# wire from being replayed tomorrow.
+WALLET_WEBHOOK_TOLERANCE_SECONDS = int(os.getenv("DJANGO_WALLET_WEBHOOK_TOLERANCE_SECONDS", "300"))
+# Reading a balance costs one checkpoint row plus every entry written since it,
+# so the archive keeps that second number small. Either trigger is enough: an
+# entry old enough, or enough of them to slow a read down.
+WALLET_ARCHIVE_AFTER_DAYS = int(os.getenv("DJANGO_WALLET_ARCHIVE_AFTER_DAYS", "1"))
+WALLET_ARCHIVE_THRESHOLD = int(os.getenv("DJANGO_WALLET_ARCHIVE_THRESHOLD", "20"))
+# How far below zero a wallet may go. Zero -- the default -- means never, which
+# is the only safe default: anything else is credit being extended, and this app
+# does not collect it.
+WALLET_OVERDRAFT_LIMIT = Decimal(os.getenv("DJANGO_WALLET_OVERDRAFT_LIMIT", "0"))
+# The deployment's own bounds, in the wallet currency, checked on top of whatever
+# each configured method allows. Zero means no bound. The withdrawal ceiling is
+# the cheapest defence there is against a compromised account emptying a wallet
+# in a single call.
+WALLET_MIN_DEPOSIT = Decimal(os.getenv("DJANGO_WALLET_MIN_DEPOSIT", "0"))
+WALLET_MAX_DEPOSIT = Decimal(os.getenv("DJANGO_WALLET_MAX_DEPOSIT", "0"))
+WALLET_MIN_WITHDRAWAL = Decimal(os.getenv("DJANGO_WALLET_MIN_WITHDRAWAL", "0"))
+WALLET_MAX_WITHDRAWAL = Decimal(os.getenv("DJANGO_WALLET_MAX_WITHDRAWAL", "0"))
+WALLET_PAGE_SIZE = int(os.getenv("DJANGO_WALLET_PAGE_SIZE", "50"))
+WALLET_MAX_PAGE_SIZE = int(os.getenv("DJANGO_WALLET_MAX_PAGE_SIZE", "200"))
+
 # The support app. Optional the same way the CMS, the notifications and the shop
 # are: naming it installs its tables, its routes, its admin and its socket, and
 # a project that does not name it never imports the package.
@@ -826,6 +912,7 @@ INSTALLED_APPS = [
     *NOTIFICATIONS_INSTALLED_APPS,
     *SHOP_INSTALLED_APPS,
     *SUPPORT_INSTALLED_APPS,
+    *WALLET_INSTALLED_APPS,
     # The transports beside REST. Both are installed whether or not they are
     # published: `generateproto` and the schema check have to be able to run in a
     # deployment that serves neither.

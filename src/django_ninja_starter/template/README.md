@@ -45,11 +45,12 @@ top-bar selector to switch between registered API versions, or
 has no selector, so each version is its own page -- `/api/v1/redoc` -- and
 Swagger links across to whichever one its top bar is showing.
 
-> **Not seeing the cms, notifications, shop or support groups?** They ship turned
+> **Not seeing the cms, notifications, shop, support or wallet groups?** They ship turned
 > **off**: a feature app that is not named has no tables, no routes and no admin,
 > and never imports its package. Set `DJANGO_CMS_ENABLED=true`,
-> `DJANGO_NOTIFICATIONS_ENABLED=true`, `DJANGO_SHOP_ENABLED=true` or
-> `DJANGO_SUPPORT_ENABLED=true` in your `.env`, run `make migrate`, and restart.
+> `DJANGO_NOTIFICATIONS_ENABLED=true`, `DJANGO_SHOP_ENABLED=true`,
+> `DJANGO_SUPPORT_ENABLED=true` or `DJANGO_WALLET_ENABLED=true` in your `.env`,
+> run `make migrate`, and restart.
 
 Signed into the admin as staff, the page authorises itself: it trades that
 session for a bearer token and fills **Authorize** in, because the API reads
@@ -77,11 +78,12 @@ python manage.py startapi reports --api-version v2 --prefix /internal-reports
 
 ```text
 src/
-├── apps/                   # Feature applications: yours, and the four that ship
+├── apps/                   # Feature applications: yours, and the five that ship
 │   ├── cms/                # Pages, sections and typed multilingual content
 │   ├── notifications/      # Stored notifications, a read API, and a WebSocket
 │   ├── shop/               # A catalogue, several sellers per product, and orders
-│   └── support/            # Live chat and support tickets, over four transports
+│   ├── support/            # Live chat and support tickets, over four transports
+│   └── wallet/             # A wallet per account, priced payment methods, a derived balance
 ├── infrastructure/
 │   ├── common/             # Project-owned foundation application
 │   ├── accounts/           # The user model and the profile attached to it

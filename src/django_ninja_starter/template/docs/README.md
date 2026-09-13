@@ -15,7 +15,7 @@ themselves — see [keeping these pages honest](#keeping-these-pages-honest).
 | Social providers | [`oauth_google`](oauth/google.md), [`oauth_apple`](oauth/apple.md), [`oauth_microsoft`](oauth/microsoft.md), [`oauth_github`](oauth/github.md) |
 | Token modes | [`oauth_sliding`](oauth/sliding.md), [`oauth_session`](oauth/session.md), [`oauth_rotation`](oauth/rotation.md) |
 | Shared by those | [`auth_core`](auth/core.md), [`oauth_core`](oauth/core.md) |
-| Feature apps | [`cms`](cms.md), [`notifications`](notifications.md), [`shop`](shop.md), [`support`](support.md) |
+| Feature apps | [`cms`](cms.md), [`notifications`](notifications.md), [`shop`](shop.md), [`support`](support.md), [`wallet`](wallet.md) |
 | Cross-cutting | [The response envelope](responses.md), [Signing in](signing-in.md), [Credentials](credentials.md), [The admin](admin.md) |
 
 ## Start here
@@ -100,6 +100,7 @@ features a project chooses rather than the plumbing under them.
 | [`notifications`](notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | Stored notifications, a read API, and a WebSocket that pushes new ones — public before it is authenticated, private after |
 | [`support`](support.md) | `DJANGO_SUPPORT_ENABLED=true` | Chat and support tickets as one app, because a ticket is a conversation: threads, staff-only notes, attachments, SLA deadlines, a queue the desk works — and channels, private groups and direct messages that the desk cannot read. One authenticated socket carries all of it |
 | [`shop`](shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare what their products are, several sellers per product, timed campaigns, search and merchandising lists, reviews and likes, a basket per account, and an order cycle that reserves stock and issues an invoice |
+| [`wallet`](wallet.md) | `DJANGO_WALLET_ENABLED=true` | A wallet per account with the balance derived from its movements rather than stored, payment methods an administrator configures rather than code declares, fees and taxes priced by the same function that quotes them, crypto with its chains, currency conversion at a published rate, and deposits that stay requests until an operator applies them |
 
 All four ship **off**, which is why a fresh `/api/docs` lists none of them: an
 app nobody named has no tables, no routes and no admin, and never imports its

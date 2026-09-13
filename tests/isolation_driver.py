@@ -212,6 +212,112 @@ def _assert_the_socket_admits_a_session(client) -> None:  # type: ignore[no-unty
     assert said[0]["user"]["username"] == "zoe", said[0]
 
 
+def wallet_alone() -> int:
+    """The wallet moving money with no login app and no other feature app installed.
+
+    Booting is not the claim; the claim is that the app works. The wallet gets
+    the same deeper treatment the support desk does, and for a sharper reason:
+    it is the app where "it installed fine" and "it works" differ by somebody's
+    money. Its router takes its auth from the login apps behind an ImportError
+    guard, and this is what proves that guard is a guard rather than a comment --
+    a bare project has no bearer tokens to offer, so Django's own session login
+    is the only identity there is, and the router has to accept it.
+
+    The whole round trip, because each step is a different way to fail alone: a
+    method configured through the app's own models, a price quoted, money in,
+    money confirmed, and a balance that agrees with the quote to the last place.
+    """
+    from decimal import Decimal
+
+    from django.conf import settings
+    from django.contrib.auth import get_user_model
+
+    assert settings.WALLET_ENABLED, "the scenario is the wallet, and the wallet is off"
+
+    from apps.wallet.catalog import ChargeKind, MethodCurrency, MethodFee, PaymentMethod
+
+    # Configured the way an administrator would, through the app's own models --
+    # there is no other app here to have set anything up.
+    method = PaymentMethod.objects.create(
+        code="card",
+        name="Card",
+        rail="card",
+        is_enabled=True,
+        supports_deposit=True,
+        requires_approval=False,
+    )
+    MethodCurrency.objects.create(method=method, currency=settings.WALLET_CURRENCY)
+    MethodFee.objects.create(
+        method=method, kind=ChargeKind.COMMISSION, percent=Decimal("2.5"), fixed=Decimal("0.30")
+    )
+
+    password_text = "corr3ct-horse-battery"
+    get_user_model().objects.create_user(username="zoe", password=password_text)
+    client = _client()
+    assert client.login(username="zoe", password=password_text), "session login failed"
+
+    opened = client.get("/api/v1/wallet")
+    assert opened.status_code == 200, _why(opened)
+
+    offered = client.get("/api/v1/wallet/methods")
+    assert offered.status_code == 200, _why(offered)
+    assert [row["code"] for row in offered.json()["data"]] == ["card"], offered.json()
+
+    quoted = _post(
+        client,
+        "/api/v1/wallet/quotes",
+        {"method": "card", "direction": "credit", "amount": "100.00"},
+    )
+    assert quoted.status_code == 200, _why(quoted)
+    expected = quoted.json()["data"]["wallet_amount"]
+
+    made = _post(
+        client,
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "100.00", "reference": "alone-1"},
+    )
+    assert made.status_code == 200, _why(made)
+    entry = made.json()["data"]
+    assert entry["status"] == "pending", entry
+
+    # Confirmed the way a real deployment confirms one: signed, as the rail.
+    # The account itself has no way to say this -- that is the whole point of
+    # the hook existing -- so a bare project has to be able to reach it, and
+    # this is the configuration where a missing secret would go unnoticed.
+    refused = _post(client, f"/api/v1/wallet/entries/{entry['id']}/settle", {})
+    assert refused.status_code == 404, _why(refused)
+
+    settled = _confirm_as_the_rail(client, entry["id"])
+    assert settled.status_code == 200, _why(settled)
+    assert settled.json()["data"]["status"] == "done", settled.json()
+
+    balance = client.get("/api/v1/wallet/balance")
+    assert balance.status_code == 200, _why(balance)
+    # The figure quoted before any of this is the figure the wallet now holds.
+    assert balance.json()["data"]["settled"] == expected, (balance.json(), expected)
+
+    print("ok")
+    return 0
+
+
+def _confirm_as_the_rail(client, entry_id: str):  # type: ignore[no-untyped-def]
+    """Post a signed confirmation to the wallet's webhook, as the card rail would."""
+    import json as _json
+
+    from django.conf import settings
+
+    from apps.wallet import hooks
+
+    secret = settings.WALLET_WEBHOOK_SECRETS["card"]
+    body = _json.dumps({"entry_id": str(entry_id), "event": "done"}).encode()
+    return client.post(
+        "/api/v1/wallet/hooks/card",
+        body,
+        content_type="application/json",
+        headers=hooks.headers_for(secret, body),
+    )
+
+
 def admin_page() -> int:
     """Render the admin front page in whatever configuration this process booted.
 
@@ -261,6 +367,8 @@ def main() -> int:
 
     if scenario == "support_alone":
         return support_alone()
+    if scenario == "wallet_alone":
+        return wallet_alone()
     if scenario == "admin_page":
         return admin_page()
 

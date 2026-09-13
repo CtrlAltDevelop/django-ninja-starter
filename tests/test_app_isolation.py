@@ -38,7 +38,7 @@ BASE_ENV = {
 METHODS = ["password", "email_code", "sms_code", "magic_link"]
 #: The optional apps, each of which has to install, work and be removable on its
 #: own. Adding an app here is what gives it isolation coverage.
-FEATURE_APPS = ["cms", "notifications", "shop", "support"]
+FEATURE_APPS = ["cms", "notifications", "shop", "support", "wallet"]
 TOKEN_MODES = ["sliding", "session", "rotation"]
 PROVIDERS = {
     "google": {
@@ -267,6 +267,37 @@ def test_support_alone_carries_a_conversation(tmp_path: Path) -> None:
     _drive("support_alone", {"DJANGO_SUPPORT_ENABLED": "true"}, tmp_path / "db.sqlite3")
 
 
+def test_the_wallet_alone_moves_money(tmp_path: Path) -> None:
+    """Booting is not the claim here either, and the gap is somebody's money.
+
+    The wallet gets the deeper treatment for a sharper reason than support does:
+    "it installed" and "it works" differ by a balance. Its router takes its auth
+    from the login apps behind an ImportError guard, and a bare project has no
+    bearer tokens to offer -- so Django's own session is the only identity there
+    is, and the router has to accept it.
+
+    The whole round trip, because each step fails differently alone: a method
+    configured through the app's own models, a price quoted, money in, money
+    confirmed by the rail over its signed webhook, and a balance that agrees
+    with the quote to the last place.
+
+    The webhook is the part this test earns its keep on. It is the only way a
+    movement can settle, it is the one endpoint in the app that is not
+    authenticated as an account, and a bare project is exactly where a mount
+    that quietly did not happen would go unnoticed -- the account's own settle
+    call is asserted to be a 404 in the same breath, so "nothing settles" cannot
+    pass for "the hook works".
+    """
+    _drive(
+        "wallet_alone",
+        {
+            "DJANGO_WALLET_ENABLED": "true",
+            "DJANGO_WALLET_WEBHOOK_SECRETS": "card:isolation-rail-secret",
+        },
+        tmp_path / "db.sqlite3",
+    )
+
+
 # -- transports ---------------------------------------------------------------
 
 
@@ -353,6 +384,7 @@ ADMIN_SECTIONS = {
     "notifications": "Notifications",
     "shop": "Shop",
     "support": "Support",
+    "wallet": "Wallet",
 }
 
 

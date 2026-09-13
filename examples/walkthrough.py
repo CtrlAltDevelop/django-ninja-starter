@@ -4,12 +4,13 @@
     python examples/walkthrough.py
 
 Four login methods, four second factors, four social providers, a token mode,
-the accounts and health endpoints, all four feature apps the starter ships --
+the accounts and health endpoints, all five feature apps the starter ships --
 the CMS, notifications with its socket, the shop from catalogue to settled
-invoice, and the support desk from both sides of it -- the notes app you would
-write yourself, the audit trail, the
-generated OpenAPI documents, and every admin screen any of them registers. All
-of it printed as a transcript of the calls a real client would make.
+invoice, the support desk from both sides of it, and the wallet from an empty
+balance to a settled one -- the notes app you would write yourself, the audit
+trail, the generated OpenAPI documents, and every admin screen any of them
+registers. All of it printed as a transcript of the calls a real client would
+make.
 
 The admin is the last section and is not an afterthought. The API is half of
 what this project is; the other half is the screen the people who run it use,
@@ -211,6 +212,42 @@ class Api:
 
     def delete(self, path: str, **kwargs: Any) -> Any:
         return self.request("DELETE", path, **kwargs)
+
+    def post_raw(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        headers: dict[str, str] | None = None,
+        expect: int = 200,
+        show: bool = True,
+    ) -> Any:
+        """POST exact bytes, with no bearer -- what a payment rail actually sends.
+
+        The body has to go out byte for byte, because the signature is over the
+        bytes: re-encoding the dict on the way would change them and the
+        confirmation would be refused for the wrong reason.
+        """
+        body = json.dumps(payload).encode()
+        self.visited.add(("POST", path.split("?")[0]))
+        response = self.client.post(
+            path, body, content_type="application/json", headers=headers or {}
+        )
+        parsed: Any = {}
+        if response.headers.get("Content-Type", "").startswith("application/json"):
+            parsed = response.json()
+        ok = response.status_code == expect
+        tint = GREEN if ok else RED
+        signed = f" {DIM}+signed{OFF}" if headers else ""
+        print(f"  {CYAN}{'POST':<6}{OFF} {path}{signed} {tint}→ {response.status_code}{OFF}")
+        if show and parsed:
+            rendered = json.dumps(shorten(parsed), indent=2, ensure_ascii=False)
+            print("".join(f"  {DIM}│{OFF} {line}\n" for line in rendered.splitlines()), end="")
+        if not ok:
+            raise WalkthroughError(f"POST {path} returned {response.status_code}, not {expect}")
+        if isinstance(parsed, dict) and "isSuccess" in parsed:
+            return parsed["data"]
+        return parsed
 
     def sign_in_as(self, credentials: dict[str, Any]) -> None:
         self.token = credentials["access_token"]
@@ -2063,9 +2100,330 @@ async def _support_socket(api: Api, desk: str, bruno: Any, dara: Any) -> None:
         )
 
 
-def section_email_code(api: Api) -> None:
+def _confirm_as_the_rail(
+    api: Api,
+    entry_id: str,
+    *,
+    method: str = "card",
+    external_reference: str = "",
+    expect: int = 200,
+) -> Any:
+    """Post a signed confirmation to the wallet's webhook, as the processor would.
+
+    The signature is the hex HMAC-SHA256 of ``"{timestamp}.{body}"`` under the
+    secret this deployment shares with that one rail. It is the only way a
+    movement can settle: the verb is not published to the account at all, since
+    a customer able to confirm their own deposit is a customer able to print
+    money.
+    """
+    from django.conf import settings
+
+    from apps.wallet import hooks
+
+    payload: dict[str, Any] = {"entry_id": str(entry_id), "event": "done"}
+    if external_reference:
+        payload["external_reference"] = external_reference
+    secret = settings.WALLET_WEBHOOK_SECRETS[method]
+    return api.post_raw(
+        f"/api/v1/wallet/hooks/{method}",
+        payload,
+        headers=hooks.headers_for(secret, json.dumps(payload).encode()),
+        expect=expect,
+    )
+
+
+def section_wallet(api: Api) -> None:
+    """The fifth feature app: money that is derived from its movements, not stored."""
+    from django.apps import apps as django_apps
+    from django.conf import settings
+
+    if not settings.WALLET_ENABLED or not django_apps.is_installed("apps.wallet"):
+        heading(
+            11,
+            "Wallet",
+            "apps.wallet",
+            "Not installed: DJANGO_WALLET_ENABLED is not set.",
+        )
+        return
+
+    from decimal import Decimal
+
+    from apps.wallet.catalog import (
+        Applies,
+        Basis,
+        ChargeKind,
+        ExchangeRate,
+        MethodCurrency,
+        MethodFee,
+        MethodNetwork,
+        PaymentMethod,
+    )
+    from apps.wallet.models import WalletEntry
+    from apps.wallet.services import wallet_service
+
     heading(
         11,
+        "A wallet, from an empty balance to a settled one",
+        "apps.wallet",
+        "There is no balance column: the balance is the last checkpoint plus "
+        "the movements written since it. And there is never one number -- what "
+        "is settled and what is merely promised are different questions.",
+    )
+
+    note(
+        "The ways to pay are rows an administrator fills in, not a list compiled "
+        "into the app. Here are three, of the three shapes that behave differently."
+    )
+
+    counter = PaymentMethod.objects.create(
+        code="counter",
+        name="Branch counter",
+        rail="cash",
+        description="Money handed over at a counter.",
+        instructions="Quote your account number at the desk.",
+        is_enabled=True,
+        supports_deposit=True,
+        # On, so a deposit somebody merely claims to have made is a request
+        # until an operator has seen the money.
+        requires_approval=True,
+    )
+    MethodCurrency.objects.create(method=counter, currency="USD", min_amount=Decimal("5"))
+
+    card = PaymentMethod.objects.create(
+        code="card",
+        name="Card",
+        rail="card",
+        description="An authorisation the processor confirms.",
+        is_enabled=True,
+        supports_deposit=True,
+        supports_withdrawal=True,
+        requires_approval=False,
+    )
+    MethodCurrency.objects.create(
+        method=card, currency="USD", min_amount=Decimal("5"), max_amount=Decimal("10000")
+    )
+    MethodFee.objects.create(
+        method=card,
+        kind=ChargeKind.COMMISSION,
+        label="Processing",
+        applies_to=Applies.BOTH,
+        percent=Decimal("2.9"),
+        fixed=Decimal("0.30"),
+        position=0,
+    )
+    MethodFee.objects.create(
+        method=card,
+        kind=ChargeKind.TAX,
+        label="VAT",
+        applies_to=Applies.BOTH,
+        percent=Decimal("20"),
+        # Of the charges before it, not of the amount -- which is how VAT on a
+        # payment commission actually works.
+        basis=Basis.CHARGES,
+        position=1,
+    )
+
+    usdt = PaymentMethod.objects.create(
+        code="usdt",
+        name="USDT",
+        rail="crypto",
+        description="An on-chain transfer.",
+        is_enabled=True,
+        supports_deposit=True,
+        supports_withdrawal=True,
+        requires_approval=False,
+    )
+    asset = MethodCurrency.objects.create(
+        method=usdt, currency="USDT", display_decimals=6, min_amount=Decimal("10")
+    )
+    MethodNetwork.objects.create(
+        asset=asset,
+        code="trc20",
+        name="Tron (TRC20)",
+        confirmations=20,
+        network_fee=Decimal("1"),
+        address_pattern=r"T[1-9A-HJ-NP-Za-km-z]{33}",
+    )
+    MethodNetwork.objects.create(
+        asset=asset,
+        code="erc20",
+        name="Ethereum (ERC20)",
+        confirmations=12,
+        network_fee=Decimal("8"),
+        address_pattern=r"0x[0-9a-fA-F]{40}",
+    )
+    ExchangeRate.objects.create(
+        base="USDT", quote="USD", rate=Decimal("1"), margin_percent=Decimal("1"), source="tour"
+    )
+
+    note(
+        "A client reads the methods rather than hard-coding them, because turning "
+        "one on is an afternoon in the admin rather than a release."
+    )
+    api.get("/api/v1/wallet/methods")
+
+    note("An empty wallet, opened by the first request that needed one.")
+    api.get("/api/v1/wallet")
+
+    note(
+        "What a deposit would cost, before committing to it. The same function "
+        "prices the deposit itself, so this figure is the figure charged."
+    )
+    api.post(
+        "/api/v1/wallet/quotes",
+        {"method": "card", "direction": "credit", "amount": "100.00"},
+    )
+
+    note(
+        "Pay 100 in: 2.90 commission, 0.58 VAT on that commission, 96.16 reaches "
+        "the wallet. The charges are written onto the movement as their own lines."
+    )
+    deposit = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "100.00", "reference": "tour-card-1"},
+    )
+
+    note(
+        "Recorded is not arrived. A card deposit is pending until the processor "
+        "says otherwise, and a pending deposit is worth nothing -- which is why "
+        "`settled` is still zero and `projected` is not."
+    )
+    api.get("/api/v1/wallet/balance")
+
+    note(
+        "The account asks to confirm its own deposit. There is no such endpoint, "
+        "and that is the whole security of this app: a customer who could say "
+        "`the money arrived` would be running a mint."
+    )
+    api.post(f"/api/v1/wallet/entries/{deposit['id']}/settle", {}, expect=404)
+
+    note(
+        "The processor's webhook lands instead -- signed with the secret only it "
+        "and this deployment hold, over a timestamp so it cannot be replayed. "
+        "This is where the money appears."
+    )
+    _confirm_as_the_rail(api, deposit["id"], external_reference="ch_3QxTour")
+    api.get("/api/v1/wallet/balance")
+
+    note("The same confirmation, unsigned. Rails prove who they are; nobody else can.")
+    api.post_raw(
+        "/api/v1/wallet/hooks/card",
+        {"entry_id": deposit["id"], "event": "done"},
+        expect=401,
+    )
+
+    note(
+        "The same request twice is one deposit. `reference` is the client's "
+        "idempotency key, and a retry after a timeout returns the first entry."
+    )
+    again = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "100.00", "reference": "tour-card-1"},
+        show=False,
+    )
+    if again["id"] != deposit["id"]:
+        raise WalkthroughError("a retried deposit created a second movement")
+    print(f"  {DIM}│ same entry returned: {again['id']}{OFF}")
+
+    note(
+        "A deposit through a method that requires approval is a *request*: it is "
+        "written down, it is visible, and it cannot settle until a person applies it."
+    )
+    request = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "counter", "amount": "40.00", "reference": "tour-counter-1"},
+    )
+    _confirm_as_the_rail(api, request["id"], method="counter", expect=409)
+
+    note(
+        "The back office applies it -- an admin action, because approving other "
+        "people's money is not something a request should be able to do. Cash "
+        "settles on approval: the approval *was* the confirmation."
+    )
+    applied = wallet_service.approve(request["id"], note="Counted at the desk.")
+    print(f"  {DIM}│ {applied['status']} / {applied['approval']}{OFF}")
+    api.get("/api/v1/wallet/balance")
+
+    note(
+        "A payout in another currency, on a chain that has to be named. The same "
+        "asset on the wrong chain is not a failed payment -- it is money gone to "
+        "an address nobody holds a key for, so the address is checked first."
+    )
+    api.post(
+        "/api/v1/wallet/withdrawals",
+        {
+            "method": "usdt",
+            "amount": "20",
+            "currency": "USDT",
+            "network": "trc20",
+            "destination": "0x" + "a" * 40,
+            "reference": "tour-wrong-chain",
+        },
+        expect=400,
+    )
+    api.post(
+        "/api/v1/wallet/withdrawals",
+        {
+            "method": "usdt",
+            "amount": "20",
+            "currency": "USDT",
+            "network": "trc20",
+            "destination": "T" + "9" * 33,
+            "reference": "tour-usdt-1",
+        },
+    )
+
+    note(
+        "A pending payout holds its own money: `available` is `settled` less what "
+        "has already been promised. Authorise against `available`, never `settled`."
+    )
+    api.get("/api/v1/wallet/balance")
+
+    note("What this deployment converts at, with the spread published beside the rate.")
+    api.get("/api/v1/wallet/rates")
+    api.get("/api/v1/wallet/exchange?amount=100&base=USDT&quote=USD")
+
+    note(
+        "Every movement the wallet has had, including what failed -- a customer "
+        "asking why a deposit never arrived is asking about exactly those rows."
+    )
+    api.get("/api/v1/wallet/entries?limit=5")
+
+    note(
+        "Folding the history into a checkpoint. Reading a balance is one row plus "
+        "the movements since it, so this is what keeps a five-year-old wallet as "
+        "cheap to read as a new one -- and the number does not move."
+    )
+    before = api.get("/api/v1/wallet/balance", show=False)["settled"]
+    from django.contrib.auth import get_user_model
+
+    from apps.wallet.balances import archive_wallet
+
+    zoe = get_user_model().objects.get(username="zoe")
+    result = archive_wallet(wallet_service.wallet_for(zoe), force=True)
+    print(
+        f"  {DIM}│ folded {result.archived} entries into checkpoint "
+        f"#{result.checkpoint.sequence if result.checkpoint else '-'}, "
+        f"left {result.skipped_pending} pending{OFF}"
+    )
+    after = api.get("/api/v1/wallet/balance")["settled"]
+    if Decimal(str(before)) != Decimal(str(after)):
+        raise WalkthroughError(f"archiving changed the balance: {before} became {after}")
+    print(f"  {DIM}│ balance unchanged: {after}{OFF}")
+    api.get("/api/v1/wallet/checkpoints")
+
+    note(
+        "A pending movement is never folded, however old: a checkpoint is a "
+        "number written down, and folding in something still free to change "
+        "would make that number wrong later."
+    )
+    still_open = WalletEntry.objects.filter(checkpoint__isnull=True, status="pending").count()
+    print(f"  {DIM}│ {still_open} pending movement(s) left unarchived{OFF}")
+
+
+def section_email_code(api: Api) -> None:
+    heading(
+        12,
         "One-time code by email",
         "auth_email_code",
         "No password at all: a ticket goes to the client, a code goes to the "
@@ -2111,7 +2469,7 @@ def section_email_code(api: Api) -> None:
 
 def section_sms_code(api: Api) -> None:
     heading(
-        12,
+        13,
         "One-time code by SMS",
         "auth_sms_code",
         "The same two steps over a phone number, which is the one identifier "
@@ -2128,7 +2486,7 @@ def section_sms_code(api: Api) -> None:
 
 def section_magic_link(api: Api) -> None:
     heading(
-        13,
+        14,
         "Magic link",
         "auth_magic_link",
         "One emailed link, good once. The client never sees a code: the token in "
@@ -2144,7 +2502,7 @@ def section_magic_link(api: Api) -> None:
 
 def section_twofactor(api: Api) -> None:
     heading(
-        14,
+        15,
         "Second factors",
         "auth_twofactor",
         "Four factors on one app. Enrolment is not real until a code confirms "
@@ -2236,7 +2594,7 @@ def section_tokens(api: Api) -> None:
 
     mode = settings.AUTH_TOKEN_MODE
     heading(
-        15,
+        16,
         f"Token mode: {mode}",
         "no token app" if mode == "none" else f"oauth_core, oauth_{mode}",
         "All three modes publish the same endpoints under /auth/token, so a "
@@ -2294,7 +2652,7 @@ def section_social(api: Api) -> None:
     from django.conf import settings
 
     heading(
-        16,
+        17,
         "Social sign-in",
         ", ".join(f"oauth_{name}" for name in settings.OAUTH_PROVIDERS),
         "Each provider mounts a start and a callback. Start is the half this "
@@ -2314,7 +2672,7 @@ def section_audit(api: Api) -> None:
     from infrastructure.oauth.core import jwt_tokens
 
     heading(
-        17,
+        18,
         "What was recorded",
         "auth_core, oauth_core",
         "Every step above left an audit row, and every credential above was a "
@@ -2344,7 +2702,7 @@ def section_audit(api: Api) -> None:
 
 def section_openapi(api: Api) -> None:
     heading(
-        18,
+        19,
         "The document all of that produced",
         "config.api",
         "One NinjaAPI per registered version, every enabled app's router "
@@ -2418,7 +2776,7 @@ def section_admin(api: Api) -> None:
     from django.urls import reverse
 
     heading(
-        19,
+        20,
         "The admin, every app of it",
         "all apps",
         "The API is half the project; the other half is the screen the people "
@@ -2541,6 +2899,7 @@ def tour() -> int:
         section_notifications(api)
         section_shop(api)
         section_support(api)
+        section_wallet(api)
         section_email_code(api)
         section_sms_code(api)
         section_magic_link(api)

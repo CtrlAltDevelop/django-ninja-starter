@@ -1,0 +1,311 @@
+syntax = "proto3";
+
+package config.wallet;
+
+import "google/protobuf/empty.proto";
+
+service WalletController {
+    rpc Cancel(CancelRequest) returns (CancelResult) {}
+    rpc Checkpoints(CheckpointsRequest) returns (CheckpointList) {}
+    rpc Convert(ExchangeRequest) returns (ExchangeResult) {}
+    rpc Deposit(DepositRequest) returns (DepositResult) {}
+    rpc Entries(EntriesRequest) returns (EntryPage) {}
+    rpc GetEntry(EntryRequest) returns (EntryResult) {}
+    rpc GetWallet(google.protobuf.Empty) returns (WalletResult) {}
+    rpc Methods(MethodsRequest) returns (MethodList) {}
+    rpc PriceMovement(QuoteRequest) returns (QuoteResult) {}
+    rpc Rates(RatesRequest) returns (RateList) {}
+    rpc Transfer(TransferRequest) returns (TransferResult) {}
+    rpc Withdraw(WithdrawRequest) returns (WithdrawResult) {}
+}
+
+message Balance {
+    string currency = 1;
+    string settled = 2;
+    string available = 3;
+    string incoming = 4;
+    string outgoing = 5;
+    string projected = 6;
+    bool has_pending = 7;
+    int32 checkpoint_sequence = 8;
+    int32 unarchived_entries = 9;
+}
+
+message CancelRequest {
+    string entry_id = 1;
+    string reason = 2;
+}
+
+message CancelResult {
+    Entry entry = 1;
+}
+
+message Charge {
+    string kind = 1;
+    string label = 2;
+    string percent = 3;
+    string amount = 4;
+    bool absorbed = 5;
+}
+
+message Checkpoint {
+    string id = 1;
+    int32 sequence = 2;
+    string balance = 3;
+    string credited = 4;
+    string debited = 5;
+    int32 entry_count = 6;
+    string created_at = 7;
+}
+
+message CheckpointList {
+    repeated Checkpoint checkpoints = 1;
+}
+
+message CheckpointsRequest {
+    int32 limit = 1;
+}
+
+message Currency {
+    string currency = 1;
+    string min_amount = 2;
+    string max_amount = 3;
+    int32 decimals = 4;
+    repeated Network networks = 5;
+}
+
+message DepositRequest {
+    string amount = 1;
+    string method = 2;
+    string reference = 3;
+    string currency = 4;
+    string network = 5;
+    string external_reference = 6;
+    string description = 7;
+}
+
+message DepositResult {
+    Entry entry = 1;
+}
+
+message EntriesRequest {
+    string kind = 1;
+    string status = 2;
+    string method = 3;
+    string direction = 4;
+    int32 limit = 5;
+    int32 offset = 6;
+}
+
+message Entry {
+    string id = 1;
+    string kind = 2;
+    string direction = 3;
+    string method = 4;
+    string payment_method = 5;
+    string payment_method_name = 6;
+    string network = 7;
+    string network_name = 8;
+    string amount = 9;
+    string signed_amount = 10;
+    string currency = 11;
+    string wallet_currency = 12;
+    string gross_amount = 13;
+    string fee_total = 14;
+    string net_amount = 15;
+    repeated Charge charges = 16;
+    bool converted = 17;
+    string exchange_rate = 18;
+    string destination = 19;
+    string status = 20;
+    bool settled = 21;
+    string approval = 22;
+    bool awaiting_approval = 23;
+    string reviewed_at = 24;
+    string review_note = 25;
+    string reference = 26;
+    string external_reference = 27;
+    string description = 28;
+    string metadata = 29;
+    string counterparty_id = 30;
+    bool archived = 31;
+    string created_at = 32;
+    string settled_at = 33;
+    bool counts_towards_balance = 34;
+}
+
+message EntryPage {
+    repeated Entry entries = 1;
+    int32 total = 2;
+    int32 limit = 3;
+    int32 offset = 4;
+}
+
+message EntryRequest {
+    string entry_id = 1;
+}
+
+message EntryResult {
+    Entry entry = 1;
+}
+
+message Exchange {
+    string base = 1;
+    string quote = 2;
+    string rate = 3;
+    string margin_percent = 4;
+    string effective_rate = 5;
+    string amount = 6;
+    string converted = 7;
+    bool inverted = 8;
+}
+
+message ExchangeRequest {
+    string amount = 1;
+    string base = 2;
+    string quote = 3;
+    string direction = 4;
+}
+
+message ExchangeResult {
+    Exchange exchange = 1;
+}
+
+message Fee {
+    string kind = 1;
+    string label = 2;
+    string applies_to = 3;
+    string percent = 4;
+    string fixed = 5;
+    string basis = 6;
+    string minimum = 7;
+    string maximum = 8;
+    string currency = 9;
+}
+
+message Method {
+    string code = 1;
+    string name = 2;
+    string rail = 3;
+    string family = 4;
+    string description = 5;
+    string instructions = 6;
+    string icon = 7;
+    repeated string directions = 8;
+    bool settles_immediately = 9;
+    bool reversible = 10;
+    bool requires_approval = 11;
+    bool needs_network = 12;
+    bool needs_destination = 13;
+    repeated Currency currencies = 14;
+    repeated Fee fees = 15;
+}
+
+message MethodList {
+    repeated Method methods = 1;
+}
+
+message MethodsRequest {
+    string direction = 1;
+    string currency = 2;
+}
+
+message Network {
+    string code = 1;
+    string name = 2;
+    int32 confirmations = 3;
+    string network_fee = 4;
+    string min_amount = 5;
+    string max_amount = 6;
+    string deposit_address = 7;
+}
+
+message Quote {
+    string method = 1;
+    string method_name = 2;
+    string rail = 3;
+    string direction = 4;
+    string currency = 5;
+    string wallet_currency = 6;
+    string network = 7;
+    string gross = 8;
+    repeated Charge charges = 9;
+    string fee_total = 10;
+    string absorbed_total = 11;
+    string net = 12;
+    string wallet_amount = 13;
+    string settlement_amount = 14;
+    bool converted = 15;
+    Exchange exchange = 16;
+    bool requires_approval = 17;
+    bool settles_immediately = 18;
+}
+
+message QuoteRequest {
+    string method = 1;
+    string direction = 2;
+    string amount = 3;
+    string currency = 4;
+    string network = 5;
+}
+
+message QuoteResult {
+    Quote quote = 1;
+}
+
+message Rate {
+    string base = 1;
+    string quote = 2;
+    string rate = 3;
+    string margin_percent = 4;
+    string source = 5;
+    string effective_from = 6;
+}
+
+message RateList {
+    repeated Rate rates = 1;
+}
+
+message RatesRequest {
+    string base = 1;
+    string quote = 2;
+}
+
+message TransferRequest {
+    string to_user_id = 1;
+    string amount = 2;
+    string reference = 3;
+    string description = 4;
+}
+
+message TransferResult {
+    Entry entry = 1;
+}
+
+message Wallet {
+    string id = 1;
+    string currency = 2;
+    string status = 3;
+    string created_at = 4;
+    Balance balance = 5;
+}
+
+message WalletResult {
+    Wallet wallet = 1;
+}
+
+message WithdrawRequest {
+    string amount = 1;
+    string method = 2;
+    string reference = 3;
+    string currency = 4;
+    string network = 5;
+    string destination = 6;
+    string external_reference = 7;
+    string description = 8;
+}
+
+message WithdrawResult {
+    Entry entry = 1;
+}
+
