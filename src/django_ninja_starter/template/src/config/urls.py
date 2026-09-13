@@ -8,6 +8,7 @@ from strawberry.django.views import AsyncGraphQLView
 
 from config.api import apis
 from config.graph import schema as graph_schema
+from infrastructure.common.adminlive import anything_live, live_script
 
 
 def api_docs(request: HttpRequest) -> HttpResponse:
@@ -39,6 +40,17 @@ urlpatterns = [
     path("api/<str:version>/redoc", api_redoc, name="api-version-redoc"),
     *(path(f"api/{version}/", api.urls) for version, api in apis.items()),
 ]
+
+# The admin's live corner -- the bell, its count and its toasts -- as a script
+# with this deployment's socket paths rendered into it. Mounted here rather than
+# by either app that feeds it, for the reason `config/sockets.py` gives: which
+# apps are installed is the project's question. Absent, and never requested,
+# when nothing is publishing a socket for it to open.
+# Ahead of `admin/`, not after it: the admin's own include ends in a catch-all
+# that answers anything under its prefix it does not recognise with a 404, so a
+# route appended below would resolve, reverse, and still never be served.
+if anything_live():
+    urlpatterns.insert(0, path("admin/live.js", live_script, name="admin-live-script"))
 
 # Uploaded files, served by Django only while DEBUG is on. In production a web
 # server or an object store serves MEDIA_URL, and Django is never asked -- which

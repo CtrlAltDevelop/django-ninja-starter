@@ -25,7 +25,10 @@ alone is enough.
    **CMS**, **notifications**, the **shop** and the **support desk**.
 3. Runs the project's own `manage.py startapi notes --api-version v1` and `v2`,
    then copies `notes/` over the scaffolding it wrote.
-4. Runs `migrate`, so `make run` inside the built project serves the API.
+4. Runs `migrate`, so `make serve` inside the built project serves the API —
+   and the sockets, and the static files. Use `make serve` rather than `make
+   run` here: the example turns on every feature app, and `runserver` is WSGI,
+   so the support desk's live chat and the admin's live bell would be dead.
 
 The build directory is ignored by git. Rebuild it against the current template
 whenever you like:

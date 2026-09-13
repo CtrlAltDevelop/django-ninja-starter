@@ -845,6 +845,16 @@ GRPC_FRAMEWORK = {
     "GRPC_ASYNC": True,
 }
 
+# Whether the admin loads the live script at all. Both feeds are optional apps
+# and either one is enough: `infrastructure.common.adminlive` decides which
+# sockets it opens, and `config/urls.py` mounts the view under the same
+# condition.
+ADMIN_LIVE_SCRIPTS = (
+    ["infrastructure.common.adminlive.live_script_url"]
+    if NOTIFICATIONS_INSTALLED_APPS or SUPPORT_INSTALLED_APPS
+    else []
+)
+
 # The admin's appearance, all of it. The three callbacks are dotted paths rather
 # than imports because settings are read before the app registry is ready, and
 # each of them asks a question only the running project can answer: which apps
@@ -882,6 +892,12 @@ UNFOLD = {
         "navigation": "infrastructure.common.adminui.sidebar_navigation",
     },
     "COMMAND": {"search_models": True, "show_history": True},
+    # The live corner: a bell with what is unanswered, and a toast when
+    # something arrives, on every admin page rather than only on the screen that
+    # owns the feed. Unfold resolves the entry per request; the view behind it
+    # renders this deployment's socket paths into the script, and the list is
+    # empty -- and the URL unmounted -- when no app publishes a socket.
+    "SCRIPTS": ADMIN_LIVE_SCRIPTS,
 }
 
 MIDDLEWARE = [

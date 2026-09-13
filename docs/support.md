@@ -525,6 +525,21 @@ A file somebody has sent but not yet attached to anything.
 | `Upload` | No — read-only | — | `name`, `owner`, `size`, `content_type`, `claimed`, `created_at` |
 <!-- /generated:admin -->
 
+Beside the records there is a screen that is not a change form: **`Support ->
+Live chat`**, at `/admin/support/ticket/chat/`. The queue is on the left, one
+conversation on the right, and a single WebSocket carries both -- so an agent
+answers somebody while they are still there, which is the whole reason this app
+has a socket. It posts no form: the queue and its filters, opening a thread,
+sending, internal notes, typing, claiming, status and priority are commands on
+the protocol above, so the desk screen is another client of it rather than a
+second implementation. The credential is the admin's own session cookie.
+
+It needs `support.view_ticket` to open, an ASGI server to be any use -- see
+[Running the socket](#running-the-socket) -- and says which of the two reasons
+it is not live rather than showing an empty queue with no explanation. Every
+admin page also carries a bell in its header that counts what is unanswered and
+toasts a message arriving in any thread; see [the admin](admin.md#the-live-bell).
+
 The queue's **SLA column** is not sortable, and that is on purpose: a breach is
 computed against the clock rather than stored, so there is no column to sort on.
 Sorting by `first_response_due_at` is the orderable version of the same question

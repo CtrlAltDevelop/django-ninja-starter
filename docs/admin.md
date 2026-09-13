@@ -70,6 +70,35 @@ Agents need `support.view_ticket` to open the screen; everything they can
 *change* on it is checked again by the socket, for the account behind the
 connection.
 
+## The live bell
+
+A bell in the **header** of every admin page, beside the environment badge, with
+a count of what is unanswered and a toast when something arrives — a new
+notification, or a message in a support thread. A badge that only appears on the
+screen that owns the feed is a badge nobody sees: an agent editing a product has
+no reason to be looking at the desk, which is exactly when a chat arrives.
+Pressing it goes where the unanswered thing is: the desk when a conversation is
+waiting, the notification list otherwise.
+
+It is one script, `/admin/live.js`, rendered by
+`infrastructure.common.adminlive` with this deployment's socket paths baked into
+it and injected into every admin page through `UNFOLD["SCRIPTS"]`. It mounts
+itself into the theme's header (`#header-inner`), falls back to the plain admin's
+user tools, and to a floating corner button in an admin that has neither. Both
+feeds are optional: the script opens only the sockets the project actually
+publishes, and neither the URL nor the script tag exists when no app publishes
+one.
+
+Three things it deliberately does **not** do, each of which it did once and each
+of which was noise: it does not toast the backlog a socket replays on connect
+(the badge says four, rather than four pop-ups on every page load), it does not
+announce your own replies back to you, and it does not repeat what the desk
+screen has already said — a new support message is published twice on purpose,
+down the socket for whoever is connected and as a notification for whoever is
+not, and an agent with the admin open is both. The count itself is the server's:
+the bell asks for it rather than keeping a tally, so it survives a reconnect, a
+second tab, and a notification read on a phone.
+
 ## Configuring it
 
 Everything visual lives in one `UNFOLD` dictionary in `src/config/settings/base.py`:
@@ -82,6 +111,7 @@ are questions only a running project can answer:
 | `ENVIRONMENT` | `adminui.environment_badge` | Is this production? |
 | `SIDEBAR.navigation` | `adminui.sidebar_navigation` | Which apps are installed, and what may this user open? |
 | `DASHBOARD_CALLBACK` | `adminui.dashboard` | What are the numbers today? |
+| `SCRIPTS` | `adminlive.live_script_url` | Which live feeds does this deployment publish? |
 
 The first three live in `src/infrastructure/common/adminui.py`, and none of them
 knows any app. They walk the installed apps looking for a contribution, which is

@@ -24,8 +24,11 @@ reader to configure and extend it:
     a GraphQL contribution, a set of gRPC actions, and their tests.
 4.  ``manage.py protos`` compiles the notes app's ``.proto`` and its stubs, the
     same command a developer runs after touching a ``@grpc_action``.
-5.  ``manage.py migrate`` leaves a database behind, so ``make run`` in the built
-    project serves the API immediately.
+5.  ``manage.py migrate`` leaves a database behind, so ``make serve`` in the
+    built project serves the API immediately. ``make serve`` rather than ``make
+    run`` because the example enables every feature app, two of which publish a
+    WebSocket -- and ``runserver`` is WSGI, so the live chat desk and the admin's
+    live bell would be the one part of the tour that does not work.
 
 The result is a project a reader could have produced themselves, and the thing
 ``examples/walkthrough.py`` and ``tests/test_example_project.py`` both run
