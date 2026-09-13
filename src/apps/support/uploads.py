@@ -16,6 +16,13 @@ already written to storage before anybody notices.
   documents and images, and deliberately excludes anything a browser would
   execute -- a support desk is a place strangers send you files, which is the
   worst possible place to be relaxed about that.
+
+  ``.svg`` is not on it, which surprises people, because an SVG is a document
+  rather than a picture: it may carry ``<script>``, and a browser opening one
+  served from this deployment's own origin runs it there. An agent clicking an
+  attachment a stranger sent is exactly the click that turns that into a session.
+  A desk that needs vector art and serves its uploads from a separate origin can
+  put it back through ``DJANGO_SUPPORT_UPLOAD_EXTENSIONS``.
 * **a file over ``SUPPORT_MAX_UPLOAD_BYTES``**, checked before the read rather
   than after, so an oversized upload costs a rejection and not a disk.
 * **too many staged uploads at once**, so a client cannot use the staging area
@@ -53,7 +60,6 @@ ALLOWED_EXTENSIONS = (
     ".gif",
     ".webp",
     ".bmp",
-    ".svg",
     ".pdf",
     ".txt",
     ".log",

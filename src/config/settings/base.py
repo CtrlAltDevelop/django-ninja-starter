@@ -680,10 +680,14 @@ SUPPORT_MAX_UPLOAD_BYTES = SUPPORT_MAX_UPLOAD_MB * 1024 * 1024
 # a place strangers send you files -- the worst possible place to be relaxed
 # about it. Left empty, the app applies no extension check at all, which is a
 # choice a deployment is allowed to make out loud.
+# Written with or without the leading dot, because both are what somebody
+# reaches for and the app compares against `.png`. `png,jpg` used to be accepted
+# and then match nothing, which turns a desk that quietly rejects every
+# attachment into the deployment's problem to diagnose.
 SUPPORT_UPLOAD_EXTENSIONS = [
-    extension.strip().lower()
+    f".{extension.strip().lower().lstrip('.')}"
     for extension in os.getenv("DJANGO_SUPPORT_UPLOAD_EXTENSIONS", "").split(",")
-    if extension.strip()
+    if extension.strip().strip(".")
 ] or None
 
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")

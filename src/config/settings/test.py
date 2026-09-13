@@ -29,6 +29,7 @@ os.environ.setdefault(
 # exception: tests need the in-process one, and it warns about itself.
 os.environ.setdefault("DJANGO_AUTH_EMAIL_FROM", "sign-in@example.test")
 os.environ.setdefault("DJANGO_AUTH_SMS_FROM", "+15555550100")
+os.environ.setdefault("DJANGO_SUPPORT_UPLOAD_EXTENSIONS", "png,jpg,jpeg,gif,pdf,txt,log,zip")
 os.environ.setdefault("DJANGO_OAUTH_PROVIDERS", "google,apple,microsoft,github")
 for key, value in {
     "GOOGLE_OAUTH_CLIENT_ID": "test-google-client",
