@@ -403,6 +403,15 @@ simply never opens, which is a confusing way to find out. The project ships
 `make serve` for this, which is `uvicorn config.asgi:application --reload
 --app-dir src` and needs the `asgi` extra that `dev` already pulls in.
 
+`make serve` serves the **static files** as well. `runserver` quietly installs a
+handler that serves `STATIC_URL` from the finders and an ASGI server does not, so
+a project served this way used to load its admin with no stylesheet: the pages
+answered 200 and the CSS answered 404. `config/asgi.py` puts that handler in by
+hand while `DEBUG` is on, and leaves it out otherwise — in production a web
+server or an object store serves what `collectstatic` wrote. Template, CSS and
+JavaScript edits are picked up by the reloader too, which is why the `asgi` extra
+carries `watchfiles`: uvicorn's own reloader watches Python files only.
+
 `config/sockets.py` is where a `websocket` scope is routed, deliberately the
 project's file rather than an app's: an app publishes a socket application the way
 it publishes a router, and the project decides whether it is mounted and where. A
@@ -528,7 +537,7 @@ make migrations  # create migrations
 make migrate     # apply migrations
 make superuser   # create an admin user
 make run         # start the development server (WSGI: no WebSocket)
-make serve       # start an ASGI server, which does serve the WebSocket
+make serve       # start an ASGI server: the WebSockets, and static files too
 make example     # build the example project and tour every app in it
 ```
 

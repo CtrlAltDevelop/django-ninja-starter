@@ -236,13 +236,22 @@ make migrations  # create migrations
 make migrate     # apply migrations
 make superuser   # create an admin user
 make run         # start the development server (WSGI: no WebSocket)
-make serve       # start an ASGI server, which does serve the WebSocket
+make serve       # start an ASGI server: the WebSockets, and static files too
 ```
 
 `make run` is `manage.py runserver`, which is WSGI and will never serve a
 WebSocket — the connection simply never opens. Use `make serve` when
 notifications or support are enabled; it needs the `asgi` extra that `dev`
 already pulls in.
+
+`make serve` serves the **static files** as well. `runserver` quietly installs a
+handler that serves `STATIC_URL` from the finders and an ASGI server does not, so
+a project served this way would otherwise load its admin with no stylesheet: the
+pages answer 200 and the CSS answers 404. `config/asgi.py` puts that handler in
+by hand while `DEBUG` is on, and leaves it out otherwise — in production a web
+server or an object store serves what `collectstatic` wrote. Template, CSS and
+JavaScript edits are picked up by the reloader too, which is what `watchfiles`
+in the `asgi` extra is for: uvicorn's own reloader watches Python files only.
 
 ## Configuration
 
