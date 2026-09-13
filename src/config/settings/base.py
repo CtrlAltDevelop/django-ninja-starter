@@ -752,6 +752,35 @@ GRAPHQL_ENABLED = os.getenv("DJANGO_GRAPHQL_ENABLED", "true").lower() == "true"
 # always False, and `development.py` raising it does so after this line has
 # already run, so the editor would be off in the one place it is wanted.
 GRAPHQL_GRAPHIQL = os.getenv("DJANGO_GRAPHQL_GRAPHIQL", "false").lower() == "true"
+# What one GraphQL request is allowed to cost. REST bounds a request by its
+# route -- an endpoint reads what it reads -- but a GraphQL caller composes the
+# query, so the cost of a request is whatever the schema's edges let them nest.
+# Every one of these apps' schemas has a cycle in it (a product has a category
+# which has products), which is all it takes for a short query to ask for a
+# cartesian product of the catalogue.
+#
+# Three limits rather than one, because there are three ways to spend the
+# server's afternoon and each is cheap to check:
+#
+# * `DEPTH` bounds nesting, which is the recursive-cycle attack.
+# * `ALIASES` bounds asking for the *same* expensive field many times under
+#   different names, which nesting limits do not see at all.
+# * `TOKENS` bounds the document before it is parsed, so an enormous query costs
+#   a rejection rather than a parse.
+#
+# Generous by default -- a real client's deepest legitimate query is nowhere
+# near ten levels -- because a limit that breaks honest queries gets raised to
+# infinity by the first person it pages at 3am.
+GRAPHQL_MAX_DEPTH = int(os.getenv("DJANGO_GRAPHQL_MAX_DEPTH", "10"))
+GRAPHQL_MAX_ALIASES = int(os.getenv("DJANGO_GRAPHQL_MAX_ALIASES", "15"))
+GRAPHQL_MAX_TOKENS = int(os.getenv("DJANGO_GRAPHQL_MAX_TOKENS", "2000"))
+# Whether the schema will describe itself. Introspection is what GraphiQL and
+# every code generator read, and it is also how somebody who has just found the
+# endpoint learns every type, field and mutation on it in one request. On by
+# default because a public API's schema is usually meant to be public and
+# turning it off breaks the tooling; a deployment whose API is internal should
+# set this false, and `production.py` does not decide for it either way.
+GRAPHQL_INTROSPECTION = os.getenv("DJANGO_GRAPHQL_INTROSPECTION", "true").lower() == "true"
 GRPC_ENABLED = os.getenv("DJANGO_GRPC_ENABLED", "true").lower() == "true"
 GRPC_PORT = int(os.getenv("DJANGO_GRPC_PORT", "50051"))
 

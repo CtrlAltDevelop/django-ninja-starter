@@ -506,6 +506,10 @@ variables as needed:
 | `DJANGO_NOTIFICATIONS_RETENTION_DAYS` | How long `manage.py notifications_prune` keeps a notification. `0` keeps everything, and nothing is deleted until you run the command | `0` |
 | `DJANGO_GRAPHQL_ENABLED` | Publish the GraphQL endpoint at `/graphql` | `true` |
 | `DJANGO_GRAPHQL_GRAPHIQL` | The in-browser query editor. On in the development settings; an unauthenticated schema browser if left on in production | `false` |
+| `DJANGO_GRAPHQL_MAX_DEPTH` | How deep one query may nest. Every schema here has a cycle in it, so this is what stops a short query asking for a cartesian product. `0` turns it off | `10` |
+| `DJANGO_GRAPHQL_MAX_ALIASES` | How many aliases one document may carry, so the same costly field cannot be asked for forty times at depth one. `0` turns it off | `15` |
+| `DJANGO_GRAPHQL_MAX_TOKENS` | How large a document may be, rejected at the lexer so an enormous query costs no parse. `0` turns it off | `2000` |
+| `DJANGO_GRAPHQL_INTROSPECTION` | Whether the schema describes itself. On, because code generators read it; off where the API is internal | `true` |
 | `DJANGO_GRPC_ENABLED` | Register the gRPC services | `true` |
 | `DJANGO_GRPC_PORT` | Port `manage.py grpcrunaioserver` listens on | `50051` |
 | `DJANGO_API_THROTTLE_ANON` | How often one IP may call the API without proving an account. Empty turns it off | `120/min` |
