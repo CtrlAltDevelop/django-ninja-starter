@@ -781,6 +781,19 @@ GRAPHQL_MAX_TOKENS = int(os.getenv("DJANGO_GRAPHQL_MAX_TOKENS", "2000"))
 # turning it off breaks the tooling; a deployment whose API is internal should
 # set this false, and `production.py` does not decide for it either way.
 GRAPHQL_INTROSPECTION = os.getenv("DJANGO_GRAPHQL_INTROSPECTION", "true").lower() == "true"
+# Which hosts a browser may open a WebSocket from. Browsers do not apply the
+# same-origin policy to WebSockets -- any page can ask for a socket to any host
+# and the browser sends the handshake, with cookies -- and these sockets accept a
+# session cookie as identity. Left unset this follows ALLOWED_HOSTS, because the
+# pages that legitimately open these sockets are the pages this deployment
+# serves. A project whose frontend is on another domain names it here. `*` turns
+# the check off.
+WEBSOCKET_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("DJANGO_WEBSOCKET_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 GRPC_ENABLED = os.getenv("DJANGO_GRPC_ENABLED", "true").lower() == "true"
 GRPC_PORT = int(os.getenv("DJANGO_GRPC_PORT", "50051"))
 

@@ -13,6 +13,7 @@ without this module knowing anything about it beyond a setting.
 """
 
 from typing import Any
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.utils.module_loading import import_string
@@ -24,6 +25,12 @@ type AsgiApplication = Any
 # server that hung up on it, and the 4000 range is the one reserved for
 # application-defined meanings.
 NO_SUCH_ROUTE = 4404
+
+# The close code for "not from a page this deployment serves". Its own code
+# rather than sharing 4404, because the two are different problems: a client on
+# the wrong path fixes its URL, and a handshake refused for its origin means
+# somebody's browser was told to open this socket by a page that is not ours.
+BAD_ORIGIN = 4403
 
 
 def websocket_routes() -> list[tuple[str, str]]:
@@ -58,4 +65,60 @@ async def websocket_application(scope: dict[str, Any], receive: Any, send: Any) 
         await receive()
         await send({"type": "websocket.close", "code": NO_SUCH_ROUTE})
         return
+    if not origin_allowed(scope):
+        await receive()
+        await send({"type": "websocket.close", "code": BAD_ORIGIN})
+        return
     await import_string(application)(scope, receive, send)
+
+
+def allowed_origins() -> list[str]:
+    """The hosts a browser may open one of these sockets from.
+
+    ``DJANGO_WEBSOCKET_ALLOWED_ORIGINS`` when a deployment names them, and
+    ``ALLOWED_HOSTS`` when it does not -- because the pages that legitimately
+    open these sockets are, almost always, the pages this deployment serves.
+    A project whose frontend is on another domain names that domain here, and
+    naming ``*`` turns the check off for a deployment that has decided its
+    sockets are genuinely public.
+    """
+    configured = getattr(settings, "WEBSOCKET_ALLOWED_ORIGINS", None)
+    if configured:
+        return [str(item) for item in configured]
+    return [str(host) for host in settings.ALLOWED_HOSTS]
+
+
+def origin_allowed(scope: dict[str, Any]) -> bool:
+    """Whether this handshake came from somewhere allowed to open the socket.
+
+    **Browsers do not apply the same-origin policy to WebSockets.** Any page can
+    ask for a socket to any host, and the browser sends the handshake -- with
+    cookies. The identity these sockets accept includes a session cookie (see
+    ``apps.notifications.identity``), so without this check a deployment whose
+    cookie reaches a cross-site handshake is one where any page a signed-in
+    person visits can open their notification feed and read it. That is
+    cross-site WebSocket hijacking, and the handshake is the only place to stop
+    it.
+
+    A modern browser's ``SameSite=Lax`` default already withholds the cookie
+    here, so this is the second lock rather than the first -- which matters
+    precisely because the deployments that need it most are the ones that had to
+    set ``SameSite=None`` to put their frontend on another domain.
+
+    A handshake with no ``Origin`` at all is allowed: that is a native client, a
+    server-to-server consumer or a test, none of which a browser's ambient
+    credentials are reachable from. The header cannot be forged by a page --
+    browsers set it themselves -- which is what makes checking it worth anything.
+    """
+    origin = ""
+    for key, value in scope.get("headers") or []:
+        if key == b"origin":
+            origin = value.decode("latin-1")
+            break
+    if not origin:
+        return True
+    allowed = allowed_origins()
+    if "*" in allowed:
+        return True
+    host = urlparse(origin).hostname or ""
+    return any(host == entry or entry == "*" for entry in allowed)
