@@ -508,6 +508,10 @@ variables as needed:
 | `DJANGO_GRAPHQL_GRAPHIQL` | The in-browser query editor. On in the development settings; an unauthenticated schema browser if left on in production | `false` |
 | `DJANGO_GRPC_ENABLED` | Register the gRPC services | `true` |
 | `DJANGO_GRPC_PORT` | Port `manage.py grpcrunaioserver` listens on | `50051` |
+| `DJANGO_API_THROTTLE_ANON` | How often one IP may call the API without proving an account. Empty turns it off | `120/min` |
+| `DJANGO_API_THROTTLE_AUTH` | How often one credential may call it. Counted per account, so an office behind one NAT does not throttle itself | `600/min` |
+| `DJANGO_API_THROTTLE_LOGIN` | How often one IP may try a login, signup, reset or token refresh. Tighter, because this is the credential-stuffing surface | `60/min` |
+| `DJANGO_API_THROTTLE_UPLOAD` | How often one account may stage a support attachment | `60/hour` |
 | `DJANGO_SHOP_ENABLED` | Install the shop: its tables, routes and admin | `false` |
 | `DJANGO_SHOP_CURRENCY` | ISO 4217 code every price is quoted in | `USD` |
 | `DJANGO_SHOP_REVIEW_MODERATION` | Hold a review for a moderator before it is readable | `true` |

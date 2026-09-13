@@ -714,6 +714,36 @@ APP_TRANSPORTS = {
     "apps.support": SUPPORT_TRANSPORTS,
 }
 
+# How often one caller may ask, whichever endpoint they are asking. A correct
+# credential is not a licence to make a hundred thousand requests, and the
+# catalogue that authenticates nobody is the endpoint most worth scraping -- so
+# there are two default scopes, and which one applies is decided per request:
+# `ANON` counts by IP where nothing was proved, `AUTH` counts by credential
+# everywhere else. Counting an authenticated caller by IP would make an office
+# behind one NAT throttle itself.
+#
+# `LOGIN` is separate and much tighter, for the endpoints that take a secret and
+# say whether it was right. The authentication core already limits guesses
+# against one account; this is the axis that cannot see -- fifty thousand
+# accounts tried once each, which is the attack people actually run.
+#
+# `LOGIN` is counted per IP, so the number has to survive an office behind one
+# NAT all arriving at nine -- while still being nowhere near what credential
+# stuffing needs, which is thousands a minute against a list.
+#
+# `UPLOAD` is separate because the cost of one of those requests is a disk.
+#
+# Each is `<count>/<period>`, where period is s, m, h or d. Empty turns that
+# scope off, which is the honest way to let a deployment that rate-limits at its
+# edge avoid counting everything twice.
+#
+# The counters live in the default cache, so these are per process until that
+# cache is Redis or Memcached. See `infrastructure/common/throttling.py`.
+API_THROTTLE_ANON = os.getenv("DJANGO_API_THROTTLE_ANON", "120/min")
+API_THROTTLE_AUTH = os.getenv("DJANGO_API_THROTTLE_AUTH", "600/min")
+API_THROTTLE_LOGIN = os.getenv("DJANGO_API_THROTTLE_LOGIN", "60/min")
+API_THROTTLE_UPLOAD = os.getenv("DJANGO_API_THROTTLE_UPLOAD", "60/hour")
+
 GRAPHQL_ENABLED = os.getenv("DJANGO_GRAPHQL_ENABLED", "true").lower() == "true"
 # The in-browser query editor. Handy in development, and an unauthenticated
 # schema browser in production, so it is off here and turned on by the

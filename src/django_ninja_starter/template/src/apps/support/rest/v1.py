@@ -71,6 +71,16 @@ try:  # pragma: no cover - exercised by whichever branch the project installs
 except ImportError:  # pragma: no cover - only in a project without the auth apps
     from ninja.security import django_auth as api_auth  # type: ignore[assignment]
 
+try:  # pragma: no cover - exercised by whichever branch the project installs
+    from infrastructure.common.throttling import upload_throttles
+except ImportError:  # pragma: no cover - only where this app was copied out alone
+    from ninja.throttling import BaseThrottle
+
+    def upload_throttles() -> list[BaseThrottle]:
+        """No project-wide limits to borrow, so this app imposes none of its own."""
+        return []
+
+
 router = Router(auth=api_auth)
 
 
@@ -266,7 +276,16 @@ def stats(request: HttpRequest) -> dict[str, Any]:
     return _call(support_service.stats, request.user)
 
 
-@router.post("/uploads", response={201: UploadOut}, summary="Send a file, before sending a message")
+@router.post(
+    "/uploads",
+    response={201: UploadOut},
+    # The one endpoint here whose cost is a disk rather than a query. The staging
+    # cap in `uploads.py` bounds how many files may sit unattached at once; this
+    # bounds how fast they may arrive, which is the different question a client
+    # that uploads and attaches in a loop asks.
+    throttle=upload_throttles(),
+    summary="Send a file, before sending a message",
+)
 def stage_upload(
     request: HttpRequest,
     # `File(...)` in the default is how django-ninja declares a multipart body;

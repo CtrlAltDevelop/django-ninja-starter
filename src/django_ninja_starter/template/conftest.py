@@ -1,4 +1,4 @@
-"""Test-wide fixtures: isolation for global auth state, and a real gRPC server."""
+"""Test-wide fixtures: isolation for global state, and a real gRPC server."""
 
 import asyncio
 from collections.abc import Callable, Iterator
@@ -6,6 +6,7 @@ from typing import Any
 
 import grpc
 import pytest
+from django.core.cache import cache
 
 from infrastructure.auth.core import delivery
 from infrastructure.auth.core.challenges import reset_challenge_store
@@ -24,6 +25,22 @@ def _isolate_auth_state() -> Iterator[None]:
     yield
     reset_challenge_store()
     delivery.outbox.clear()
+
+
+@pytest.fixture(autouse=True)
+def _empty_the_rate_limit_counters() -> Iterator[None]:
+    """Give every test its own throttle budget.
+
+    The rate-limit counters live in the default cache, which is per process and
+    lives as long as the process does -- so without this the requests one test
+    makes are still counted against the next one, and a suite that grows past a
+    limit starts failing in whichever test happens to run last. That failure
+    would point at the endpoint rather than at the counter, which is a bad
+    afternoon.
+    """
+    cache.clear()
+    yield
+    cache.clear()
 
 
 @pytest.fixture

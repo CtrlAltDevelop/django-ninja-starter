@@ -95,6 +95,45 @@ attached in is the order the groups appear. A tag belonging to an app this
 deployment did not enable is not in the list at all, for the same reason its
 routes are not.
 
+### Rate limits
+
+Every endpoint on every registered API version is rate-limited, because
+`config/api.py` attaches the limits to the `NinjaAPI` rather than to the routes.
+An endpoint added next week is limited by having been added, which is the only
+arrangement that stays true -- a decorator per route is a decorator somebody
+forgets, on the endpoint nobody has load-tested.
+
+Which limit applies is decided per request, not per route, because Django Ninja
+resolves the caller before it checks a throttle:
+
+| Scope | Counts by | Applies to |
+| --- | --- | --- |
+| `anon` | IP address | requests that proved no account |
+| `auth` | credential | requests that did |
+| `login` | IP address | every login, signup, reset, token and OAuth route |
+| `upload` | credential | staging a support attachment |
+
+The two default scopes are disjoint on purpose. Counting a signed-in caller by
+IP would make an office behind one NAT throttle itself, and counting an
+anonymous one under both scopes would mean the anonymous dial could never be
+raised above the authenticated one.
+
+`login` is separate and much tighter because it guards a different attack from
+the one `AUTH_MAX_SENDS_PER_HOUR` and the password attempt cap guard. Those count
+guesses against *one* account; a credential-stuffing run makes one guess against
+each of fifty thousand, which no per-account counter can see.
+
+Each rate is `<count>/<period>` and is read from the settings **per request**, so
+`override_settings` works in a test and a deployment's change takes effect on the
+process it has. Setting one empty turns that scope off, which is what a project
+that already rate-limits at its CDN wants rather than counting everything twice.
+
+The counters live in Django's default cache. That default is per process, so a
+project running four workers hands out four times the limit; point `CACHES` at
+Redis or Memcached and the fleet shares one budget. Treat this as load-shedding
+rather than an authorisation control -- it is the cheap layer that keeps honest
+traffic honest, not the one that stops somebody determined.
+
 ### Refusing a request
 
 ```python
