@@ -11,6 +11,7 @@ and worth every second: this is the only place the *shipped* defaults are
 exercised, rather than the test settings that turn everything on.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -331,3 +332,51 @@ def test_dropping_ws_unmounts_that_app_socket(app: str, tmp_path: Path) -> None:
     assert without.returncode == 0, without.stdout + without.stderr
     assert app in with_ws.stdout, with_ws.stdout
     assert app not in without.stdout, without.stdout
+
+
+# -- the admin -----------------------------------------------------------------
+
+
+def _admin_page(environment: dict[str, str], database: Path) -> dict[str, list[str]]:
+    """Render the admin front page in one configuration and report what it drew."""
+    result = _run([str(DRIVER), "admin_page"], environment, database)
+
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    return json.loads(result.stdout.splitlines()[-2])
+
+
+#: What each feature app calls its own dashboard section, so that the assertion
+#: below is about the app's contribution rather than about a title this file
+#: happens to know. An app with no section belongs here as ``None``.
+ADMIN_SECTIONS = {
+    "cms": "Content",
+    "notifications": "Notifications",
+    "shop": "Shop",
+    "support": "Support",
+}
+
+
+def test_the_admin_front_page_renders_with_nothing_enabled(tmp_path: Path) -> None:
+    """The bare project has an admin too, and it is the configuration most likely
+    to be broken by a dashboard that assumes an app is there."""
+    drawn = _admin_page({}, tmp_path / "db.sqlite3")
+
+    assert "Overview" in drawn["groups"]
+    for section in ADMIN_SECTIONS.values():
+        assert section not in drawn["sections"], section
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_feature_app_brings_its_own_admin_and_only_its_own(app: str, tmp_path: Path) -> None:
+    """The point of the contribution protocol, asserted end to end.
+
+    Enabling an app has to be the whole of installing its admin -- no project
+    file edited, no template block added -- and enabling it must not draw a
+    heading belonging to an app this deployment does not have.
+    """
+    drawn = _admin_page({_enabled(app): "true"}, tmp_path / "db.sqlite3")
+
+    assert ADMIN_SECTIONS[app] in drawn["sections"], f"enabling {app} contributed no section"
+    for other, section in ADMIN_SECTIONS.items():
+        if other != app:
+            assert section not in drawn["sections"], f"enabling {app} drew {other}'s section"

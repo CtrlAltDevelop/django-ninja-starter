@@ -57,9 +57,57 @@ are questions only a running project can answer:
 | `SIDEBAR.navigation` | `adminui.sidebar_navigation` | Which apps are installed, and what may this user open? |
 | `DASHBOARD_CALLBACK` | `adminui.dashboard` | What are the numbers today? |
 
-All three are in `src/infrastructure/common/adminui.py`. Adding a feature app to
-the sidebar is a group appended in `sidebar_navigation`; adding a card to the
-dashboard is a key in `dashboard` and a block in `src/templates/admin/index.html`.
+The first three live in `src/infrastructure/common/adminui.py`, and none of them
+knows any app. They walk the installed apps looking for a contribution, which is
+what makes the sidebar and the dashboard follow the enabled flags instead of a
+list somebody has to remember to edit.
+
+## An app contributes its own admin
+
+Each app carries its navigation and its dashboard numbers in an `adminui.py`
+beside its `admin.py` — the same convention `config/graph.py` uses for the
+schema and `config/grpc.py` for the gRPC servicers:
+
+```python
+# apps/shop/adminui.py
+from infrastructure.common.adminui import Section, card, changelist, item, may
+
+NAVIGATION_ORDER = 40
+DASHBOARD_ORDER = 40
+
+
+def navigation(request):
+    return {
+        "title": "Shop",
+        "items": [item("Orders", "receipt_long", changelist("shop", "order"), "shop.view_order")],
+    }
+
+
+def dashboard(request):
+    if not may(request, "shop.view_order"):
+        return None
+    return Section(title="Shop", cards=[card("Orders this week", 12, icon="receipt_long")])
+```
+
+Both functions are optional, both are asked **per request**, and both may return
+`None` for "nothing to show this person" — which is how permissions are applied.
+A contributor decides what its reader may see and offers less; nothing filters
+afterwards, because a filter in the project would have to know what each card
+means. `may()`, `item()`, `card()` and `changelist()` are the helpers for that,
+and `changelist()` reverses lazily so an app can name a model page without the
+project having imported it yet.
+
+The `*_ORDER` values place the contribution; a group may also carry its own
+`order`, because *Credentials above Audit* is true however many apps fill
+either. **Groups merge by title**, so several apps can put items under one
+heading — every token mode contributes to Credentials — and a heading with no
+items for this reader is not drawn at all.
+
+So installing an app is the whole of installing its admin. No project file is
+edited, no template block is added, and `src/templates/admin/index.html` draws
+whatever it is handed without knowing an app either. `tests/test_app_isolation.py`
+renders the front page with nothing enabled and with each feature app alone, and
+asserts that an app contributes its section exactly when it is installed.
 
 Unfold must stay ahead of `django.contrib.admin` in `INSTALLED_APPS` — it themes
 the admin by overriding its templates, and a template is found in app order. A

@@ -212,6 +212,48 @@ def _assert_the_socket_admits_a_session(client) -> None:  # type: ignore[no-unty
     assert said[0]["user"]["username"] == "zoe", said[0]
 
 
+def admin_page() -> int:
+    """Render the admin front page in whatever configuration this process booted.
+
+    Prints the sidebar groups and dashboard sections it found, as JSON, so the
+    caller can assert that an app contributes its admin exactly when it is
+    installed. The page is *rendered*, not just assembled: a contribution that
+    reverses a URL an uninstalled app owns raises at render and nowhere earlier,
+    which is precisely the failure the old hard-coded template shipped with.
+    """
+    import json
+
+    from django.contrib.auth import get_user_model
+    from django.test import RequestFactory
+
+    from infrastructure.common.adminui import dashboard, sidebar_navigation
+
+    password_text = "corr3ct-horse-battery"
+    admin = get_user_model().objects.create_superuser(
+        username="root", email="root@example.test", password=password_text
+    )
+    client = _client()
+    assert client.login(username="root", password=password_text), "session login failed"
+
+    response = client.get("/admin/")
+    assert response.status_code == 200, _why(response)
+
+    request = RequestFactory().get("/admin/")
+    request.user = admin
+    print(
+        json.dumps(
+            {
+                "groups": [group["title"] for group in sidebar_navigation(request)],
+                "sections": [
+                    section["title"] for section in dashboard(request, {})["admin_sections"]
+                ],
+            }
+        )
+    )
+    print("ok")
+    return 0
+
+
 def main() -> int:
     scenario = sys.argv[1]
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
@@ -219,6 +261,8 @@ def main() -> int:
 
     if scenario == "support_alone":
         return support_alone()
+    if scenario == "admin_page":
+        return admin_page()
 
     client, body = SCENARIOS[scenario]()
     assert body["requires_second_factor"] is False, body

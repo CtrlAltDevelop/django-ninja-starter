@@ -39,6 +39,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from apps.support.models import (
+    DESK_KINDS,
     LIVE_STATUSES,
     Attachment,
     CannedReply,
@@ -585,8 +586,13 @@ class MessageAdmin(ModelAdmin):
 
 def desk_numbers() -> dict[str, Any]:
     """The numbers the dashboard card shows. Here rather than in the admin UI
-    module, so that the app carries its own definition of what matters."""
-    live = Ticket.objects.filter(status__in=LIVE_STATUSES)
+    module, so that the app carries its own definition of what matters.
+
+    Desk kinds only. A room is people talking to each other, and counting one as
+    an unanswered thread would put the desk permanently in the red over
+    conversations it is not entitled to read, let alone answer.
+    """
+    live = Ticket.objects.filter(status__in=LIVE_STATUSES, kind__in=DESK_KINDS)
     return {
         "live": live.count(),
         "unassigned": live.filter(assignee__isnull=True).count(),
