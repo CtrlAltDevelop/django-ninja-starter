@@ -541,12 +541,17 @@ class ShopService:
         product = Product.objects.live().filter(slug=slug).first()
         if product is None:
             raise ShopNotFound("No such product.")
+        # Through the same ceiling every other listing goes through. This route
+        # is public and prices every row it returns, so a `limit` taken at its
+        # word is an unauthenticated request for as much work as the caller
+        # cares to name.
+        size, _ = options.bounded_page(limit, 0)
         siblings = list(
             listed_products()
             .live()
             .filter(category_id=product.category_id)
             .exclude(pk=product.pk)
-            .order_by("-rating_average", "-sales_count")[: max(1, limit)]
+            .order_by("-rating_average", "-sales_count")[:size]
         )
         discounts = running_discounts()
         branches = reach(discounts)
