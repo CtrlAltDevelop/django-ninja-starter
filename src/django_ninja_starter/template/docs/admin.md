@@ -44,6 +44,32 @@ with alt text beside it.
 
 See [the CMS page](cms.md#admin) for what it does and who may open it.
 
+## The support desk screen
+
+The second page that is not a change form: `Support → Live chat`, at
+`/admin/support/ticket/chat/`. The queue is on the left, one conversation on the
+right, and a single WebSocket carries both — so a message a client sends appears
+while an agent is reading the thread rather than on the next page load.
+
+Everything it does is a command on the support socket: the queue and its
+filters, opening a thread, sending a reply, leaving a staff-only internal note,
+the typing indicator, claiming a ticket, and changing a status or a priority. It
+posts no form and calls no endpoint of its own, which means the desk screen and
+any chat widget a project ships to its customers exercise the same protocol and
+cannot drift apart.
+
+It authenticates with the admin's own session cookie — the socket accepts one,
+so there is no token to mint and signing out of the admin closes the feed.
+
+Two things it will not do, and says so on the page rather than hanging: a
+deployment that leaves `ws` out of `DJANGO_SUPPORT_TRANSPORTS` publishes no
+socket, and `runserver` is WSGI and serves none whatever the setting says. Serve
+the project with an ASGI server (`make serve`) to use it.
+
+Agents need `support.view_ticket` to open the screen; everything they can
+*change* on it is checked again by the socket, for the account behind the
+connection.
+
 ## Configuring it
 
 Everything visual lives in one `UNFOLD` dictionary in `src/config/settings/base.py`:

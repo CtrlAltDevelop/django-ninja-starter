@@ -1,0 +1,727 @@
+{% extends base_template %}
+
+{% comment %}
+The desk screen: the queue on the left, one conversation on the right, and a
+single WebSocket underneath both.
+
+Written as one page of plain JavaScript with no build step, for the same reason
+the socket is written against ASGI rather than Channels: the whole thing is a
+connection, a dispatch table and a renderer, and a bundler would be a second
+toolchain to install before an agent can answer a message. Nothing here posts a
+form -- every action is a command on apps/support/sockets.py, so this screen and
+a customer's chat widget exercise the same protocol.
+
+**The styling is this page's own, not the theme's utility classes.** Unfold
+ships a *compiled* Tailwind stylesheet, which holds the utilities Unfold itself
+uses and nothing else: a class it never compiled -- `dark:bg-base-800` is in
+there, `dark:bg-primary-500/10` is not -- does not fail, it is simply absent, so
+the element keeps whatever the light rule said and a selected row becomes white
+text on a white block in the dark theme, with nothing in the console to say so.
+The rules below are therefore written here, against the theme's CSS *variables*,
+which are a published surface and fall back to a readable default in a project
+that has no theme at all.
+
+`base_template` is the theme's layout where the project has one and the plain
+admin's where it does not, exactly as the CMS content screen does it.
+{% endcomment %}
+
+{% load i18n %}
+
+{% block title %}{{ title }} | {{ site_title }}{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        /* One palette, named for the job rather than the colour, so the dark
+           override is six lines rather than one per element. */
+        .desk-scope {
+            --desk-panel: #fff;
+            --desk-line: var(--color-base-200, #e5e7eb);
+            --desk-hover: var(--color-base-100, #f3f4f6);
+            --desk-text: var(--color-font-default-light, #374151);
+            --desk-strong: var(--color-font-important-light, #111827);
+            --desk-subtle: var(--color-font-subtle-light, #6b7280);
+            --desk-accent: var(--color-primary-600, #2563eb);
+            --desk-accent-text: #fff;
+            --desk-warn-bg: #fff7ed;
+            --desk-warn-text: #9a3412;
+            --desk-bad-bg: #fef2f2;
+            --desk-bad-text: #b91c1c;
+            --desk-ok-bg: #ecfdf5;
+            --desk-ok-text: #047857;
+            --desk-note-bg: #ffedd5;
+            --desk-note-text: #7c2d12;
+        }
+        /* Unfold marks the dark theme with a class on <html>; Django's own admin
+           uses `data-theme`, where "auto" means ask the operating system. */
+        html.dark .desk-scope,
+        html[data-theme="dark"] .desk-scope {
+            --desk-panel: var(--color-base-900, #111827);
+            --desk-line: var(--color-base-700, #374151);
+            --desk-hover: var(--color-base-800, #1f2937);
+            --desk-text: var(--color-font-default-dark, #d1d5db);
+            --desk-strong: var(--color-font-important-dark, #f9fafb);
+            --desk-subtle: var(--color-font-subtle-dark, #9ca3af);
+            --desk-warn-bg: rgba(249, 115, 22, .18);
+            --desk-warn-text: #fdba74;
+            --desk-bad-bg: rgba(239, 68, 68, .18);
+            --desk-bad-text: #fca5a5;
+            --desk-ok-bg: rgba(16, 185, 129, .18);
+            --desk-ok-text: #6ee7b7;
+            --desk-note-bg: rgba(249, 115, 22, .2);
+            --desk-note-text: #fed7aa;
+        }
+        @media (prefers-color-scheme: dark) {
+            html[data-theme="auto"] .desk-scope {
+                --desk-panel: #111827;
+                --desk-line: #374151;
+                --desk-hover: #1f2937;
+                --desk-text: #d1d5db;
+                --desk-strong: #f9fafb;
+                --desk-subtle: #9ca3af;
+                --desk-warn-bg: rgba(249, 115, 22, .18);
+                --desk-warn-text: #fdba74;
+                --desk-bad-bg: rgba(239, 68, 68, .18);
+                --desk-bad-text: #fca5a5;
+                --desk-ok-bg: rgba(16, 185, 129, .18);
+                --desk-ok-text: #6ee7b7;
+                --desk-note-bg: rgba(249, 115, 22, .2);
+                --desk-note-text: #fed7aa;
+            }
+        }
+
+        .desk-scope { color: var(--desk-text); }
+        .desk-topbar { align-items: center; display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+        .desk-titles { display: flex; flex-direction: column; flex-grow: 1; }
+        .desk-title { color: var(--desk-strong); font-size: 1.25rem; font-weight: 600; margin: 0; }
+        .desk-sub { color: var(--desk-subtle); font-size: .875rem; }
+
+        .desk-pill { background: var(--desk-hover); border-radius: 9999px; color: var(--desk-text);
+                     font-size: .75rem; font-weight: 500; padding: .25rem .6rem; }
+        .desk-pill.is-ok { background: var(--desk-ok-bg); color: var(--desk-ok-text); }
+        .desk-pill.is-bad { background: var(--desk-bad-bg); color: var(--desk-bad-text); }
+
+        .desk-btn { background: none; border: 1px solid var(--desk-line); border-radius: 6px; color: inherit;
+                    cursor: pointer; font-size: .8125rem; padding: .4rem .7rem; text-decoration: none; }
+        .desk-btn:hover { background: var(--desk-hover); }
+        .desk-btn.is-primary { background: var(--desk-accent); border-color: var(--desk-accent);
+                               color: var(--desk-accent-text); font-weight: 500; }
+
+        .desk-banner { border-radius: 6px; font-size: .875rem; margin-bottom: 1rem; padding: .75rem 1rem; }
+        .desk-banner.is-warn { background: var(--desk-warn-bg); color: var(--desk-warn-text); }
+        .desk-banner.is-bad { background: var(--desk-bad-bg); color: var(--desk-bad-text); }
+
+        /* The two panes fill the viewport and scroll independently, or the
+           composer walks off the bottom of a long thread. */
+        .desk { display: flex; gap: 1rem; height: calc(100vh - 15rem); min-height: 30rem; }
+        .desk-pane { background: var(--desk-panel); border: 1px solid var(--desk-line); border-radius: 6px;
+                     display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .desk-pane.is-queue { flex: 0 0 22rem; }
+        .desk-pane.is-thread { flex: 1 1 auto; min-width: 0; }
+        @media (max-width: 1023px) {
+            .desk { flex-direction: column; height: auto; }
+            .desk-pane.is-queue { flex: 1 1 auto; max-height: 20rem; }
+            .desk-pane.is-thread { min-height: 28rem; }
+        }
+        .desk-scroll { overflow-y: auto; overscroll-behavior: contain; }
+
+        .desk-filters { border-bottom: 1px solid var(--desk-line); display: flex; flex-direction: column;
+                        gap: .5rem; padding: .75rem; }
+        .desk-field { background: var(--desk-panel); border: 1px solid var(--desk-line); border-radius: 6px;
+                      color: inherit; font-size: .8125rem; padding: .4rem .6rem; width: 100%; }
+        .desk-row-of { display: flex; gap: .5rem; }
+        .desk-row-of > * { flex: 1 1 0; min-width: 0; }
+        .desk-checks { color: var(--desk-subtle); display: flex; flex-wrap: wrap; font-size: .75rem; gap: .75rem; }
+        .desk-checks label { align-items: center; display: flex; gap: .25rem; }
+
+        .desk-queue-list { flex-grow: 1; }
+        .desk-total { border-top: 1px solid var(--desk-line); color: var(--desk-subtle);
+                      font-size: .75rem; padding: .5rem .75rem; }
+
+        .desk-item { background: none; border: 0; border-bottom: 1px solid var(--desk-line);
+                     border-left: 3px solid transparent; color: inherit; cursor: pointer; display: flex;
+                     flex-direction: column; gap: .15rem; padding: .5rem .75rem; text-align: left; width: 100%; }
+        .desk-item:hover { background: var(--desk-hover); }
+        /* Selected is a rule down the edge, not a pale fill: a tint that reads
+           as "selected" on white is an unreadable block in the dark theme. */
+        .desk-item.is-open { background: var(--desk-hover); border-left-color: var(--desk-accent); }
+        .desk-item-top { align-items: center; display: flex; gap: .5rem; }
+        .desk-who { color: var(--desk-strong); flex-grow: 1; font-weight: 600; overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; }
+        .desk-badge { background: var(--desk-accent); border-radius: 9999px; color: var(--desk-accent-text);
+                      font-size: .6875rem; padding: 0 .4rem; }
+        .desk-item-subject { font-size: .8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .desk-item-meta { color: var(--desk-subtle); font-size: .6875rem; }
+        .desk-item-meta.is-late { color: var(--desk-bad-text); }
+
+        .desk-header { align-items: center; border-bottom: 1px solid var(--desk-line); display: flex;
+                       flex-wrap: wrap; gap: .5rem; padding: .75rem; }
+        .desk-header-titles { display: flex; flex-direction: column; flex-grow: 1; min-width: 12rem; }
+        .desk-subject { color: var(--desk-strong); font-weight: 600; }
+        .desk-meta { color: var(--desk-subtle); font-size: .75rem; }
+        .desk-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+        .desk-actions .desk-field { font-size: .75rem; padding: .3rem .4rem; width: auto; }
+
+        .desk-thread { display: flex; flex-direction: column; flex-grow: 1; gap: .75rem; padding: 1rem; }
+        .desk-line { display: flex; flex-direction: column; }
+        .desk-line.is-mine { align-items: flex-end; }
+        .desk-line.is-theirs { align-items: flex-start; }
+        .desk-line.is-system { align-items: center; }
+        .desk-bubble { background: var(--desk-hover); border-radius: 8px; color: var(--desk-text);
+                       font-size: .875rem; max-width: min(46rem, 80%); overflow-wrap: anywhere;
+                       padding: .5rem .75rem; white-space: pre-wrap; }
+        .desk-bubble.is-mine { background: var(--desk-accent); color: var(--desk-accent-text); }
+        .desk-bubble.is-internal { background: var(--desk-note-bg); color: var(--desk-note-text); }
+        .desk-stamp { color: var(--desk-subtle); font-size: .6875rem; margin-top: .15rem; }
+        .desk-attachment { font-size: .75rem; text-decoration: underline; }
+        .desk-empty { color: var(--desk-subtle); font-size: .875rem; }
+
+        .desk-typing { color: var(--desk-subtle); font-size: .75rem; min-height: 1rem; padding: 0 1rem; }
+        .desk-composer { border-top: 1px solid var(--desk-line); display: flex; flex-direction: column;
+                         gap: .5rem; padding: .75rem; }
+        .desk-composer-top { align-items: center; display: flex; flex-wrap: wrap; font-size: .75rem; gap: .75rem; }
+        .desk-composer-top label { align-items: center; display: flex; gap: .25rem; }
+        .desk-write { align-items: flex-end; display: flex; gap: .5rem; }
+        .desk-write textarea { flex-grow: 1; font-family: inherit; resize: vertical; }
+
+        .desk-toasts { bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; position: fixed;
+                       right: 1rem; width: 18rem; z-index: 50; }
+        .desk-toast { background: var(--desk-panel); border: 1px solid var(--desk-line); border-radius: 6px;
+                      box-shadow: 0 6px 20px rgba(0, 0, 0, .2); cursor: pointer; font-size: .8125rem;
+                      padding: .6rem .7rem; }
+        .desk-toast-title { color: var(--desk-strong); font-weight: 600; }
+        .desk-toast-body { color: var(--desk-subtle); }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {{ config|json_script:"desk-config" }}
+
+    <div class="desk-scope">
+        <div class="desk-topbar">
+            <div class="desk-titles">
+                <h1 class="desk-title">{{ title }}</h1>
+                <span class="desk-sub">{{ subtitle }}</span>
+            </div>
+            <span id="desk-state" class="desk-pill">{% trans "connecting…" %}</span>
+            <a href="{{ queue_url }}" class="desk-btn">{% trans "Ticket records" %}</a>
+        </div>
+
+        {% if not socket_available %}
+            <div class="desk-banner is-warn">
+                {% blocktrans %}This deployment does not publish the support WebSocket, so nothing on this screen will load. Add "ws" to DJANGO_SUPPORT_TRANSPORTS and serve the project with an ASGI server.{% endblocktrans %}
+            </div>
+        {% endif %}
+
+        <div id="desk-banner" class="desk-banner is-bad" hidden></div>
+
+        <div class="desk">
+            {# -- the queue ------------------------------------------------- #}
+            <section class="desk-pane is-queue">
+                <div class="desk-filters">
+                    <input id="desk-search" type="search" class="desk-field"
+                           placeholder="{% trans 'Search the queue' %}">
+                    <div class="desk-row-of">
+                        <select id="desk-status" class="desk-field">
+                            <option value="">{% trans "Any status" %}</option>
+                            {% for value, label in statuses %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                        <select id="desk-kind" class="desk-field">
+                            <option value="">{% trans "Chats and tickets" %}</option>
+                            {% for value, label in kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="desk-checks">
+                        <label><input type="checkbox" id="desk-mine"> {% trans "Mine" %}</label>
+                        <label><input type="checkbox" id="desk-unassigned"> {% trans "Unassigned" %}</label>
+                        <label><input type="checkbox" id="desk-live" checked> {% trans "Open only" %}</label>
+                    </div>
+                </div>
+                <div id="desk-queue" class="desk-queue-list desk-scroll"></div>
+                <div id="desk-queue-total" class="desk-total"></div>
+            </section>
+
+            {# -- the conversation ------------------------------------------ #}
+            <section class="desk-pane is-thread">
+                <header id="desk-header" class="desk-header" hidden>
+                    <div class="desk-header-titles">
+                        <span id="desk-subject" class="desk-subject"></span>
+                        <span id="desk-meta" class="desk-meta"></span>
+                    </div>
+                    <div class="desk-actions">
+                        <select id="desk-set-status" class="desk-field">
+                            {% for value, label in statuses %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                        <select id="desk-set-priority" class="desk-field">
+                            {% for value, label in priorities %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                        </select>
+                        <button type="button" id="desk-claim" class="desk-btn">{% trans "Claim" %}</button>
+                        <a id="desk-record" href="#" class="desk-btn">{% trans "Record" %}</a>
+                    </div>
+                </header>
+
+                <div id="desk-thread" class="desk-thread desk-scroll">
+                    <p class="desk-empty">{% trans "Pick a conversation on the left." %}</p>
+                </div>
+
+                <div id="desk-presence" class="desk-typing"></div>
+
+                <footer id="desk-composer" class="desk-composer" hidden>
+                    <div class="desk-composer-top">
+                        <label><input type="checkbox" id="desk-internal"> {% trans "Internal note (staff only)" %}</label>
+                        {% if canned_replies %}
+                            <select id="desk-canned" class="desk-field" style="width:auto">
+                                <option value="">{% trans "Canned reply…" %}</option>
+                                {% for reply in canned_replies %}<option value="{{ reply.body }}">{{ reply.title }}</option>{% endfor %}
+                            </select>
+                        {% endif %}
+                    </div>
+                    <div class="desk-write">
+                        <textarea id="desk-body" rows="2" class="desk-field"
+                                  placeholder="{% trans 'Write a reply. Enter sends, Shift+Enter starts a line.' %}"></textarea>
+                        <button type="button" id="desk-send" class="desk-btn is-primary">{% trans "Send" %}</button>
+                    </div>
+                </footer>
+            </section>
+        </div>
+
+        <div id="desk-toasts" class="desk-toasts"></div>
+    </div>
+
+    <script>
+    (function () {
+        "use strict";
+
+        const config = JSON.parse(document.getElementById("desk-config").textContent);
+        const el = (id) => document.getElementById(id);
+        const queue = new Map();       // ticket id -> ticket payload
+        const rendered = new Set();    // message ids already on screen, so a
+                                       // frame that arrives twice -- the echo of
+                                       // our own send and the thread broadcast --
+                                       // is drawn once.
+        let socket = null;
+        let openTicket = null;
+        let backoff = 1000;
+        let typingSentAt = 0;
+        const typists = new Map();
+
+        // -- plumbing ------------------------------------------------------
+
+        function socketUrl(path) {
+            const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+            return scheme + "//" + window.location.host + path;
+        }
+
+        function state(text, tone) {
+            const node = el("desk-state");
+            node.textContent = text;
+            node.className = "desk-pill" + (tone ? " is-" + tone : "");
+        }
+
+        function banner(text) {
+            const node = el("desk-banner");
+            node.textContent = text;
+            node.hidden = !text;
+        }
+
+        function send(frame) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(frame));
+                return true;
+            }
+            return false;
+        }
+
+        function toast(title, body, ticketId) {
+            const node = document.createElement("div");
+            node.className = "desk-toast";
+            const head = document.createElement("div");
+            head.className = "desk-toast-title";
+            head.textContent = title;
+            const text = document.createElement("div");
+            text.className = "desk-toast-body";
+            // textContent throughout: every string here was written by whoever
+            // opened the conversation, and a toast built with innerHTML is a
+            // stored cross-site script with a friendlier name.
+            text.textContent = body;
+            node.append(head, text);
+            node.addEventListener("click", function () {
+                node.remove();
+                if (ticketId) { select(ticketId); }
+            });
+            el("desk-toasts").append(node);
+            window.setTimeout(() => node.remove(), 8000);
+        }
+
+        function when(value) {
+            return value ? new Date(value).toLocaleString() : "";
+        }
+
+        // -- the queue -----------------------------------------------------
+
+        function filters() {
+            return {
+                search: el("desk-search").value.trim(),
+                status: el("desk-status").value,
+                kind: el("desk-kind").value,
+                mine: el("desk-mine").checked,
+                unassigned: el("desk-unassigned").checked,
+                live: el("desk-live").checked ? true : null
+            };
+        }
+
+        function loadQueue() {
+            const frame = Object.assign({ command: "tickets", limit: 50 }, filters());
+            if (!frame.kind) { delete frame.kind; }
+            if (frame.live === null) { delete frame.live; }
+            if (!frame.search) { delete frame.search; }
+            if (!frame.status) { delete frame.status; }
+            send(frame);
+        }
+
+        function ranking(ticket) {
+            return new Date(ticket.last_message_at || ticket.created_at).getTime();
+        }
+
+        function inQueue(ticket) {
+            // The desk's own kinds only. A staff account can be a member of a
+            // group or a direct chat, and those arrive on the same socket --
+            // they are simply not what this screen is for.
+            return ticket.kind === "chat" || ticket.kind === "ticket";
+        }
+
+        function drawQueue() {
+            const list = el("desk-queue");
+            const rows = Array.from(queue.values()).filter(inQueue).sort((a, b) => ranking(b) - ranking(a));
+            list.replaceChildren();
+            if (!rows.length) {
+                const empty = document.createElement("p");
+                empty.className = "desk-empty";
+                empty.style.padding = ".75rem";
+                empty.textContent = "Nothing is waiting.";
+                list.append(empty);
+            }
+            for (const ticket of rows) { list.append(queueRow(ticket)); }
+            el("desk-queue-total").textContent = rows.length + " conversation(s)";
+        }
+
+        function queueRow(ticket) {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = "desk-item" + (openTicket === ticket.id ? " is-open" : "");
+
+            const top = document.createElement("div");
+            top.className = "desk-item-top";
+            const who = document.createElement("span");
+            who.className = "desk-who";
+            who.textContent = (ticket.client && ticket.client.username) || ticket.reference;
+            top.append(who);
+            if (ticket.unread) {
+                const badge = document.createElement("span");
+                badge.className = "desk-badge";
+                badge.textContent = ticket.unread;
+                top.append(badge);
+            }
+
+            const subject = document.createElement("span");
+            subject.className = "desk-item-subject";
+            subject.textContent = ticket.subject || ("(" + ticket.kind + ")");
+
+            const breached = ticket.sla && (ticket.sla.first_response_breached || ticket.sla.resolution_breached);
+            const meta = document.createElement("span");
+            meta.className = "desk-item-meta" + (breached ? " is-late" : "");
+            meta.textContent = [
+                ticket.reference,
+                ticket.status,
+                ticket.priority,
+                ticket.assignee ? "→ " + ticket.assignee.username : "unassigned",
+                breached ? "· SLA breached" : ""
+            ].filter(Boolean).join(" · ");
+
+            row.append(top, subject, meta);
+            row.addEventListener("click", () => select(ticket.id));
+            return row;
+        }
+
+        function upsert(ticket) {
+            const known = queue.get(ticket.id);
+            // A frame addressed to nobody in particular carries no unread count;
+            // dropping the one we had would clear a badge nothing has read.
+            if (known && ticket.unread === undefined) { ticket.unread = known.unread; }
+            queue.set(ticket.id, ticket);
+            if (openTicket === ticket.id) { drawHeader(ticket); }
+            drawQueue();
+        }
+
+        // -- one conversation ----------------------------------------------
+
+        function select(ticketId) {
+            if (openTicket === ticketId) { return; }
+            if (openTicket) { send({ command: "unsubscribe", ticket: openTicket }); }
+            openTicket = ticketId;
+            rendered.clear();
+            typists.clear();
+            el("desk-thread").replaceChildren();
+            el("desk-presence").textContent = "";
+            el("desk-composer").hidden = false;
+            const ticket = queue.get(ticketId);
+            if (ticket) { drawHeader(ticket); }
+            send({ command: "subscribe", ticket: ticketId });
+            send({ command: "ticket", ticket: ticketId });
+            send({ command: "read", ticket: ticketId });
+            drawQueue();
+        }
+
+        function drawHeader(ticket) {
+            el("desk-header").hidden = false;
+            el("desk-subject").textContent = ticket.subject
+                || ("Live chat with " + ((ticket.client && ticket.client.username) || "somebody"));
+            const sla = ticket.sla || {};
+            el("desk-meta").textContent = [
+                ticket.reference,
+                ticket.category ? ticket.category.name : null,
+                ticket.assignee ? "assigned to " + ticket.assignee.username : "unassigned",
+                sla.first_response_due_at ? "first answer due " + when(sla.first_response_due_at) : null,
+                "opened " + when(ticket.created_at)
+            ].filter(Boolean).join(" · ");
+            el("desk-set-status").value = ticket.status;
+            el("desk-set-priority").value = ticket.priority;
+            el("desk-claim").hidden = Boolean(ticket.assignee && ticket.assignee.id === config.user_id);
+            el("desk-record").href = config.ticket_url_template.replace(config.ticket_url_placeholder, ticket.id);
+        }
+
+        function atBottom(node) {
+            return node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+        }
+
+        function drawMessage(message, options) {
+            if (rendered.has(message.id)) {
+                const existing = document.getElementById("m-" + message.id);
+                if (existing) { existing.replaceWith(bubble(message)); }
+                return;
+            }
+            rendered.add(message.id);
+            const thread = el("desk-thread");
+            const stick = atBottom(thread);
+            thread.append(bubble(message));
+            if (stick || (options && options.force)) { thread.scrollTop = thread.scrollHeight; }
+        }
+
+        function bubble(message) {
+            const mine = Boolean(message.author && message.author.id === config.user_id);
+            const system = message.kind === "event" || !message.author;
+            const wrap = document.createElement("div");
+            wrap.id = "m-" + message.id;
+            wrap.className = "desk-line " + (system ? "is-system" : mine ? "is-mine" : "is-theirs");
+
+            if (system) {
+                const note = document.createElement("span");
+                note.className = "desk-stamp";
+                note.textContent = message.body + " · " + when(message.created_at);
+                wrap.append(note);
+                return wrap;
+            }
+
+            const internal = message.visibility === "internal";
+            const body = document.createElement("div");
+            body.className = "desk-bubble" + (internal ? " is-internal" : mine ? " is-mine" : "");
+            body.textContent = message.deleted ? "(deleted)" : message.body;
+            wrap.append(body);
+
+            for (const attachment of message.attachments || []) {
+                const link = document.createElement("a");
+                link.href = attachment.url;
+                link.target = "_blank";
+                link.rel = "noopener";
+                link.className = "desk-attachment";
+                link.textContent = "📎 " + attachment.name;
+                wrap.append(link);
+            }
+
+            const meta = document.createElement("span");
+            meta.className = "desk-stamp";
+            meta.textContent = [
+                message.author.username,
+                internal ? "internal note" : null,
+                when(message.created_at),
+                message.edited_at ? "edited" : null
+            ].filter(Boolean).join(" · ");
+            wrap.append(meta);
+            return wrap;
+        }
+
+        function drawTypists() {
+            const now = Date.now();
+            const names = [];
+            for (const [name, at] of typists) {
+                if (now - at > 6000) { typists.delete(name); } else { names.push(name); }
+            }
+            el("desk-presence").textContent = names.length ? names.join(", ") + " is typing…" : "";
+        }
+        window.setInterval(drawTypists, 2000);
+
+        // -- talking --------------------------------------------------------
+
+        function submit() {
+            const box = el("desk-body");
+            const body = box.value.trim();
+            if (!body || !openTicket) { return; }
+            const internal = el("desk-internal").checked;
+            if (send({ command: internal ? "note" : "send", ticket: openTicket, body: body })) {
+                box.value = "";
+                send({ command: "typing", ticket: openTicket, typing: false });
+            }
+        }
+
+        el("desk-send").addEventListener("click", submit);
+        el("desk-body").addEventListener("keydown", function (event) {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submit();
+                return;
+            }
+            // Throttled rather than sent per keystroke: the indicator is true
+            // for a few seconds either way, and one frame per character is one
+            // broker publish per character.
+            const now = Date.now();
+            if (openTicket && now - typingSentAt > 3000) {
+                typingSentAt = now;
+                send({ command: "typing", ticket: openTicket, typing: true });
+            }
+        });
+        el("desk-claim").addEventListener("click", function () {
+            if (openTicket) { send({ command: "claim", ticket: openTicket }); }
+        });
+        el("desk-set-status").addEventListener("change", function () {
+            if (openTicket) { send({ command: "status", ticket: openTicket, status: this.value }); }
+        });
+        el("desk-set-priority").addEventListener("change", function () {
+            if (openTicket) { send({ command: "priority", ticket: openTicket, priority: this.value }); }
+        });
+        const canned = el("desk-canned");
+        if (canned) {
+            canned.addEventListener("change", function () {
+                if (!this.value) { return; }
+                const box = el("desk-body");
+                box.value = box.value ? box.value + "\n" + this.value : this.value;
+                this.value = "";
+                box.focus();
+            });
+        }
+        for (const id of ["desk-status", "desk-kind", "desk-mine", "desk-unassigned", "desk-live"]) {
+            el(id).addEventListener("change", loadQueue);
+        }
+        let searchTimer = null;
+        el("desk-search").addEventListener("input", function () {
+            window.clearTimeout(searchTimer);
+            searchTimer = window.setTimeout(loadQueue, 300);
+        });
+
+        // -- frames ----------------------------------------------------------
+
+        const handlers = {
+            ready: function () {
+                state("live", "ok");
+                banner("");
+                loadQueue();
+                // Reconnecting with a thread open: rejoin it, rather than
+                // leaving the agent looking at a conversation the socket is no
+                // longer delivering.
+                if (openTicket) {
+                    send({ command: "subscribe", ticket: openTicket });
+                    send({ command: "ticket", ticket: openTicket });
+                }
+            },
+            tickets: function (frame) {
+                // The reply's `total` is not drawn: it counts every thread the
+                // filter matched, and this screen lists the desk's two kinds
+                // only -- a footer saying nine over a list of four is a footer
+                // that makes somebody go looking for five conversations that
+                // are not missing. `drawQueue` counts what it drew.
+                for (const ticket of frame.tickets) { queue.set(ticket.id, ticket); }
+                drawQueue();
+            },
+            ticket: function (frame) { upsert(frame.ticket); },
+            opened: function (frame) { upsert(frame.ticket); },
+            subscribed: function (frame) {
+                if (frame.ticket !== openTicket) { return; }
+                el("desk-thread").replaceChildren();
+                rendered.clear();
+                for (const message of frame.messages) { drawMessage(message, { force: true }); }
+            },
+            messages: function (frame) {
+                if (frame.ticket !== openTicket) { return; }
+                for (const message of frame.messages) { drawMessage(message); }
+            },
+            message: function (frame) {
+                const message = frame.message;
+                if (frame.ticket === openTicket) {
+                    drawMessage(message);
+                    send({ command: "read", ticket: openTicket });
+                    return;
+                }
+                if (message.author && message.author.id === config.user_id) { return; }
+                toast(
+                    (message.author ? message.author.username : "Support") + " wrote",
+                    (message.body || "").slice(0, 120),
+                    frame.ticket
+                );
+            },
+            sent: function (frame) { drawMessage(frame.message, { force: true }); },
+            edited: function (frame) { drawMessage(frame.message); },
+            deleted: function (frame) { drawMessage(frame.message); },
+            typing: function (frame) {
+                if (frame.ticket !== openTicket || !frame.user || frame.user.id === config.user_id) { return; }
+                if (frame.typing) { typists.set(frame.user.username, Date.now()); }
+                else { typists.delete(frame.user.username); }
+                drawTypists();
+            },
+            presence: function (frame) {
+                if (frame.ticket !== openTicket || !frame.user || frame.user.id === config.user_id) { return; }
+                el("desk-presence").textContent = frame.user.username + (frame.present ? " is here." : " left.");
+            },
+            read: function () { /* the other side's ticks; nothing drawn yet */ },
+            status: function (frame) { if (frame.ticket) { send({ command: "ticket", ticket: frame.ticket }); } },
+            assigned: function (frame) { if (frame.ticket) { send({ command: "ticket", ticket: frame.ticket }); } },
+            error: function (frame) { banner(frame.title + ": " + frame.description); }
+        };
+
+        function connect() {
+            if (!config.socket_available) {
+                state("not published", "bad");
+                return;
+            }
+            state("connecting…");
+            socket = new WebSocket(socketUrl(config.ws_path));
+            socket.addEventListener("open", function () { backoff = 1000; });
+            socket.addEventListener("message", function (event) {
+                let frame;
+                try { frame = JSON.parse(event.data); } catch (error) { return; }
+                const handler = handlers[frame.type];
+                if (handler) { handler(frame); }
+            });
+            socket.addEventListener("close", function (event) {
+                state("offline", "bad");
+                // 1008 is the handshake refusing a connection it cannot name --
+                // a session that has signed out. Retrying that would be a
+                // connection attempt a second for as long as the tab is open,
+                // and it would never succeed.
+                if (event.code === 1008) {
+                    banner("The socket refused this session. Sign in to the admin again.");
+                    return;
+                }
+                // Backoff, capped: a desk left open overnight should reconnect
+                // when the server comes back without having hammered it all
+                // night to find out.
+                window.setTimeout(connect, backoff);
+                backoff = Math.min(backoff * 2, 30000);
+            });
+        }
+
+        connect();
+
+        // Keeps an idle connection alive through a proxy that closes quiet ones.
+        window.setInterval(function () { send({ command: "ping" }); }, 45000);
+    })();
+    </script>
+{% endblock %}

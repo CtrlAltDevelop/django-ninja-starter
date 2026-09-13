@@ -38,6 +38,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.html import format_html
 
+from apps.support.adminchat import LiveChatAdminMixin
 from apps.support.models import (
     DESK_KINDS,
     LIVE_STATUSES,
@@ -167,8 +168,13 @@ class ParticipantInline(TabularInline):
 
 
 @admin.register(Ticket)
-class TicketAdmin(ModelAdmin):
-    """The queue, and one conversation with everything about it on one page."""
+class TicketAdmin(LiveChatAdminMixin, ModelAdmin):
+    """The queue, one conversation on a page, and the live desk beside both.
+
+    The change form is the *record* of a conversation and the live screen at
+    ``chat/`` is the conversation itself; see :mod:`apps.support.adminchat` for
+    why answering somebody who is still there cannot be a change form.
+    """
 
     list_display = (
         "reference",

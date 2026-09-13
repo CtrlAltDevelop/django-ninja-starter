@@ -98,3 +98,4 @@ and the message that carries it goes over the socket like any other.
 | `graph/` | The same surface as GraphQL queries and mutations |
 | `grpc/` | The same, as gRPC actions, and the `.proto` they generate |
 | `admin.py` | The desk's own screens: the queue, its SLA column, and the bulk actions |
+| `adminchat.py` | The live desk screen in the admin, and the route it is mounted on |
