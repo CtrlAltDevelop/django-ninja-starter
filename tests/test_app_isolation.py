@@ -38,7 +38,7 @@ BASE_ENV = {
 METHODS = ["password", "email_code", "sms_code", "magic_link"]
 #: The optional apps, each of which has to install, work and be removable on its
 #: own. Adding an app here is what gives it isolation coverage.
-FEATURE_APPS = ["cms", "notifications", "shop", "support", "wallet"]
+FEATURE_APPS = ["cms", "club", "notifications", "shop", "support", "wallet"]
 TOKEN_MODES = ["sliding", "session", "rotation"]
 PROVIDERS = {
     "google": {
@@ -417,6 +417,7 @@ def _admin_page(environment: dict[str, str], database: Path) -> dict[str, list[s
 #: happens to know. An app with no section belongs here as ``None``.
 ADMIN_SECTIONS = {
     "cms": "Content",
+    "club": "Club",
     "notifications": "Notifications",
     "shop": "Shop",
     "support": "Support",

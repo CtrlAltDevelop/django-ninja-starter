@@ -43,7 +43,7 @@ SECTIONS = ("routes", "models", "admin", "settings")
 # and still get a page: the foundation every project carries, the accounts it
 # resolves to, and the optional feature apps.
 PROJECT_LABELS = frozenset(
-    {"accounts", "common", "cms", "notifications", "shop", "support", "wallet"}
+    {"accounts", "common", "cms", "club", "notifications", "shop", "support", "wallet"}
 )
 NONE = "_None._"
 

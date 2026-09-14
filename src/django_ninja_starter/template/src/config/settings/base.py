@@ -666,6 +666,44 @@ WALLET_MAX_PAGE_SIZE = int(os.getenv("DJANGO_WALLET_MAX_PAGE_SIZE", "200"))
 # Zero means no cap, for a deployment that has its own limit in front.
 WALLET_MAX_METADATA_BYTES = int(os.getenv("DJANGO_WALLET_MAX_METADATA_BYTES", "4096"))
 
+# The club app. Optional the same way the others are: naming it installs its
+# tables, its routes and its admin, and a project that does not name it never
+# imports the package. It is the one app here designed to be told about what the
+# *others* do -- see `apps.club.events` -- so it is useful on its own and more
+# useful beside a shop or a wallet.
+CLUB_ENABLED = os.getenv("DJANGO_CLUB_ENABLED", "false").lower() == "true"
+CLUB_APP = "apps.club.apps.ClubConfig"
+CLUB_INSTALLED_APPS = [CLUB_APP] if CLUB_ENABLED else []
+CLUB_TRANSPORTS = app_transports("club", ("rest", "graph", "grpc")) if CLUB_ENABLED else ()
+CLUB_ROUTERS = (
+    [
+        {
+            "prefix": "/club",
+            "router": "apps.club.rest.router",
+            "tag": "Club",
+            "description": (
+                "Clubs with a levelled ladder, and missions that complete "
+                "themselves. An account belongs to one club at a time, earns XP "
+                "for things it does elsewhere in the deployment, and climbs a "
+                "ladder the club defines. Nothing here claims a mission: the "
+                "engine is told by the app where the thing actually happened, so "
+                "`/club/events` is the honest list of what this deployment can "
+                "build a mission out of."
+            ),
+        }
+    ]
+    if "rest" in CLUB_TRANSPORTS
+    else []
+)
+# Dotted module paths that register your own app's events. Importing one is what
+# puts its events in the registry, which is how a mission can be built out of
+# code this starter has never seen.
+CLUB_EVENT_SOURCES = [
+    path.strip() for path in os.getenv("DJANGO_CLUB_EVENT_SOURCES", "").split(",") if path.strip()
+]
+CLUB_PAGE_SIZE = int(os.getenv("DJANGO_CLUB_PAGE_SIZE", "50"))
+CLUB_MAX_PAGE_SIZE = int(os.getenv("DJANGO_CLUB_MAX_PAGE_SIZE", "200"))
+
 # The support app. Optional the same way the CMS, the notifications and the shop
 # are: naming it installs its tables, its routes, its admin and its socket, and
 # a project that does not name it never imports the package.
@@ -817,6 +855,7 @@ APP_TRANSPORTS = {
     "apps.shop": SHOP_TRANSPORTS,
     "apps.support": SUPPORT_TRANSPORTS,
     "apps.wallet": WALLET_TRANSPORTS,
+    "apps.club": CLUB_TRANSPORTS,
 }
 
 # How often one caller may ask, whichever endpoint they are asking. A correct
@@ -928,6 +967,7 @@ INSTALLED_APPS = [
     *SHOP_INSTALLED_APPS,
     *SUPPORT_INSTALLED_APPS,
     *WALLET_INSTALLED_APPS,
+    *CLUB_INSTALLED_APPS,
     # The transports beside REST. Both are installed whether or not they are
     # published: `generateproto` and the schema check have to be able to run in a
     # deployment that serves neither.

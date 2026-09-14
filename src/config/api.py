@@ -41,6 +41,7 @@ def build_apis() -> dict[str, NinjaAPI]:
             *configuration["routes"],
             *settings.ACCOUNT_ROUTERS,
             *credential_routes,
+            *settings.CLUB_ROUTERS,
             *settings.CMS_ROUTERS,
             *settings.NOTIFICATIONS_ROUTERS,
             *settings.SHOP_ROUTERS,
