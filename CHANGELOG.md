@@ -253,7 +253,59 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   told no -- because a support desk that could read its customers' private
   conversations would be a surveillance tool with a help widget attached.
 
+- **Money can be put back, given up on, and corrected by hand.** Three things the
+  service could already do and nothing could reach. A chargeback now arrives the
+  way a settlement does -- a `reversed` event on the signed rail webhook -- and an
+  operator has the same verb as an admin action. A pending movement nothing ever
+  confirmed now expires: `DJANGO_WALLET_EXPIRE_AFTER_HOURS` says after how long,
+  `manage.py wallet_expire` is the job that does it, and until one of them ran, a
+  rail that simply never answered held an account's money out of `available`
+  forever. And the four kinds a back office writes -- a bonus, a fee, a credit or
+  debit adjustment -- have a service method and the app's only add form, which
+  writes through `WalletService.adjust` so a correction typed by hand still takes
+  the wallet's lock and is still refused when the funds are not there.
+- **A wallet can be frozen and closed, with the checks a status change needs.**
+  `WalletService.set_wallet_status`, published as admin actions rather than an
+  editable status field. Frozen refuses payouts and still takes money in, which
+  is what a compliance hold means; closed is refused while a settled balance or a
+  pending movement would be stranded by it, and a closed wallet stays closed.
+- **The wallet announces what it did.** `apps.wallet.signals` carries
+  `entry_recorded`, `entry_settled`, `entry_failed`, `entry_reversed`,
+  `payout_ready` and `wallet_status_changed`, sent after commit, so notifications
+  or a payout integration can listen without the wallet importing either.
+- **GraphQL and gRPC take `metadata` on a movement, as REST always did.** The
+  same call through a different transport wrote a different row; it no longer
+  does.
+
 ### Security
+
+- **Settling a movement from the admin recorded nobody.** `approve` and `reject`
+  filled in `reviewed_by` and a reversal recorded `reversed_by_operator`, but
+  `settle` and `fail` -- the action that turns a row into real money -- took no
+  operator and wrote no `LogEntry`, so a staff member who settled a deposit
+  nobody ever made left no trace of having done it. `settle`, `fail` and
+  `expire_entry` now take `by`, and the admin actions pass the operator, who is
+  recorded on the entry as `settled_by_operator`, `failed_by_operator` or
+  `expired_by_operator`. A transition with no operator on it came from a rail's
+  signed confirmation, the account itself, or the expiry job -- the absence is
+  the answer, not a gap.
+- **`metadata` had no size limit.** The one field on a movement a client fills in
+  freely, unbounded, stored on every deposit, withdrawal and transfer and
+  returned on every read of that entry -- so any authenticated account could put
+  megabytes into the ledger a movement at a time and make everybody's history
+  expensive to read. Capped at `DJANGO_WALLET_MAX_METADATA_BYTES`, 4096 by
+  default, `0` for a deployment that limits request size at its edge.
+- **The row locks are now actually tested.** The wallet's whole safety argument
+  rests on `select_for_update`, which SQLite compiles away -- so on the default
+  backend `test_concurrency.py` skipped itself and nothing, ever, had
+  demonstrated that two withdrawals cannot both take the last of the money. CI
+  gained a `locks` job: a real PostgreSQL service, the wallet suite run against
+  it, and a step that fails if those tests skipped there as well. They pass.
+- **A transfer to a deactivated account is refused.** All three transports
+  resolved the recipient with a bare primary-key lookup, so money could be sent
+  to an account that can no longer sign in and therefore can never spend it. The
+  check is in the service rather than in each of the three doors, because a rule
+  enforced in three places is a rule enforced in two of them a release later.
 
 - **No shopper can mark their own order paid.** `POST
   /shop/orders/{number}/payment/confirm`, the `shopConfirmPayment` mutation and
