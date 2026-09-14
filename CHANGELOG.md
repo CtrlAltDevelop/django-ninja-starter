@@ -112,6 +112,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   crossing transfers cannot deadlock; and every write takes a `reference` unique
   per wallet, so a client retrying on a timeout gets the first entry back rather
   than moving the money twice.
+- **The walkthrough tours every wallet route, not a selection.** Section 11 now
+  shows a deposit a signed webhook fails as well as settles, a request refused
+  as well as applied, a payout cancelled, a free transfer read back from the
+  recipient's side, and a chargeback written beside the deposit it reverses. It
+  runs both management commands, `wallet_methods` and `wallet_archive`. At the
+  end it asks the app's routers what exists and fails if it skipped a route, as
+  the support section does. The admin section refuses a waiting request from the
+  changelist's own action.
 - **`make serve` serves the static files too.** `runserver` quietly installs a
   handler that serves `STATIC_URL` from the finders; an ASGI server does not, so
   a project served the way its own WebSockets require loaded its admin with no
@@ -373,6 +381,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`DJANGO_WALLET_TRANSPORTS` was accepted and then ignored.** The wallet was
+  never keyed in `APP_TRANSPORTS`, so `config.transports.serves` took it for an
+  infrastructure app and published its GraphQL fields and gRPC services whatever
+  the setting said. `check` stayed green, because the test only ran `check`. It
+  is keyed now. The isolation test asks the GraphQL and gRPC registries directly
+  whether a REST-only app is still in them, and `test_transports.py` fails fast
+  when a feature app is missing from the mapping.
+- **A misspelt rail in `DJANGO_WALLET_METHODS` switched rails off without a
+  word.** The list is intersected with the rails the app knows, so `card,crd`
+  quietly meant `card` and `crd` alone meant nothing could be paid. A settings
+  rule now refuses a name that is not in `Method`, so `check` and preflight
+  reject it at startup.
 - **An account could confirm its own wallet movements, and credit itself.**
   `settle`, `fail`, `expire` and `reverse` were published to the wallet's owner
   on all three transports. Settling is where money becomes real, so two calls --
