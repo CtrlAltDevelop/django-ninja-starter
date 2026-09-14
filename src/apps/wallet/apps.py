@@ -4,6 +4,18 @@ from django.conf import settings
 from infrastructure.common.appsettings import AppSettings, Requirement, Rule
 
 
+def unknown_rails() -> list[str]:
+    """The names in ``DJANGO_WALLET_METHODS`` that are not a rail this app knows.
+
+    A rule rather than ``choices``, because the setting is a list and ``choices``
+    compares one value. Imported at check time, not at module level, so reading
+    the app config never drags the rail catalogue in with it.
+    """
+    from apps.wallet.methods import Method
+
+    return sorted(set(settings.WALLET_METHODS) - set(Method.values))
+
+
 class WalletConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "apps.wallet"
@@ -172,6 +184,20 @@ class WalletConfig(AppConfig):
             ),
         ),
         rules=(
+            Rule(
+                holds=lambda: not unknown_rails(),
+                message=(
+                    "WALLET_METHODS names a rail this app does not know, so nothing can "
+                    "ever be paid on it -- and a list with only misspellings in it "
+                    "switches every rail off"
+                ),
+                settings=("WALLET_METHODS",),
+                hint=(
+                    "Use the rail names from apps.wallet.methods.Method, such as "
+                    "card, bank_transfer, crypto or cash. A payment method's own code "
+                    "belongs in DJANGO_WALLET_WEBHOOK_SECRETS, not here."
+                ),
+            ),
             Rule(
                 holds=lambda: settings.WALLET_MAX_PAGE_SIZE >= settings.WALLET_PAGE_SIZE,
                 message=(

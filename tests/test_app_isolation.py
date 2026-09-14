@@ -298,6 +298,23 @@ def test_the_wallet_alone_moves_money(tmp_path: Path) -> None:
     )
 
 
+def test_an_unknown_wallet_rail_is_refused_at_startup(tmp_path: Path) -> None:
+    """A misspelt rail is not a narrower wallet, it is a wallet with no rails.
+
+    `enabled_methods` intersects the list with the rails the app knows, so
+    `card,crd` quietly means `card` and `crd` alone means nothing can be paid at
+    all. The spelling that works is checked in the same breath, so a rule that
+    refused everything could not pass for one that refuses typos.
+    """
+    wallet = {"DJANGO_WALLET_ENABLED": "true"}
+    misspelt = _check({**wallet, "DJANGO_WALLET_METHODS": "card,crd"}, tmp_path / "db.sqlite3")
+    spelt = _check({**wallet, "DJANGO_WALLET_METHODS": "card,crypto"}, tmp_path / "db.sqlite3")
+
+    assert misspelt.returncode != 0
+    assert "WALLET_METHODS names a rail" in misspelt.stdout + misspelt.stderr
+    assert spelt.returncode == 0, spelt.stdout + spelt.stderr
+
+
 # -- transports ---------------------------------------------------------------
 
 
