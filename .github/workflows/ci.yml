@@ -22,6 +22,59 @@ jobs:
       - run: python -m pip install -e '.[dev]'
       - run: make test
 
+  # The wallet's safety rests on `select_for_update`, and SQLite compiles that
+  # away -- so on the default backend the race tests skip and the whole "no
+  # double withdrawal" claim is untested. This job is the one place it is
+  # actually exercised: a real Postgres, and the wallet suite run against it.
+  # Scoped to the wallet rather than the whole suite because row locking is the
+  # only thing this proves that the job above does not.
+  locks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: wallet
+          POSTGRES_PASSWORD: wallet
+          POSTGRES_DB: wallet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DJANGO_DB_ENGINE: django.db.backends.postgresql
+      DJANGO_DB_NAME: wallet
+      DJANGO_DB_USER: wallet
+      DJANGO_DB_PASSWORD: wallet
+      DJANGO_DB_HOST: localhost
+      DJANGO_DB_PORT: "5432"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e '.[dev]' 'psycopg[binary]'
+      # `-p no:randomly` because the race tests run real threads against real
+      # rows: an ordering that leaves a wallet behind from another test is a
+      # flake nobody can reproduce.
+      - run: pytest src/apps/wallet -p no:randomly --no-cov
+      # Fails the job if the race tests were skipped after all -- a silent skip
+      # here would put this workflow back exactly where it started.
+      - name: The row-lock tests must actually have run
+        run: |
+          # pipefail, or `tee` succeeding would hide pytest failing.
+          set -o pipefail
+          pytest src/apps/wallet/tests/test_concurrency.py -p no:randomly --no-cov -q \
+            | tee /tmp/locks.txt
+          if grep -qi "skipped" /tmp/locks.txt; then
+            echo "::error::the row-lock tests skipped, so nothing proved the locks work"
+            exit 1
+          fi
+
   # Everything else a merge could break: the linters and the type checker, the
   # wheel, and the published generator building and touring a real project.
   # Skipped for a pull request into `main`.
