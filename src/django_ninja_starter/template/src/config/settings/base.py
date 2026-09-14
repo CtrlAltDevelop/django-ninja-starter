@@ -802,6 +802,7 @@ APP_TRANSPORTS = {
     "apps.notifications": NOTIFICATIONS_TRANSPORTS,
     "apps.shop": SHOP_TRANSPORTS,
     "apps.support": SUPPORT_TRANSPORTS,
+    "apps.wallet": WALLET_TRANSPORTS,
 }
 
 # How often one caller may ask, whichever endpoint they are asking. A correct

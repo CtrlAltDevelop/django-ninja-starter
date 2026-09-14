@@ -308,13 +308,32 @@ def test_an_app_can_be_installed_for_one_transport_only(app: str, tmp_path: Path
     The narrowest configuration is the one worth checking, because it is the one
     where a surface that ignored the setting would still be up: REST only, on an
     app that also speaks GraphQL, gRPC and -- for two of them -- a socket.
+
+    Passing `check` is not the claim. The claim is that the other doors are shut,
+    so the GraphQL and gRPC registries are asked directly whether the app is in
+    them: an app the settings forgot to key reads as infrastructure there, and
+    publishes everything while `check` stays green.
     """
-    result = _check(
-        {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest"},
-        tmp_path / "db.sqlite3",
-    )
+    environment = {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest"}
+    result = _check(environment, tmp_path / "db.sqlite3")
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+    script = (
+        "import json, django; django.setup();"
+        "from config.graph import graph_contributions;"
+        "from config.grpc import grpc_app_services;"
+        "graph = {label for kind in ('Query', 'Mutation')"
+        " for label, _ in graph_contributions(kind)};"
+        "grpc = {config.label for config, _ in grpc_app_services()};"
+        "print(json.dumps({'graph': sorted(graph), 'grpc': sorted(grpc)}))"
+    )
+    served = _run(["-c", script], environment, tmp_path / "db.sqlite3")
+
+    assert served.returncode == 0, served.stdout + served.stderr
+    published = json.loads(served.stdout.splitlines()[-1])
+    assert app not in published["graph"], f"{app} still publishes GraphQL: {published}"
+    assert app not in published["grpc"], f"{app} still publishes gRPC: {published}"
 
 
 @pytest.mark.parametrize("app", FEATURE_APPS)
