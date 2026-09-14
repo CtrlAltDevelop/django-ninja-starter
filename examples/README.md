@@ -56,7 +56,7 @@ tour runs them:
 | 8 | Notifications | `apps.notifications` | The stored history over HTTP, then three live sockets |
 | 9 | A shop | `apps.shop` | A public catalogue, then a basket, an order and a settled invoice that are nobody's but the caller's |
 | 10 | A support desk | `apps.support` | One conversation from both sides: a ticket, a queue, a staff-only note, and then the same thing live over a socket |
-| 11 | A wallet | `apps.wallet` | Every wallet route: configured payment methods, a priced deposit a signed webhook settles or fails, requests applied and refused, a payout cancelled, a free transfer, a chargeback, and a balance that survives being archived |
+| 11 | A wallet | `apps.wallet` | Every wallet route: configured payment methods, a priced deposit a signed webhook settles or fails, requests applied and refused, a payout cancelled, a free transfer, a chargeback the rail signs for, and a balance that survives being archived |
 | 12 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
 | 13 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
 | 14 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
@@ -342,7 +342,7 @@ fails if a route was left out.
 | `POST /api/v1/wallet/withdrawals` | The wrong chain for the address is a **400**. The right one holds its money out of `available` |
 | `GET …/entries/{id}`, `POST …/entries/{id}/cancel` | Cancelling is the account's one lifecycle verb, and it releases the hold. A settled entry is a **409** |
 | `POST /api/v1/wallet/transfers` | Both sides at once and free. The recipient's balance is read with their own token. A transfer to yourself is a **400** |
-| _(no endpoint)_ `wallet_service.reverse` | A chargeback is a second entry. The original is marked `reversed`, never edited |
+| `POST …/hooks/card` (`reversed`) | A chargeback arrives on the same signed webhook. It is a second entry; the original is marked `reversed`, never edited |
 | `GET …/rates`, `GET …/exchange` | The spread is published beside the rate |
 | `GET …/entries` | Failed, cancelled and reversed rows are listed with the rest |
 | `manage.py wallet_archive --force`, `GET …/checkpoints` | The balance does not move. A pending entry is never folded |

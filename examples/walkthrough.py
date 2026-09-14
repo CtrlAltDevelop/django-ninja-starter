@@ -2480,15 +2480,19 @@ def section_wallet(api: Api) -> None:
     )
 
     note(
-        "Months later the cardholder disputes the first deposit. A settled "
-        "movement is never edited: an operator reverses it, which writes a "
-        "chargeback beside it and marks the original `reversed` -- so the ledger "
+        "Months later the cardholder disputes the first deposit. The rail says so "
+        "on the same signed webhook it settled on -- `reversed` rather than "
+        "`done` -- and a settled movement is never edited: the chargeback is "
+        "written beside it and the original is marked `reversed`, so the ledger "
         "still agrees with the processor that remembers the payment happening."
     )
-    chargeback = wallet_service.reverse(
-        zoe, deposit["id"], reference="tour-chargeback-1", reason="Disputed by the cardholder."
+    _confirm_as_the_rail(
+        api,
+        deposit["id"],
+        event="reversed",
+        external_reference="ch_3QxTour",
+        reason="Disputed by the cardholder.",
     )
-    print(f"  {DIM}│ {chargeback['kind']} of {chargeback['amount']}, charges kept: 0{OFF}")
     api.get("/api/v1/wallet/balance")
 
     note("What this deployment converts at, with the spread published beside the rate.")
