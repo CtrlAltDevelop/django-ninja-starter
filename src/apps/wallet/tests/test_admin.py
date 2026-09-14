@@ -17,9 +17,22 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.test import Client, RequestFactory
 from django.urls import reverse
 
-from apps.wallet.admin import PaymentMethodAdmin, WalletEntryAdmin
+from apps.wallet.admin import (
+    AdjustmentForm,
+    PaymentMethodAdmin,
+    WalletAdmin,
+    WalletEntryAdmin,
+)
 from apps.wallet.catalog import MethodCurrency, PaymentMethod
-from apps.wallet.models import Approval, EntryStatus, WalletEntry
+from apps.wallet.errors import WalletError
+from apps.wallet.models import (
+    Approval,
+    EntryKind,
+    EntryStatus,
+    Wallet,
+    WalletEntry,
+    WalletStatus,
+)
 from apps.wallet.services import wallet_service
 
 pytestmark = pytest.mark.django_db
@@ -219,3 +232,91 @@ def test_an_amount_is_written_as_money_rather_than_at_storage_precision(
 
     assert "1000.00 USD" in page
     assert "1000.0000" not in page
+
+
+def test_reversing_from_the_admin_writes_one_correction(
+    alice: Any, cash: PaymentMethod, superuser: Any
+) -> None:
+    """A returned transfer, undone by a person, and a double-click that changes nothing."""
+    deposit = wallet_service.deposit(alice, amount=Decimal("100"), method="cash", reference="d")
+    screen = WalletEntryAdmin(WalletEntry, AdminSite())
+
+    for _ in range(2):
+        screen.reverse_entries(
+            admin_request(superuser), WalletEntry.objects.filter(pk=deposit["id"])
+        )
+
+    corrections = WalletEntry.objects.filter(counterparty_id=deposit["id"])
+    assert corrections.count() == 1
+    assert corrections.get().metadata["reversed_by_operator"] == str(superuser.pk)
+    assert wallet_service.balance(alice)["settled"] == Decimal("0.0000")
+
+
+def test_freezing_a_wallet_from_the_admin_goes_through_the_service(
+    funded: Any, card: PaymentMethod, superuser: Any
+) -> None:
+    """The status field is not edited in place; the action calls the service that checks it."""
+    screen = WalletAdmin(Wallet, AdminSite())
+    wallet = Wallet.objects.get(user=funded)
+
+    screen.freeze_wallets(admin_request(superuser), Wallet.objects.filter(pk=wallet.pk))
+
+    wallet.refresh_from_db()
+    assert wallet.status == str(WalletStatus.FROZEN)
+    with pytest.raises(WalletError):
+        wallet_service.withdraw(
+            funded, amount=Decimal("10"), method="card", reference="out", destination="4242"
+        )
+
+
+def test_closing_a_funded_wallet_from_the_admin_is_refused_with_a_message(
+    funded: Any, superuser: Any
+) -> None:
+    """The refusal an operator would get from the API, in the message bar instead of a 500."""
+    screen = WalletAdmin(Wallet, AdminSite())
+    wallet = Wallet.objects.get(user=funded)
+
+    screen.close_wallets(admin_request(superuser), Wallet.objects.filter(pk=wallet.pk))
+
+    wallet.refresh_from_db()
+    assert wallet.status != str(WalletStatus.CLOSED)
+
+
+def test_an_adjustment_typed_into_the_admin_is_written_by_the_service(
+    funded: Any, superuser: Any
+) -> None:
+    """The one add form in the app, and it still takes the lock and checks the funds."""
+    wallet = Wallet.objects.get(user=funded)
+    form = AdjustmentForm(
+        data={
+            "wallet": str(wallet.pk),
+            "kind": str(EntryKind.BONUS),
+            "amount": "25",
+            "description": "Goodwill",
+            "idempotency_key": "fixed-key",
+        }
+    )
+    form.operator = superuser
+
+    assert form.is_valid(), form.errors
+    assert wallet_service.balance(funded)["settled"] == Decimal("1025.0000")
+    assert form.recorded is not None
+
+
+def test_an_adjustment_the_service_refuses_comes_back_as_a_form_error(
+    funded: Any, superuser: Any
+) -> None:
+    wallet = Wallet.objects.get(user=funded)
+    form = AdjustmentForm(
+        data={
+            "wallet": str(wallet.pk),
+            "kind": str(EntryKind.ADJUSTMENT_DEBIT),
+            "amount": "5000",
+            "description": "Clawback",
+            "idempotency_key": "fixed-key",
+        }
+    )
+    form.operator = superuser
+
+    assert form.is_valid() is False
+    assert wallet_service.balance(funded)["settled"] == Decimal("1000.0000")

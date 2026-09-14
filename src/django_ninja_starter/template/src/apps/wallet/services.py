@@ -49,6 +49,9 @@ app. The money does not leave, so there is no cost to pass on, and this app does
 not invent one.
 """
 
+import json
+from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -57,6 +60,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.wallet import signals
 from apps.wallet.balances import Balance, balance_of
 from apps.wallet.catalog import Applies, ExchangeRate, PaymentMethod
 from apps.wallet.charges import Quote, convert, free_quote, quote_movement
@@ -83,6 +87,7 @@ from apps.wallet.models import (
     Wallet,
     WalletCharge,
     WalletEntry,
+    WalletStatus,
     direction_of,
 )
 from apps.wallet.money import ZERO, money
@@ -107,6 +112,18 @@ def page_size(limit: int | None) -> int:
     return max(1, min(asked, ceiling))
 
 
+#: The kinds an operator may write by hand. A deposit or a withdrawal has a rail
+#: and a price and is the account's to ask for; these have neither, and are the
+#: back office's to decide.
+BACK_OFFICE_KINDS = frozenset(
+    {
+        str(EntryKind.BONUS),
+        str(EntryKind.FEE),
+        str(EntryKind.ADJUSTMENT_CREDIT),
+        str(EntryKind.ADJUSTMENT_DEBIT),
+    }
+)
+
 #: The kinds a client may ask for directly. Everything else -- a fee, a
 #: chargeback, an adjustment -- is written by the code or the operator that has
 #: a reason to, never by the account whose balance it moves.
@@ -118,6 +135,7 @@ CLIENT_KINDS = frozenset({str(EntryKind.DEPOSIT), str(EntryKind.WITHDRAWAL)})
 #: because the pricing engine raises them too, and it must not import a service.
 __all__ = [
     "ApprovalRequired",
+    "BACK_OFFICE_KINDS",
     "CurrencyNotAllowed",
     "InsufficientFunds",
     "InvalidAmount",
@@ -129,12 +147,101 @@ __all__ = [
     "WalletError",
     "WalletFrozen",
     "WalletNotFound",
+    "ExpiryResult",
     "WalletService",
     "entry_payload",
+    "expire_after",
+    "metadata_limit",
     "page_size",
     "method_payload",
     "wallet_service",
 ]
+
+
+def metadata_limit() -> int:
+    """How many bytes of client metadata one movement may carry. Zero means no cap."""
+    return int(getattr(settings, "WALLET_MAX_METADATA_BYTES", 4096))
+
+
+def _check_metadata(metadata: Any) -> None:
+    """Refuse metadata that is not an object, or is larger than one movement needs.
+
+    The column is a JSON object and every transport renders it as one, so a list
+    or a bare string stored here would be a movement no client could read back.
+    Checked in the service because GraphQL's ``JSON`` scalar accepts any shape.
+
+    The size cap matters for the same reason the page size does: this is a field
+    the *client* fills in, on every deposit, withdrawal and transfer, and it is
+    returned again on every read of that entry. Uncapped, an authenticated
+    account can put megabytes into the ledger a movement at a time and make
+    everybody's history expensive to read. The default is generous for what the
+    field is for -- an order id, a note, a few tags -- and a deployment that
+    genuinely needs more can raise it.
+    """
+    if metadata is None:
+        return
+    if not isinstance(metadata, dict):
+        raise WalletError("metadata has to be an object.")
+    cap = metadata_limit()
+    if not cap:
+        return
+    try:
+        size = len(json.dumps(metadata, default=str).encode())
+    except (TypeError, ValueError):
+        raise WalletError("metadata has to be JSON-serialisable.") from None
+    if size > cap:
+        raise WalletError(f"metadata is {size} bytes; the most one movement may carry is {cap}.")
+
+
+#: Which metadata key records the operator behind each hand-made transition.
+#: Settling is where money becomes real, so "who said so" is part of the record
+#: rather than something an audit has to reconstruct from a server log. A
+#: transition with no operator -- a rail's webhook, an account cancelling its own
+#: movement, the expiry job -- records nobody, which is the honest answer.
+OPERATOR_KEYS = {
+    str(EntryStatus.DONE): "settled_by_operator",
+    str(EntryStatus.FAILED): "failed_by_operator",
+    str(EntryStatus.EXPIRED): "expired_by_operator",
+    str(EntryStatus.CANCELLED): "cancelled_by_operator",
+}
+
+
+def _operator_note(status: str, by: Any) -> dict[str, str]:
+    """The attribution to merge into an entry's metadata, or nothing."""
+    key = OPERATOR_KEYS.get(status)
+    if key is None or not getattr(by, "pk", None):
+        return {}
+    return {key: str(by.pk)}
+
+
+#: What a rail may report through its signed webhook. See
+#: :meth:`WalletService.confirm_from_rail`.
+RAIL_EVENTS = frozenset({str(EntryStatus.DONE), str(EntryStatus.FAILED), str(EntryStatus.REVERSED)})
+
+
+def expire_after() -> timedelta | None:
+    """How long a movement may wait on its rail before it is given up on, or ``None``.
+
+    ``DJANGO_WALLET_EXPIRE_AFTER_HOURS``; zero -- the default -- means never. Off
+    by default because the right window is a fact about the rails a deployment
+    runs: a card authorisation is stale in a day, a bank transfer is not late
+    until the third.
+    """
+    hours = int(getattr(settings, "WALLET_EXPIRE_AFTER_HOURS", 0))
+    return timedelta(hours=hours) if hours else None
+
+
+@dataclass(frozen=True)
+class ExpiryResult:
+    """What one sweep of stale movements did, and what it deliberately left."""
+
+    expired: int
+    """Pending movements nothing confirmed inside the window, now ``expired``."""
+
+    awaiting_operator: int
+    """Stale requests left alone: the wait is on a person, not on a rail."""
+
+    window: timedelta | None
 
 
 def _limit(name: str, fallback: str) -> Decimal:
@@ -516,6 +623,14 @@ class WalletService:
         """
         if getattr(to_user, "pk", None) == getattr(user, "pk", None):
             raise WalletError("A transfer needs two different accounts.")
+        # Checked here rather than in each of the three transports that resolve a
+        # recipient, because a rule enforced in three places is a rule enforced in
+        # two of them a release later. A deactivated account cannot sign in, so it
+        # cannot spend what lands in its wallet: the money would simply stop
+        # there, which is not a transfer, it is a hole.
+        if not getattr(to_user, "is_active", True):
+            raise WalletError("That account is closed, so money sent to it could never leave.")
+        _check_metadata(metadata)
 
         sender = self.wallet_for(user)
         recipient = self.wallet_for(to_user)
@@ -584,24 +699,36 @@ class WalletService:
             )
             out.counterparty = incoming
             out.save(update_fields=["counterparty"])
+            self._announce_recorded(out)
+            self._announce_recorded(incoming)
             return entry_payload(out)
 
     # -- moving an entry through its states -------------------------------
 
-    def settle(self, user: Any, entry_id: UUID, *, external_reference: str = "") -> dict[str, Any]:
+    def settle(
+        self, user: Any, entry_id: UUID, *, external_reference: str = "", by: Any = None
+    ) -> dict[str, Any]:
         """Confirm that a pending movement really happened. This is where money appears.
 
         A settling withdrawal is re-checked against the balance under the lock:
         between recording and confirming, a chargeback may have taken the money
         away, and paying it out anyway is the one mistake a wallet cannot undo.
+
+        ``by`` is the operator who said so, recorded on the entry. This is the
+        single most consequential thing anybody in the back office can do -- it
+        turns a row into money -- so it is not left to a server log that rotates.
+        A settlement with no operator came from a rail's signed confirmation,
+        which carries its own `external_reference` instead.
         """
         return self._transition(
-            user, entry_id, str(EntryStatus.DONE), external_reference=external_reference
+            user, entry_id, str(EntryStatus.DONE), external_reference=external_reference, by=by
         )
 
-    def fail(self, user: Any, entry_id: UUID, *, reason: str = "") -> dict[str, Any]:
+    def fail(
+        self, user: Any, entry_id: UUID, *, reason: str = "", by: Any = None
+    ) -> dict[str, Any]:
         """The rail refused it. Terminal, and it never counted for anything."""
-        return self._transition(user, entry_id, str(EntryStatus.FAILED), reason=reason)
+        return self._transition(user, entry_id, str(EntryStatus.FAILED), reason=reason, by=by)
 
     def cancel(self, user: Any, entry_id: UUID, *, reason: str = "") -> dict[str, Any]:
         """Withdraw a movement before it settles. Only ever a pending entry."""
@@ -611,7 +738,192 @@ class WalletService:
         """Give up on a pending movement nothing ever confirmed."""
         return self._transition(user, entry_id, str(EntryStatus.EXPIRED))
 
+    def expire_entry(self, entry_id: UUID, *, reason: str = "", by: Any = None) -> dict[str, Any]:
+        """Give up on one pending movement from the back office, whichever wallet it is in.
+
+        Expiring asserts that the money did *not* move, which is the safe
+        direction: it releases whatever a pending payout was holding, and a
+        deposit whose money turns up after all arrives as a fresh movement
+        rather than resurrecting this one. Idempotent, like every other
+        transition a scheduled job can repeat.
+        """
+        with transaction.atomic():
+            entry = self._locked_across_wallets(entry_id)
+            if entry.status == str(EntryStatus.EXPIRED):
+                return entry_payload(entry)
+            if not entry.can_become(str(EntryStatus.EXPIRED)):
+                raise InvalidTransition(
+                    f"A {entry.get_status_display().lower()} entry cannot expire."
+                )
+            entry.status = str(EntryStatus.EXPIRED)
+            fields = ["status"]
+            note = {
+                **({"reason": reason} if reason else {}),
+                **_operator_note(str(EntryStatus.EXPIRED), by),
+            }
+            if note:
+                entry.metadata = {**entry.metadata, **note}
+                fields.append("metadata")
+            entry.save(update_fields=fields)
+            signals.announce(signals.entry_expired, entry=entry_payload(entry))
+            return entry_payload(entry)
+
+    def expire_stale(self, *, older_than: timedelta | None = None, now: Any = None) -> ExpiryResult:
+        """Expire every movement that has waited on its rail longer than the window.
+
+        What ``manage.py wallet_expire`` runs. Without it, a card deposit whose
+        webhook never came stays pending for ever -- and a pending *payout* holds
+        its money out of ``available`` for ever with it.
+
+        **A request waiting on an operator is not expired**, however old. Its
+        status and its approval are two separate waits, and this sweep is about
+        the first: a rail that never answered. A request nobody has looked at is
+        a queue problem, and expiring it would quietly empty the queue that is
+        supposed to make somebody look. Those are counted and reported instead.
+
+        Each movement is expired in its own transaction under its own wallet's
+        lock, so one wallet with a busy afternoon does not hold up the rest, and
+        a movement a webhook settled in the meantime is simply skipped.
+        """
+        window = older_than if older_than is not None else expire_after()
+        if window is None:
+            return ExpiryResult(expired=0, awaiting_operator=0, window=None)
+        cutoff = (now or timezone.now()) - window
+        stale = WalletEntry.objects.pending().filter(created_at__lt=cutoff)
+        waiting = stale.filter(approval=str(Approval.REQUESTED)).count()
+        expired = 0
+        for entry_id in stale.exclude(approval=str(Approval.REQUESTED)).values_list(
+            "pk", flat=True
+        ):
+            try:
+                self.expire_entry(entry_id, reason="Not confirmed in time.")
+            except WalletError:
+                # Settled, failed or cancelled between the listing and the lock.
+                continue
+            expired += 1
+        return ExpiryResult(expired=expired, awaiting_operator=waiting, window=window)
+
     # -- the back office --------------------------------------------------
+
+    def adjust(
+        self,
+        user: Any,
+        *,
+        kind: str,
+        amount: Decimal,
+        reference: str,
+        reason: str,
+        by: Any = None,
+    ) -> dict[str, Any]:
+        """Correct a balance by hand: a bonus, a fee, a goodwill credit, a write-off.
+
+        Settled at once and priced at nothing -- there is no rail and no
+        processor, only an operator's decision -- and still written the way
+        every other movement is: under the wallet's lock, once per reference,
+        with the funds checked before anything is taken out. A debit adjustment
+        that would take a wallet below its overdraft allowance is refused, not
+        recorded; clawing back money the account has already spent is a
+        conversation, not a row.
+
+        ``reason`` is required. An unexplained balance change is the one entry
+        an auditor will certainly ask about, and the person who made it will not
+        remember.
+        """
+        if kind not in BACK_OFFICE_KINDS:
+            raise WalletError(
+                f"{kind!r} is not something the back office writes by hand. "
+                f"Use one of: {', '.join(sorted(BACK_OFFICE_KINDS))}."
+            )
+        if not reason.strip():
+            raise WalletError("An adjustment needs a reason; it is the only record of why.")
+        metadata: dict[str, Any] = {"reason": reason}
+        if getattr(by, "pk", None):
+            metadata["adjusted_by"] = str(by.pk)
+        return self._record_system(
+            user,
+            kind=kind,
+            amount=amount,
+            reference=reference,
+            description=reason,
+            metadata=metadata,
+        )
+
+    def pay(
+        self,
+        user: Any,
+        *,
+        amount: Decimal,
+        reference: str,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Spend from the wallet on something this project sells.
+
+        For another app in the same project -- a shop checking out against the
+        balance, a subscription renewing -- and published on no transport: what
+        is being bought, and for how much, is that app's to decide, and a route
+        that let an account name its own price would be a route that bought
+        things for nothing. Free and settled at once, like a transfer, because
+        the money never leaves this deployment.
+        """
+        _check_metadata(metadata)
+        return self._record_system(
+            user,
+            kind=str(EntryKind.PAYMENT),
+            amount=amount,
+            reference=reference,
+            description=description,
+            metadata=metadata or {},
+        )
+
+    def set_wallet_status(
+        self, wallet_id: UUID, status: str, *, by: Any = None, reason: str = ""
+    ) -> dict[str, Any]:
+        """Freeze, unfreeze or close a wallet, with the checks a status change needs.
+
+        **Frozen** refuses payouts and still takes money in, which is what a
+        compliance hold means. **Closed** takes nothing either way, and so it is
+        refused while there is anything left to strand: a settled balance that
+        is not zero, or a movement still pending that would have nowhere to
+        land. Pay it out or adjust it to zero first. A closed wallet stays
+        closed -- reopening one is opening a new account's history on top of an
+        old one's, which is a decision for somebody with more context than a
+        status field.
+        """
+        if status not in WalletStatus.values:
+            raise WalletError(f"{status!r} is not a wallet status.")
+        with transaction.atomic():
+            locked = Wallet.objects.select_for_update().filter(pk=wallet_id).first()
+            if locked is None:
+                raise WalletNotFound("No such wallet.")
+            previous = locked.status
+            if previous == status:
+                return {"id": locked.pk, "status": status, "previous": previous}
+            if previous == str(WalletStatus.CLOSED):
+                raise InvalidTransition("A closed wallet stays closed.")
+            if status == str(WalletStatus.CLOSED):
+                balance = balance_of(locked)
+                if balance.has_pending:
+                    raise InvalidTransition(
+                        "This wallet has movements still pending, and a closed wallet "
+                        "would give them nowhere to land. Settle, fail or expire them first."
+                    )
+                if balance.settled != ZERO:
+                    raise InvalidTransition(
+                        f"This wallet still holds {balance.settled} {locked.currency}. Pay "
+                        "it out or adjust it to zero before closing it."
+                    )
+            locked.status = status
+            locked.save(update_fields=["status", "updated_at"])
+            change = {
+                "id": locked.pk,
+                "status": status,
+                "previous": previous,
+                "reason": reason,
+                "by": str(by.pk) if getattr(by, "pk", None) else None,
+            }
+            signals.announce(signals.wallet_status_changed, wallet=change)
+            return {"id": locked.pk, "status": status, "previous": previous}
 
     def awaiting_approval(
         self, *, limit: int | None = None, offset: int = 0, method: str | None = None
@@ -680,6 +992,7 @@ class WalletService:
             entry.reviewed_at = timezone.now()
             entry.review_note = note
             entry.save(update_fields=["approval", "reviewed_by", "reviewed_at", "review_note"])
+            signals.announce(signals.entry_approved, entry=entry_payload(entry))
 
             rail = entry.payment_method.spec if entry.payment_method_id else None
             if (
@@ -688,6 +1001,8 @@ class WalletService:
                 and entry.can_become(str(EntryStatus.DONE))
             ):
                 return self._settle_locked(entry)
+            if _payout_ready(entry):
+                signals.announce(signals.payout_ready, entry=entry_payload(entry))
             return entry_payload(entry)
 
     def confirm_from_rail(
@@ -715,14 +1030,22 @@ class WalletService:
         it turns one leaked secret into a smaller problem than it would otherwise
         be.
 
-        Two events, because there are only two things a rail knows: the money
-        moved, or it did not. Approval is not among them -- a movement waiting on
-        an operator stays waiting however loudly its processor confirms it, which
-        is exactly what :meth:`settle` already refuses and this inherits.
+        Three events, because there are three things a rail knows: the money
+        moved, it did not, or -- on a rail where the payer can take it back, a
+        card's chargeback -- it moved and was later taken back. Approval is not
+        among them: a movement waiting on an operator stays waiting however
+        loudly its processor confirms it, which is exactly what :meth:`settle`
+        already refuses and this inherits.
+
+        ``reversed`` is only believed from a rail whose type can be reversed.
+        A bank transfer or a chain confirmation is final, and a processor
+        claiming otherwise is a misconfiguration or a forgery -- either way not
+        a reason to take money out of somebody's wallet.
         """
-        if event not in (str(EntryStatus.DONE), str(EntryStatus.FAILED)):
+        if event not in RAIL_EVENTS:
             raise WalletError(
-                f"A rail may only report that a movement settled or failed; {event!r} is neither."
+                "A rail may only report that a movement settled, failed or was reversed; "
+                f"{event!r} is none of those."
             )
         with transaction.atomic():
             entry = self._locked_across_wallets(entry_id)
@@ -732,6 +1055,23 @@ class WalletService:
                 # a rail probing for other processors' entry ids should not be
                 # able to tell "not yours" from "no such thing".
                 raise WalletNotFound("No such entry.")
+            if event == str(EntryStatus.REVERSED):
+                if not entry.payment_method.reversible:
+                    raise WalletError(
+                        f"A {entry.payment_method.name} payment cannot be taken back, so "
+                        "its rail cannot report one reversed."
+                    )
+                reference = _reversal_reference(entry.pk)
+                if entry.status == event and self._existing(entry.wallet, reference) is None:
+                    # Undone already, by an operator: the rail is late, not wrong.
+                    return entry_payload(entry)
+                return self._reverse_locked(
+                    entry.wallet,
+                    entry.pk,
+                    reference=reference,
+                    reason=reason,
+                    external_reference=external_reference,
+                )
             if entry.status == event:
                 return entry_payload(entry)
             if event == str(EntryStatus.DONE):
@@ -760,6 +1100,7 @@ class WalletService:
                 entry.metadata = {**entry.metadata, "reason": reason}
                 fields.append("metadata")
             entry.save(update_fields=fields)
+            signals.announce(signals.entry_failed, entry=entry_payload(entry))
             return entry_payload(entry)
 
     def reject(self, entry_id: UUID, *, by: Any = None, note: str = "") -> dict[str, Any]:
@@ -784,78 +1125,136 @@ class WalletService:
             entry.reviewed_at = timezone.now()
             entry.review_note = note
             fields = ["approval", "reviewed_by", "reviewed_at", "review_note"]
-            if entry.status == str(EntryStatus.PENDING):
+            cancelled = entry.status == str(EntryStatus.PENDING)
+            if cancelled:
                 entry.status = str(EntryStatus.CANCELLED)
                 fields.append("status")
             entry.save(update_fields=fields)
+            signals.announce(signals.entry_rejected, entry=entry_payload(entry))
+            if cancelled:
+                signals.announce(signals.entry_cancelled, entry=entry_payload(entry))
             return entry_payload(entry)
 
     def reverse(
         self, user: Any, entry_id: UUID, *, reference: str, reason: str = ""
     ) -> dict[str, Any]:
-        """Undo a settled movement -- as a second entry, never as an edit.
+        """Undo a settled movement of this account's -- as a second entry, never as an edit.
 
         A chargeback, a returned transfer, a refund of a payment. The original
         stays exactly as it was and is marked ``reversed``; the money moves back
         on a new entry pointing at it. A ledger that rewrote the original could
         not be reconciled against the rail that still remembers it happening.
+
+        Scoped to the account for code that already holds one. It is published
+        on no transport -- a customer who could reverse their own paid-out
+        withdrawal would be paid twice. The back office reaches the same rule
+        through :meth:`reverse_entry`, and a rail through :meth:`confirm_from_rail`.
         """
         wallet = self.wallet_for(user)
         with transaction.atomic():
             locked = Wallet.objects.select_for_update().get(pk=wallet.pk)
-            if existing := self._existing(locked, reference):
-                # Same question as everywhere else, asked about the only thing
-                # that identifies a reversal: which movement it undoes. A
-                # reference reused against a second entry would hand back the
-                # first correction and leave the second movement standing.
-                if existing.metadata.get("reversal_of") != str(entry_id):
-                    raise ReferenceReused(
-                        f"The reference {reference!r} was already used to reverse a "
-                        "different movement on this wallet."
-                    )
-                return entry_payload(existing)
-            original = self._locked_entry(locked, entry_id)
-            if not original.can_become(str(EntryStatus.REVERSED)):
-                raise InvalidTransition(
-                    f"A {original.get_status_display().lower()} entry cannot be reversed."
+            return self._reverse_locked(locked, entry_id, reference=reference, reason=reason)
+
+    def reverse_entry(
+        self, entry_id: UUID, *, reference: str = "", reason: str = "", by: Any = None
+    ) -> dict[str, Any]:
+        """Undo a settled movement from the back office, whichever wallet it is in.
+
+        What an operator does when a bank returns a transfer or a dispute is lost
+        and no webhook is coming to say so. The reference defaults to one derived
+        from the entry, so a double-clicked action returns the first correction
+        rather than writing a second one.
+        """
+        with transaction.atomic():
+            original = self._locked_across_wallets(entry_id)
+            return self._reverse_locked(
+                original.wallet,
+                original.pk,
+                reference=reference or _reversal_reference(original.pk),
+                reason=reason,
+                by=by,
+            )
+
+    def _reverse_locked(
+        self,
+        locked: Wallet,
+        entry_id: UUID,
+        *,
+        reference: str,
+        reason: str = "",
+        external_reference: str = "",
+        by: Any = None,
+    ) -> dict[str, Any]:
+        """The one reversal, with the wallet already locked by the caller."""
+        if existing := self._existing(locked, reference):
+            # Same question as everywhere else, asked about the only thing
+            # that identifies a reversal: which movement it undoes. A
+            # reference reused against a second entry would hand back the
+            # first correction and leave the second movement standing.
+            if existing.metadata.get("reversal_of") != str(entry_id):
+                raise ReferenceReused(
+                    f"The reference {reference!r} was already used to reverse a "
+                    "different movement on this wallet."
                 )
-            opposite = (
-                str(EntryKind.CHARGEBACK)
-                if original.direction == str(Direction.CREDIT)
-                else str(EntryKind.REFUND)
+            return entry_payload(existing)
+        original = self._locked_entry(locked, entry_id)
+        if original.method == str(Method.INTERNAL):
+            # Reversing one half of a transfer credits the sender and leaves the
+            # recipient holding the money: a reversal that creates money. The
+            # honest undo is the recipient transferring it back.
+            raise InvalidTransition(
+                "A transfer between two wallets here is undone by transferring the money "
+                "back, not by reversing one side of it."
             )
-            correction = WalletEntry.objects.create(
-                wallet=locked,
-                kind=opposite,
-                method=original.method,
-                # The rail and the chain are carried across so the record says
-                # what the money went back on, rather than leaving a correction
-                # that appears to have arrived from nowhere.
-                payment_method=original.payment_method,
-                network=original.network,
-                amount=original.amount,
-                # In the wallet's own currency, which is what `amount` already
-                # is -- a reversal moves the balance back by exactly what it
-                # moved, at the rate that applied then, not at today's.
-                gross_amount=original.amount,
-                # Nothing. The charges on the original were spent moving money
-                # that really did move; a processor does not return its
-                # commission because the payment was later disputed. A
-                # deployment that does refund a fee writes that as its own
-                # entry, where it can be seen and argued with.
-                fee_total=ZERO,
-                status=str(EntryStatus.DONE),
-                approval=str(Approval.NOT_REQUIRED),
-                reference=reference,
-                external_reference=original.external_reference,
-                description=reason or f"Reversal of {original.pk}",
-                metadata={"reversal_of": str(original.pk), "reason": reason},
-                counterparty=original,
+        if not original.can_become(str(EntryStatus.REVERSED)):
+            raise InvalidTransition(
+                f"A {original.get_status_display().lower()} entry cannot be reversed."
             )
-            original.status = str(EntryStatus.REVERSED)
-            original.metadata = {**original.metadata, "reversed_by": str(correction.pk)}
-            original.save(update_fields=["status", "metadata"])
-            return entry_payload(correction)
+        opposite = (
+            str(EntryKind.CHARGEBACK)
+            if original.direction == str(Direction.CREDIT)
+            else str(EntryKind.REFUND)
+        )
+        metadata: dict[str, Any] = {"reversal_of": str(original.pk), "reason": reason}
+        if getattr(by, "pk", None):
+            metadata["reversed_by_operator"] = str(by.pk)
+        correction = WalletEntry.objects.create(
+            wallet=locked,
+            kind=opposite,
+            method=original.method,
+            # The rail and the chain are carried across so the record says
+            # what the money went back on, rather than leaving a correction
+            # that appears to have arrived from nowhere.
+            payment_method=original.payment_method,
+            network=original.network,
+            amount=original.amount,
+            # In the wallet's own currency, which is what `amount` already
+            # is -- a reversal moves the balance back by exactly what it
+            # moved, at the rate that applied then, not at today's.
+            gross_amount=original.amount,
+            # Nothing. The charges on the original were spent moving money
+            # that really did move; a processor does not return its
+            # commission because the payment was later disputed. A
+            # deployment that does refund a fee writes that as its own
+            # entry, where it can be seen and argued with.
+            fee_total=ZERO,
+            status=str(EntryStatus.DONE),
+            approval=str(Approval.NOT_REQUIRED),
+            reference=reference,
+            external_reference=external_reference or original.external_reference,
+            description=reason or f"Reversal of {original.pk}",
+            metadata=metadata,
+            counterparty=original,
+        )
+        original.status = str(EntryStatus.REVERSED)
+        original.metadata = {**original.metadata, "reversed_by": str(correction.pk)}
+        original.save(update_fields=["status", "metadata"])
+        signals.announce(
+            signals.entry_reversed,
+            entry=entry_payload(original),
+            correction=entry_payload(correction),
+        )
+        return entry_payload(correction)
 
     # -- the parts every write shares -------------------------------------
 
@@ -1032,6 +1431,7 @@ class WalletService:
         """
         if not reference:
             raise WalletError("A reference is required; it is what makes a retry safe.")
+        _check_metadata(metadata)
         direction = direction_of(kind)
         configured = self._method(method, direction)
         wallet = self.wallet_for(user)
@@ -1092,6 +1492,56 @@ class WalletService:
                 metadata=metadata or {},
             )
             self._write_charges(entry, priced)
+            self._announce_recorded(entry)
+            return entry_payload(entry)
+
+    def _record_system(
+        self,
+        user: Any,
+        *,
+        kind: str,
+        amount: Decimal,
+        reference: str,
+        description: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Write one movement that no rail carries and nothing prices.
+
+        The unpriced sibling of :meth:`_record`, for what the project itself
+        writes: settled on the spot, no charges, the ``system`` rail. The
+        deployment's deposit and withdrawal limits do not apply -- they bound
+        what an account may move, and this is not an account moving anything --
+        but the wallet's status and its funds do, under the lock, as always.
+        """
+        if not reference:
+            raise WalletError("A reference is required; it is what makes a retry safe.")
+        if amount is None or Decimal(amount) <= ZERO:
+            raise InvalidAmount("An amount has to be more than zero.")
+        direction = direction_of(kind)
+        moving = money(Decimal(amount))
+        wallet = self.wallet_for(user)
+        with transaction.atomic():
+            locked = Wallet.objects.select_for_update().get(pk=wallet.pk)
+            if existing := self._existing(locked, reference):
+                self._check_same_request(existing, kind=kind, amount=moving, method="")
+                return entry_payload(existing)
+            self._check_wallet(locked, direction)
+            if direction == str(Direction.DEBIT):
+                self._check_funds(locked, moving)
+            entry = WalletEntry.objects.create(
+                wallet=locked,
+                kind=kind,
+                method=str(Method.SYSTEM),
+                amount=moving,
+                gross_amount=moving,
+                fee_total=ZERO,
+                status=str(EntryStatus.DONE),
+                approval=str(Approval.NOT_REQUIRED),
+                reference=reference,
+                description=description,
+                metadata=metadata,
+            )
+            self._announce_recorded(entry)
             return entry_payload(entry)
 
     def _write_charges(self, entry: WalletEntry, priced: Quote) -> None:
@@ -1179,7 +1629,17 @@ class WalletService:
             entry.external_reference = external_reference
             fields.append("external_reference")
         entry.save(update_fields=fields)
+        signals.announce(signals.entry_settled, entry=entry_payload(entry))
         return entry_payload(entry)
+
+    def _announce_recorded(self, entry: WalletEntry) -> None:
+        """Tell the project a movement exists, and whatever that already means."""
+        payload = entry_payload(entry)
+        signals.announce(signals.entry_recorded, entry=payload)
+        if entry.status == str(EntryStatus.DONE):
+            signals.announce(signals.entry_settled, entry=payload)
+        elif _payout_ready(entry):
+            signals.announce(signals.payout_ready, entry=payload)
 
     def _transition(
         self,
@@ -1189,6 +1649,7 @@ class WalletService:
         *,
         external_reference: str = "",
         reason: str = "",
+        by: Any = None,
     ) -> dict[str, Any]:
         """Move one entry to a new status, if the map allows it.
 
@@ -1228,11 +1689,34 @@ class WalletService:
             if external_reference:
                 entry.external_reference = external_reference
                 fields.append("external_reference")
-            if reason:
-                entry.metadata = {**entry.metadata, "reason": reason}
+            note = {**({"reason": reason} if reason else {}), **_operator_note(status, by)}
+            if note:
+                entry.metadata = {**entry.metadata, **note}
                 fields.append("metadata")
             entry.save(update_fields=fields)
+            signals.announce(signals.STATUS_SIGNALS[status], entry=entry_payload(entry))
             return entry_payload(entry)
+
+
+def _payout_ready(entry: WalletEntry) -> bool:
+    """Whether a payout now waits on nothing but its rail being told to pay.
+
+    Pending, cleared of approval, and through a configured method -- the three
+    together, because each alone is true of rows nobody should send money for:
+    a payout still awaiting an operator is pending, and a cash payout handed
+    over at a counter went through a method and settled on the spot.
+    """
+    return (
+        entry.direction == str(Direction.DEBIT)
+        and entry.status == str(EntryStatus.PENDING)
+        and entry.is_cleared
+        and entry.payment_method_id is not None
+    )
+
+
+def _reversal_reference(entry_id: Any) -> str:
+    """The reference a back-office or rail reversal writes, derived so a retry finds it."""
+    return f"reversal:{entry_id}"
 
 
 def charge_payload(charge: Any) -> dict[str, Any]:

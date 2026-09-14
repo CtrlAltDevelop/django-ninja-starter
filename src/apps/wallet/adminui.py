@@ -46,6 +46,12 @@ def navigation(request: HttpRequest) -> dict[str, Any]:
                 "wallet.view_wallet",
             ),
             item(
+                "Adjustments",
+                "tune",
+                changelist("wallet", "balanceadjustment"),
+                "wallet.view_balanceadjustment",
+            ),
+            item(
                 "Ways to pay",
                 "credit_card",
                 changelist("wallet", "paymentmethod"),

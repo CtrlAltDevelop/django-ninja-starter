@@ -23,6 +23,7 @@ from decimal import Decimal
 from typing import Any
 
 import strawberry
+from strawberry.scalars import JSON
 from strawberry.types import Info
 
 from apps.wallet.graph.types import (
@@ -227,6 +228,7 @@ class Mutation:
         network: str = "",
         external_reference: str = "",
         description: str = "",
+        metadata: JSON | None = None,
     ) -> EntryType:
         return entry_type(
             _run(
@@ -239,6 +241,7 @@ class Mutation:
                 network=network,
                 external_reference=external_reference,
                 description=description,
+                metadata=metadata,
             )
         )
 
@@ -258,6 +261,7 @@ class Mutation:
         destination: str = "",
         external_reference: str = "",
         description: str = "",
+        metadata: JSON | None = None,
     ) -> EntryType:
         return entry_type(
             _run(
@@ -271,6 +275,7 @@ class Mutation:
                 destination=destination,
                 external_reference=external_reference,
                 description=description,
+                metadata=metadata,
             )
         )
 
@@ -286,6 +291,7 @@ class Mutation:
         amount: Decimal,
         reference: str,
         description: str = "",
+        metadata: JSON | None = None,
     ) -> EntryType:
         from django.contrib.auth import get_user_model
 
@@ -300,6 +306,7 @@ class Mutation:
                 amount=amount,
                 reference=reference,
                 description=description,
+                metadata=metadata,
             )
         )
 

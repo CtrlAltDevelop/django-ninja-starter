@@ -76,6 +76,28 @@ def _amount(value: str, field: str) -> Decimal:
         ) from None
 
 
+def _metadata(value: str) -> dict[str, Any]:
+    """The integration's own fields, sent as a JSON object in a string.
+
+    A string because protobuf has no free-form map of mixed values, and the
+    shape belongs to whoever integrated the rail. Empty means none; anything that
+    is not an object is refused, as the other two transports refuse it.
+    """
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        raise ApiError(
+            "metadata has to be a JSON object, written as a string.",
+            status=400,
+            title=ResponseTitle.VALIDATION_ERROR,
+        )
+    return parsed
+
+
 def _text(value: Any) -> str:
     """Anything optional, as the empty string protobuf uses for "not set"."""
     return "" if value is None else str(value)
@@ -475,6 +497,7 @@ class WalletService(generics.GenericService):
             {"name": "network", "type": "string"},
             {"name": "external_reference", "type": "string"},
             {"name": "description", "type": "string"},
+            {"name": "metadata", "type": "string"},
         ],
         request_name="DepositRequest",
         response=[{"name": "entry", "type": Entry}],
@@ -494,6 +517,7 @@ class WalletService(generics.GenericService):
                 network=request.network,
                 external_reference=request.external_reference,
                 description=request.description,
+                metadata=_metadata(request.metadata),
             )
         except WalletError as refusal:
             raise _refuse(refusal) from None
@@ -509,6 +533,7 @@ class WalletService(generics.GenericService):
             {"name": "destination", "type": "string"},
             {"name": "external_reference", "type": "string"},
             {"name": "description", "type": "string"},
+            {"name": "metadata", "type": "string"},
         ],
         request_name="WithdrawRequest",
         response=[{"name": "entry", "type": Entry}],
@@ -529,6 +554,7 @@ class WalletService(generics.GenericService):
                 destination=request.destination,
                 external_reference=request.external_reference,
                 description=request.description,
+                metadata=_metadata(request.metadata),
             )
         except WalletError as refusal:
             raise _refuse(refusal) from None
@@ -540,6 +566,7 @@ class WalletService(generics.GenericService):
             {"name": "amount", "type": "string"},
             {"name": "reference", "type": "string"},
             {"name": "description", "type": "string"},
+            {"name": "metadata", "type": "string"},
         ],
         request_name="TransferRequest",
         response=[{"name": "entry", "type": Entry}],
@@ -563,6 +590,7 @@ class WalletService(generics.GenericService):
                 amount=_amount(request.amount, "amount"),
                 reference=request.reference,
                 description=request.description,
+                metadata=_metadata(request.metadata),
             )
         except WalletError as refusal:
             raise _refuse(refusal) from None

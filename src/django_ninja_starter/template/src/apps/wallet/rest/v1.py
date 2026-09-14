@@ -4,9 +4,11 @@ Every decision is :class:`WalletService`'s -- including the one that matters,
 which is that the wallet is derived from the caller and there is no parameter
 that can widen it. No endpoint here takes a wallet id.
 
-The verbs mirror the GraphQL mutations and the gRPC calls one for one, under the
-same names and with the same replies, so a project publishing all three publishes
-one contract three ways.
+The verbs mirror the GraphQL fields and the gRPC calls one for one, with the same
+replies, so a project publishing all three publishes one contract three ways. The
+names follow each transport's convention, and gRPC renames two calls whose
+natural name collides with a message -- `quote` is `PriceMovement` there and
+`exchange` is `Convert` -- see `apps.wallet.grpc.services`.
 """
 
 from decimal import Decimal
@@ -235,7 +237,8 @@ def deposit(request: HttpRequest, payload: MoveIn) -> dict[str, Any]:
 
     Where it ends up depends on two independent things. A cash or voucher deposit
     comes back `done`; a card, bank or crypto deposit comes back `pending` until
-    something confirms it through `/entries/{id}/settle`. And if the method
+    its rail confirms it through the signed `/wallet/hooks/{method}`, or an
+    operator settles it in the admin -- never the account. And if the method
     requires approval, it comes back `pending` with `awaiting_approval` set
     whatever its rail does -- it is a request until an operator applies it, and it
     cannot settle before they do.

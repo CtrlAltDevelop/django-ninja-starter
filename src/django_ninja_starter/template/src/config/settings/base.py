@@ -637,6 +637,12 @@ WALLET_WEBHOOK_TOLERANCE_SECONDS = int(os.getenv("DJANGO_WALLET_WEBHOOK_TOLERANC
 # entry old enough, or enough of them to slow a read down.
 WALLET_ARCHIVE_AFTER_DAYS = int(os.getenv("DJANGO_WALLET_ARCHIVE_AFTER_DAYS", "1"))
 WALLET_ARCHIVE_THRESHOLD = int(os.getenv("DJANGO_WALLET_ARCHIVE_THRESHOLD", "20"))
+# How long a movement may wait on its rail before `manage.py wallet_expire` gives
+# up on it, in hours. Zero -- the default -- means never, because the right
+# window depends on the slowest rail a deployment runs: a card authorisation is
+# stale in a day, a bank transfer is not late until the third. Requests waiting
+# on an operator are never expired by the job; that wait is a person's.
+WALLET_EXPIRE_AFTER_HOURS = int(os.getenv("DJANGO_WALLET_EXPIRE_AFTER_HOURS", "0"))
 # How far below zero a wallet may go. Zero -- the default -- means never, which
 # is the only safe default: anything else is credit being extended, and this app
 # does not collect it.
@@ -651,6 +657,14 @@ WALLET_MIN_WITHDRAWAL = Decimal(os.getenv("DJANGO_WALLET_MIN_WITHDRAWAL", "0"))
 WALLET_MAX_WITHDRAWAL = Decimal(os.getenv("DJANGO_WALLET_MAX_WITHDRAWAL", "0"))
 WALLET_PAGE_SIZE = int(os.getenv("DJANGO_WALLET_PAGE_SIZE", "50"))
 WALLET_MAX_PAGE_SIZE = int(os.getenv("DJANGO_WALLET_MAX_PAGE_SIZE", "200"))
+
+# How much client-supplied `metadata` one movement may carry, in bytes. This is a
+# field the caller fills in, on every deposit, withdrawal and transfer, and it is
+# returned on every read of that entry -- so uncapped it is a way for an
+# authenticated account to make the ledger expensive for everybody, a movement at
+# a time. Generous for what the field is for: an order id, a note, a few tags.
+# Zero means no cap, for a deployment that has its own limit in front.
+WALLET_MAX_METADATA_BYTES = int(os.getenv("DJANGO_WALLET_MAX_METADATA_BYTES", "4096"))
 
 # The support app. Optional the same way the CMS, the notifications and the shop
 # are: naming it installs its tables, its routes, its admin and its socket, and

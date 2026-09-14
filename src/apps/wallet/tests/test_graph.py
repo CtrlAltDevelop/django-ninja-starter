@@ -171,3 +171,42 @@ def test_one_account_cannot_read_another_entry(alice: Any, bob: Any, cash: Payme
 def test_signing_in_is_required(db: None) -> None:
     body = graphql(WALLET)
     assert refusal(body)["status"] == 401
+
+
+DEPOSIT_WITH_METADATA = """
+mutation($method: String!, $amount: Decimal!, $reference: String!, $metadata: JSON) {
+  walletDeposit(method: $method, amount: $amount, reference: $reference, metadata: $metadata) {
+    id
+    metadata
+  }
+}
+"""
+
+
+def test_a_deposit_keeps_the_integration_s_metadata(alice: Any, cash: PaymentMethod) -> None:
+    """The same field the HTTP door takes, so an integration is not tied to one transport."""
+    body = graphql(
+        DEPOSIT_WITH_METADATA,
+        alice,
+        method="cash",
+        amount="10",
+        reference="with-metadata",
+        metadata={"order": "A-17"},
+    )
+
+    assert body["data"]["walletDeposit"]["metadata"] == {"order": "A-17"}
+
+
+def test_metadata_that_is_not_an_object_is_refused(alice: Any, cash: PaymentMethod) -> None:
+    """The JSON scalar takes any shape; the column only holds an object."""
+    body = graphql(
+        DEPOSIT_WITH_METADATA,
+        alice,
+        method="cash",
+        amount="10",
+        reference="bad-metadata",
+        metadata=["not", "an", "object"],
+    )
+
+    assert refusal(body)["status"] == 400
+    assert wallet_service.count(alice) == 0

@@ -253,6 +253,7 @@ class DepositRequest(_message.Message):
     NETWORK_FIELD_NUMBER: _builtins.int
     EXTERNAL_REFERENCE_FIELD_NUMBER: _builtins.int
     DESCRIPTION_FIELD_NUMBER: _builtins.int
+    METADATA_FIELD_NUMBER: _builtins.int
     amount: _builtins.str
     method: _builtins.str
     reference: _builtins.str
@@ -260,6 +261,7 @@ class DepositRequest(_message.Message):
     network: _builtins.str
     external_reference: _builtins.str
     description: _builtins.str
+    metadata: _builtins.str
     def __init__(
         self,
         *,
@@ -270,10 +272,11 @@ class DepositRequest(_message.Message):
         network: _builtins.str = ...,
         external_reference: _builtins.str = ...,
         description: _builtins.str = ...,
+        metadata: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["amount", b"amount", "currency", b"currency", "description", b"description", "external_reference", b"external_reference", "method", b"method", "network", b"network", "reference", b"reference"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["amount", b"amount", "currency", b"currency", "description", b"description", "external_reference", b"external_reference", "metadata", b"metadata", "method", b"method", "network", b"network", "reference", b"reference"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -1001,10 +1004,12 @@ class TransferRequest(_message.Message):
     AMOUNT_FIELD_NUMBER: _builtins.int
     REFERENCE_FIELD_NUMBER: _builtins.int
     DESCRIPTION_FIELD_NUMBER: _builtins.int
+    METADATA_FIELD_NUMBER: _builtins.int
     to_user_id: _builtins.str
     amount: _builtins.str
     reference: _builtins.str
     description: _builtins.str
+    metadata: _builtins.str
     def __init__(
         self,
         *,
@@ -1012,10 +1017,11 @@ class TransferRequest(_message.Message):
         amount: _builtins.str = ...,
         reference: _builtins.str = ...,
         description: _builtins.str = ...,
+        metadata: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["amount", b"amount", "description", b"description", "reference", b"reference", "to_user_id", b"to_user_id"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["amount", b"amount", "description", b"description", "metadata", b"metadata", "reference", b"reference", "to_user_id", b"to_user_id"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -1105,6 +1111,7 @@ class WithdrawRequest(_message.Message):
     DESTINATION_FIELD_NUMBER: _builtins.int
     EXTERNAL_REFERENCE_FIELD_NUMBER: _builtins.int
     DESCRIPTION_FIELD_NUMBER: _builtins.int
+    METADATA_FIELD_NUMBER: _builtins.int
     amount: _builtins.str
     method: _builtins.str
     reference: _builtins.str
@@ -1113,6 +1120,7 @@ class WithdrawRequest(_message.Message):
     destination: _builtins.str
     external_reference: _builtins.str
     description: _builtins.str
+    metadata: _builtins.str
     def __init__(
         self,
         *,
@@ -1124,10 +1132,11 @@ class WithdrawRequest(_message.Message):
         destination: _builtins.str = ...,
         external_reference: _builtins.str = ...,
         description: _builtins.str = ...,
+        metadata: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["amount", b"amount", "currency", b"currency", "description", b"description", "destination", b"destination", "external_reference", b"external_reference", "method", b"method", "network", b"network", "reference", b"reference"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["amount", b"amount", "currency", b"currency", "description", b"description", "destination", b"destination", "external_reference", b"external_reference", "metadata", b"metadata", "method", b"method", "network", b"network", "reference", b"reference"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

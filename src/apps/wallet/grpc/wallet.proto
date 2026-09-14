@@ -82,6 +82,7 @@ message DepositRequest {
     string network = 5;
     string external_reference = 6;
     string description = 7;
+    string metadata = 8;
 }
 
 message DepositResult {
@@ -276,6 +277,7 @@ message TransferRequest {
     string amount = 2;
     string reference = 3;
     string description = 4;
+    string metadata = 5;
 }
 
 message TransferResult {
@@ -303,6 +305,7 @@ message WithdrawRequest {
     string destination = 6;
     string external_reference = 7;
     string description = 8;
+    string metadata = 9;
 }
 
 message WithdrawResult {

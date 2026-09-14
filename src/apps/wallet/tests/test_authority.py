@@ -316,17 +316,55 @@ def test_a_rail_repeating_itself_is_not_an_error(
     assert WalletEntry.objects.filter(status=str(EntryStatus.DONE)).count() == 1
 
 
-def test_a_rail_may_only_report_the_two_things_it_knows(
+def test_a_rail_may_only_report_the_three_things_it_knows(
     mallory: Any, rail: PaymentMethod, signed: None
 ) -> None:
-    """`reversed` is a decision, not an observation, and is refused here."""
+    """`approved` is a person's decision, not an observation, and is refused here."""
     entry = wallet_service.deposit(
         mallory, amount=Decimal("500"), method="card", reference="real-one"
     )
 
-    response = _signed(entry["id"], "reversed")
+    response = _signed(entry["id"], "approved")
 
     assert response.status_code == 400
+
+
+def test_a_card_rail_reports_a_chargeback(mallory: Any, rail: PaymentMethod, signed: None) -> None:
+    """A dispute lost at the processor takes the money back, as a second entry."""
+    entry = wallet_service.deposit(
+        mallory, amount=Decimal("500"), method="card", reference="disputed"
+    )
+    _signed(entry["id"], "done")
+
+    first = _signed(entry["id"], "reversed", external_reference="dp_1", reason="fraudulent")
+    again = _signed(entry["id"], "reversed", external_reference="dp_1")
+
+    assert first.status_code == 200, first.content
+    correction = first.json()["data"]
+    assert correction["kind"] == "chargeback"
+    assert correction["external_reference"] == "dp_1"
+    assert again.json()["data"]["id"] == correction["id"]
+    assert wallet_service.balance(mallory)["settled"] == Decimal("0.0000")
+    assert wallet_service.entry(mallory, entry["id"])["status"] == "reversed"
+
+
+def test_a_final_rail_cannot_report_a_reversal(mallory: Any, settings: Any) -> None:
+    """A bank transfer is final; a processor claiming otherwise takes nothing back."""
+    _method("bank", "bank_transfer", approval=False)
+    settings.WALLET_WEBHOOK_SECRETS = {"bank": SECRET}
+    entry = wallet_service.deposit(mallory, amount=Decimal("500"), method="bank", reference="final")
+    wallet_service.settle(mallory, entry["id"])
+    body = json.dumps({"entry_id": str(entry["id"]), "event": "reversed"}).encode()
+
+    response = _client().post(
+        "/api/v1/wallet/hooks/bank",
+        body,
+        content_type="application/json",
+        headers=hooks.headers_for(SECRET, body),
+    )
+
+    assert response.status_code == 400
+    assert wallet_service.balance(mallory)["settled"] == Decimal("500.0000")
 
 
 def test_the_hook_is_not_reachable_as_a_logged_in_account(

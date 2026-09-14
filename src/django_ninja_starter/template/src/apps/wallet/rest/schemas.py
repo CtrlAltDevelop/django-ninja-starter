@@ -393,16 +393,19 @@ class ReverseIn(Schema):
 class RailEventIn(Schema):
     """What a payment rail says happened, in the one shape this app accepts.
 
-    Deliberately small. A rail knows two things about a movement -- the money
-    arrived, or it did not -- and a webhook that accepted anything richer would
-    be letting a processor drive a state machine it cannot see.
+    Deliberately small. A rail knows three things about a movement -- the money
+    arrived, it did not, or it arrived and was taken back -- and a webhook that
+    accepted anything richer would be letting a processor drive a state machine
+    it cannot see.
     """
 
     entry_id: UUID
     """The movement this is about: the id this app gave the rail when it started."""
 
     event: str
-    """`done` or `failed`. Nothing else is a thing a rail knows."""
+    """`done`, `failed`, or `reversed` -- the last only from a rail whose payments
+    can be taken back, such as a card's chargeback. Nothing else is a thing a rail
+    knows."""
 
     external_reference: str = ""
     """What the rail calls it, kept on the entry so the two can be reconciled."""

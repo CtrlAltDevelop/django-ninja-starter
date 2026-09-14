@@ -124,3 +124,37 @@ def test_one_account_cannot_read_another_entry(
         )
     # Not found rather than forbidden: saying "forbidden" would confirm it exists.
     assert refusal.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_a_deposit_keeps_the_integration_s_metadata(
+    paying: Any, grpc_call: Callable[..., Any]
+) -> None:
+    """Sent as a JSON object in a string, and read back the same way."""
+    import json
+
+    reply = grpc_call(
+        Stub,
+        "Deposit",
+        wallet_pb2.DepositRequest(
+            method="card", amount="100", reference="m", metadata='{"order": "A-17"}'
+        ),
+        token=access_token(paying),
+    )
+
+    assert json.loads(reply.entry.metadata) == {"order": "A-17"}
+
+
+def test_metadata_that_is_not_a_json_object_is_refused(
+    paying: Any, grpc_call: Callable[..., Any]
+) -> None:
+    with pytest.raises(grpc.RpcError) as refusal:
+        grpc_call(
+            Stub,
+            "Deposit",
+            wallet_pb2.DepositRequest(
+                method="card", amount="100", reference="m", metadata="[1, 2]"
+            ),
+            token=access_token(paying),
+        )
+
+    assert refusal.value.code() == grpc.StatusCode.INVALID_ARGUMENT

@@ -37,9 +37,12 @@ The theme is whatever :mod:`apps.wallet.theme` resolves: Unfold where the projec
 installs it, Django's own admin where it does not.
 """
 
+import uuid
 from typing import Any
 
+from django import forms
 from django.contrib import admin, messages
+from django.core.exceptions import ValidationError
 from django.db.models import Count, Q, QuerySet
 from django.http import HttpRequest
 from django.utils.html import format_html
@@ -54,14 +57,17 @@ from apps.wallet.catalog import (
 from apps.wallet.errors import WalletError
 from apps.wallet.models import (
     Approval,
+    BalanceAdjustment,
+    EntryKind,
     EntryStatus,
     Wallet,
     WalletCharge,
     WalletCheckpoint,
     WalletEntry,
+    WalletStatus,
 )
-from apps.wallet.money import written
-from apps.wallet.services import wallet_service
+from apps.wallet.money import MONEY, written
+from apps.wallet.services import BACK_OFFICE_KINDS, wallet_service
 from apps.wallet.theme import (
     BooleanRadioFilter,
     ChoicesDropdownFilter,
@@ -477,9 +483,55 @@ class WalletAdmin(ModelAdmin):
     inlines = [WalletEntryInline]
     fields = ("user", "currency", "status", "balance_display", "id", "created_at", "updated_at")
     autocomplete_fields = ("user",)
+    actions = ["freeze_wallets", "unfreeze_wallets", "close_wallets"]
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
         return super().get_queryset(request).select_related("user")
+
+    def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> Any:
+        """Once a wallet exists, who owns it, what it holds and its status are not fields.
+
+        Changing the currency would redenominate every amount already in it;
+        changing the owner would hand one account's money to another; changing
+        the status by typing would skip the checks closing a wallet needs. The
+        last is an action, the first two are not something this screen does.
+        """
+        if obj is None:
+            return self.readonly_fields
+        return (*self.readonly_fields, "user", "currency", "status")
+
+    def _set_status(self, request: HttpRequest, queryset: QuerySet, status: str) -> int:
+        return sum(
+            1
+            for wallet in queryset
+            if _run(
+                request,
+                wallet_service.set_wallet_status,
+                wallet.pk,
+                status,
+                by=request.user,
+                reason="Changed in the admin.",
+            )
+        )
+
+    @admin.action(description="Freeze the selected wallets")
+    def freeze_wallets(self, request: HttpRequest, queryset: QuerySet) -> None:
+        """A compliance hold: payouts are refused, and money already on its way still lands."""
+        changed = self._set_status(request, queryset, str(WalletStatus.FROZEN))
+        messages.success(request, f"Froze {changed}.")
+
+    @admin.action(description="Unfreeze the selected wallets")
+    def unfreeze_wallets(self, request: HttpRequest, queryset: QuerySet) -> None:
+        changed = self._set_status(
+            request, queryset.filter(status=str(WalletStatus.FROZEN)), str(WalletStatus.ACTIVE)
+        )
+        messages.success(request, f"Unfroze {changed}.")
+
+    @admin.action(description="Close the selected wallets")
+    def close_wallets(self, request: HttpRequest, queryset: QuerySet) -> None:
+        """Refused for a wallet that still holds money or has anything pending."""
+        changed = self._set_status(request, queryset, str(WalletStatus.CLOSED))
+        messages.success(request, f"Closed {changed}.")
 
     def _balance(self, instance: Wallet) -> Any:
         from apps.wallet.balances import balance_of
@@ -552,7 +604,14 @@ class WalletEntryAdmin(ModelAdmin):
     )
     date_hierarchy = "created_at"
     inlines = [WalletChargeInline]
-    actions = ["approve_entries", "reject_entries", "settle_entries", "fail_entries"]
+    actions = [
+        "approve_entries",
+        "reject_entries",
+        "settle_entries",
+        "fail_entries",
+        "expire_entries",
+        "reverse_entries",
+    ]
     readonly_fields = (
         "id",
         "wallet",
@@ -670,6 +729,7 @@ class WalletEntryAdmin(ModelAdmin):
                 wallet_service.settle,
                 entry.wallet.user,
                 entry.pk,
+                by=request.user,
             )
         )
         messages.success(request, f"Settled {settled}.")
@@ -685,9 +745,169 @@ class WalletEntryAdmin(ModelAdmin):
                 entry.wallet.user,
                 entry.pk,
                 reason="Marked failed in the admin.",
+                by=request.user,
             )
         )
         messages.success(request, f"Failed {failed}.")
+
+    @admin.action(description="Expire the selected pending movements")
+    def expire_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
+        """Give up on movements nothing is going to confirm, releasing what they held.
+
+        The by-hand version of ``manage.py wallet_expire``, and unlike the job it
+        will expire a request still awaiting approval: choosing to is exactly the
+        decision an operator is there to make.
+        """
+        expired = sum(
+            1
+            for entry in queryset.filter(status=str(EntryStatus.PENDING))
+            if _run(
+                request,
+                wallet_service.expire_entry,
+                entry.pk,
+                reason="Expired in the admin.",
+                by=request.user,
+            )
+        )
+        messages.success(request, f"Expired {expired}.")
+
+    @admin.action(description="Reverse the selected settled movements")
+    def reverse_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
+        """Undo settled movements: a returned bank transfer, a dispute that was lost.
+
+        Each writes an opposing entry and marks the original ``reversed`` -- the
+        original is never edited, so the ledger still agrees with the rail that
+        remembers it happening. The same service call a rail's signed
+        ``reversed`` event makes, so a transfer between two wallets here is
+        refused rather than half undone, and a double-click writes one
+        correction, not two.
+        """
+        undone = sum(
+            1
+            for entry in queryset.filter(status=str(EntryStatus.DONE))
+            if _run(
+                request,
+                wallet_service.reverse_entry,
+                entry.pk,
+                reason="Reversed in the admin.",
+                by=request.user,
+            )
+        )
+        messages.success(request, f"Reversed {undone}.")
+
+
+class AdjustmentForm(forms.ModelForm):
+    """What an operator fills in to correct a balance, and nothing a ledger derives.
+
+    The movement is written by :meth:`WalletService.adjust` during validation,
+    inside the admin's own transaction, so a refusal -- not enough money, a
+    frozen wallet -- comes back as a form error an operator can read rather than
+    as a server error. ``idempotency_key`` is minted when the form is drawn, so
+    submitting it twice writes one adjustment.
+    """
+
+    kind = forms.ChoiceField(
+        choices=[(kind, EntryKind(kind).label) for kind in sorted(BACK_OFFICE_KINDS)]
+    )
+    amount = forms.DecimalField(
+        max_digits=MONEY["max_digits"], decimal_places=MONEY["decimal_places"], min_value=0.0001
+    )
+    description = forms.CharField(
+        label="Reason",
+        max_length=255,
+        help_text="Required. The only record of why this balance changed.",
+    )
+    idempotency_key = forms.CharField(widget=forms.HiddenInput, initial=lambda: str(uuid.uuid4()))
+
+    operator: Any = None
+    recorded: dict[str, Any] | None = None
+
+    class Meta:
+        model = BalanceAdjustment
+        fields = ("wallet", "kind", "amount", "description")
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        if self.errors:
+            return cleaned
+        wallet = cleaned["wallet"]
+        try:
+            self.recorded = wallet_service.adjust(
+                wallet.user,
+                kind=cleaned["kind"],
+                amount=cleaned["amount"],
+                reference=f"adjustment:{cleaned['idempotency_key']}",
+                reason=cleaned["description"],
+                by=self.operator,
+            )
+        except WalletError as refusal:
+            raise ValidationError(str(refusal)) from None
+        return cleaned
+
+
+@admin.register(BalanceAdjustment)
+class BalanceAdjustmentAdmin(ModelAdmin):
+    """The one screen where a movement may be added by hand, and only through the service.
+
+    Every other entry screen refuses to add: a row typed into a form is a
+    balance change with no lock taken and no funds checked. This one takes the
+    four things an operator actually decides and hands them to
+    :meth:`WalletService.adjust`, which takes the lock, checks the funds and
+    writes the row. What it wrote is read-only afterwards, like every record here.
+    """
+
+    form = AdjustmentForm
+    list_display = ("created_at", "wallet", "kind", "amount_display", "description")
+    list_filter = (dropdown_filter("kind", ChoicesDropdownFilter),)
+    search_fields = ("description", "reference", "wallet__user__username", "wallet__user__email")
+    date_hierarchy = "created_at"
+    autocomplete_fields = ("wallet",)
+    view_fields = (
+        "wallet",
+        "kind",
+        "amount",
+        "description",
+        "reference",
+        "metadata",
+        "created_at",
+    )
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet:
+        return (
+            super()
+            .get_queryset(request)
+            .filter(kind__in=BACK_OFFICE_KINDS)
+            .select_related("wallet", "wallet__user")
+        )
+
+    def get_form(self, request: HttpRequest, obj: Any = None, **kwargs: Any) -> Any:
+        form = super().get_form(request, obj, **kwargs)
+        return type(form.__name__, (form,), {"operator": request.user})
+
+    def get_fields(self, request: HttpRequest, obj: Any = None) -> Any:
+        if obj is None:
+            return ("wallet", "kind", "amount", "description", "idempotency_key")
+        return self.view_fields
+
+    def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> Any:
+        return () if obj is None else self.view_fields
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        """No. What an adjustment moved is history; a mistake is corrected by another one."""
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def save_model(self, request: HttpRequest, obj: Any, form: Any, change: bool) -> None:
+        """The service already wrote it during validation; point the admin at that row."""
+        obj.pk = form.recorded["id"]
+        obj.refresh_from_db()
+
+    @display(description="Amount")
+    def amount_display(self, instance: WalletEntry) -> str:
+        sign = "+" if instance.direction == "credit" else "−"
+        return f"{sign}{written(instance.amount, instance.wallet.currency)}"
 
 
 @admin.register(WalletCheckpoint)

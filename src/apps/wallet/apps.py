@@ -127,6 +127,22 @@ class WalletConfig(AppConfig):
                 ),
             ),
             Requirement(
+                "WALLET_EXPIRE_AFTER_HOURS",
+                env="DJANGO_WALLET_EXPIRE_AFTER_HOURS",
+                purpose=(
+                    "how long a movement may wait on its rail before `manage.py "
+                    "wallet_expire` gives up on it, or zero for never"
+                ),
+                minimum=0,
+                maximum=8760,
+                hint=(
+                    "Without a window, a deposit whose webhook never arrived stays "
+                    "pending for ever, and a pending payout holds its money out of "
+                    "`available` for ever with it. Pick one longer than your slowest "
+                    "rail takes to confirm -- a bank transfer can take three days."
+                ),
+            ),
+            Requirement(
                 "WALLET_OVERDRAFT_LIMIT",
                 env="DJANGO_WALLET_OVERDRAFT_LIMIT",
                 purpose=(
@@ -181,6 +197,18 @@ class WalletConfig(AppConfig):
                 purpose="the ceiling on `limit`, so one request cannot ask for a whole history",
                 minimum=1,
                 maximum=1_000,
+            ),
+            Requirement(
+                "WALLET_MAX_METADATA_BYTES",
+                env="DJANGO_WALLET_MAX_METADATA_BYTES",
+                purpose=("how much client-supplied `metadata` one movement may carry, in bytes"),
+                minimum=0,
+                maximum=1_048_576,
+                hint=(
+                    "Zero means no cap. The field is filled in by the caller and returned "
+                    "on every read of that entry, so an uncapped one is a way to make the "
+                    "ledger expensive a movement at a time."
+                ),
             ),
         ),
         rules=(

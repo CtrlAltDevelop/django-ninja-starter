@@ -699,6 +699,20 @@ class WalletEntry(models.Model):
             raise ValidationError({"amount": "An amount is positive; the kind says which way."})
 
 
+class BalanceAdjustment(WalletEntry):
+    """An operator's correction to a balance: a bonus, a fee, a goodwill credit.
+
+    A proxy, not a table. The row is an ordinary :class:`WalletEntry` written by
+    :meth:`apps.wallet.services.WalletService.adjust`, under the wallet's lock
+    and with the funds checked -- this exists only so the admin has one screen
+    where adding a movement by hand is allowed, and it is allowed nowhere else.
+    """
+
+    class Meta:
+        proxy = True
+        verbose_name = "balance adjustment"
+
+
 class WalletCharge(models.Model):
     """One fee, as it was charged, kept beside the movement it came off.
 

@@ -36,13 +36,17 @@ router = Router(auth=None)
     auth=None,
 )
 def rail_event(request: HttpRequest, method_code: str, payload: RailEventIn) -> dict[str, Any]:
-    """Settle or fail one movement, on the word of the rail that carried it.
+    """Settle, fail or reverse one movement, on the word of the rail that carried it.
 
     Send `X-Wallet-Timestamp` and `X-Wallet-Signature`, where the signature is
     the hex HMAC-SHA256 of `"{timestamp}.{raw body}"` under the secret configured
     for this method in `DJANGO_WALLET_WEBHOOK_SECRETS`. Anything that cannot be
     verified -- unsigned, wrongly signed, stale, or a method with no secret --
     gets one `401` with one sentence.
+
+    `reversed` is a chargeback: it writes the opposing entry and answers with
+    it, and is refused for a rail whose payments are final -- a bank transfer, a
+    chain confirmation.
 
     Idempotent: a rail that delivers the same confirmation twice gets the same
     entry back, because rails do exactly that.
