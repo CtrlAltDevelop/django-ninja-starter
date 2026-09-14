@@ -56,7 +56,7 @@ tour runs them:
 | 8 | Notifications | `apps.notifications` | The stored history over HTTP, then three live sockets |
 | 9 | A shop | `apps.shop` | A public catalogue, then a basket, an order and a settled invoice that are nobody's but the caller's |
 | 10 | A support desk | `apps.support` | One conversation from both sides: a ticket, a queue, a staff-only note, and then the same thing live over a socket |
-| 11 | A wallet | `apps.wallet` | Payment methods an administrator configured, a priced deposit, a request applied by the back office, a crypto payout to the right chain, and a balance that survives being archived |
+| 11 | A wallet | `apps.wallet` | Every wallet route: configured payment methods, a priced deposit a signed webhook settles or fails, requests applied and refused, a payout cancelled, a free transfer, a chargeback, and a balance that survives being archived |
 | 12 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
 | 13 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
 | 14 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
@@ -318,6 +318,35 @@ application directly, no server and no port — with two connections open at onc
 | `{"command": "note"}` from the desk | Published to the same channel and dropped on the way out for a connection that may not read it. The next frame the client is sent is the public message after it |
 | `{"command": "ticket", "ticket": "not-a-uuid"}` | An `error` **frame**, not a close — and the `ping` after it proves the connection is still there |
 
+### A wallet — `apps.wallet`
+
+Enabled by `DJANGO_WALLET_ENABLED=true` alone. There is no balance column: the
+balance is the last checkpoint plus the movements written since it. The tour
+configures three payment methods the way an administrator would — a branch
+counter that needs approval, a card with a commission and VAT on it, and USDT on
+two chains — and then moves money through every door the app has. The section
+ends by checking itself against the app's routers, as the support one does, and
+fails if a route was left out.
+
+| Call | What to notice |
+| --- | --- |
+| `manage.py wallet_methods` | One method per rail, switched off and charging nothing. Methods already configured are left alone |
+| `GET /api/v1/wallet/methods`, `GET …/methods/usdt` | Only enabled methods are published, so the ones the command just wrote are absent. One method in full carries its chains |
+| `GET /api/v1/wallet` | Opened by the first request that needed it |
+| `POST /api/v1/wallet/quotes` | The same function prices the deposit, so the quote is the charge |
+| `POST /api/v1/wallet/deposits` | 100 in, 96.16 lands, and the charges are their own lines. Pending, so `settled` is zero and `projected` is not |
+| `POST …/entries/{id}/settle` | A **404**. No endpoint lets the account confirm its own deposit |
+| `POST /api/v1/wallet/hooks/card` | Signed by the rail: `done` settles, `failed` ends a declined deposit. Unsigned is a **401** |
+| `POST …/deposits` (same `reference`) | One deposit. The reference is the idempotency key |
+| `POST …/deposits` (`counter`) | A request. The rail cannot settle it (**409**) until the back office applies it, and refusing one cancels it too. A third request is left waiting for the admin section |
+| `POST /api/v1/wallet/withdrawals` | The wrong chain for the address is a **400**. The right one holds its money out of `available` |
+| `GET …/entries/{id}`, `POST …/entries/{id}/cancel` | Cancelling is the account's one lifecycle verb, and it releases the hold. A settled entry is a **409** |
+| `POST /api/v1/wallet/transfers` | Both sides at once and free. The recipient's balance is read with their own token. A transfer to yourself is a **400** |
+| _(no endpoint)_ `wallet_service.reverse` | A chargeback is a second entry. The original is marked `reversed`, never edited |
+| `GET …/rates`, `GET …/exchange` | The spread is published beside the rate |
+| `GET …/entries` | Failed, cancelled and reversed rows are listed with the rest |
+| `manage.py wallet_archive --force`, `GET …/checkpoints` | The balance does not move. A pending entry is never folded |
+
 ### A feature app of your own — `apps.notes`
 
 The app `build.py` adds, and the only one here that the starter does not ship.
@@ -361,7 +390,7 @@ tour, so an app added tomorrow is covered without editing the file, and one that
 ships a broken changelist fails the run.
 
 With the `.env` above that is **56 models across 16 app labels, 61 pages**, all
-of them rendering. Three are worth opening on their own, because none is an
+of them rendering. Four are worth opening on their own, because none is an
 ordinary Django change form:
 
 | Screen | What to notice |
@@ -369,6 +398,7 @@ ordinary Django change form:
 | `admin/cms/page/{id}/content/` | The CMS content screen: sections in reader order, one language at a time, and the input each field type deserves. The tour asserts the page really contains an upload button, a URL box, a text area, a colour picker, a dropdown and a multi-file input — the six the hero's field types should have produced |
 | `admin/notifications/notification/add/` | Writing to everybody is a form, not a shell session |
 | `admin/shop/order/{id}/change/` | The order placed in section 9, as whoever packs it sees it |
+| `admin/wallet/walletentry/` | The approval queue. The tour refuses the request section 11 left waiting with the changelist's own action, which calls the same service the API does. Also opened: that movement, zoe's wallet with its balance, and the card method with its fees |
 
 ## How the tour runs
 

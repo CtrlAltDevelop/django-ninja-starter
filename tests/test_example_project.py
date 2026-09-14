@@ -174,6 +174,8 @@ def test_the_support_app_ships_with_the_generated_project(example_project: Path)
 
 def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     """The tour asserts its own status codes, so a zero exit is the assertion."""
+    import re
+
     result = subprocess.run(
         [sys.executable, str(build.EXAMPLES / "walkthrough.py"), "--project", str(example_project)],
         check=False,
@@ -192,6 +194,12 @@ def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     assert "/api/v1/support" in result.stdout, "the support desk was not toured"
     assert "/ws/support" in result.stdout, "the support socket was not toured"
     assert "/api/v1/wallet/deposits" in result.stdout, "the wallet was not toured"
+    # The wallet section compares itself against the app's routers, as the
+    # support one does, and prints the totals it found.
+    wallet = re.search(r"toured (\d+) of (\d+) wallet endpoints", result.stdout)
+    assert wallet is not None, "the wallet section printed no coverage line"
+    assert wallet.group(1) == wallet.group(2), result.stdout
+    assert "manage.py wallet_archive" in result.stdout, "the archive job was not run"
     assert "admin pages opened" in result.stdout, "the admin was not toured"
 
 

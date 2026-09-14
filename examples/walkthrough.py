@@ -2105,30 +2105,36 @@ def _confirm_as_the_rail(
     entry_id: str,
     *,
     method: str = "card",
+    event: str = "done",
     external_reference: str = "",
+    reason: str = "",
     expect: int = 200,
+    show: bool = True,
 ) -> Any:
     """Post a signed confirmation to the wallet's webhook, as the processor would.
 
     The signature is the hex HMAC-SHA256 of ``"{timestamp}.{body}"`` under the
     secret this deployment shares with that one rail. It is the only way a
-    movement can settle: the verb is not published to the account at all, since
-    a customer able to confirm their own deposit is a customer able to print
-    money.
+    movement can settle or fail: neither verb is published to the account at
+    all, since a customer able to confirm their own deposit is a customer able
+    to print money.
     """
     from django.conf import settings
 
     from apps.wallet import hooks
 
-    payload: dict[str, Any] = {"entry_id": str(entry_id), "event": "done"}
+    payload: dict[str, Any] = {"entry_id": str(entry_id), "event": event}
     if external_reference:
         payload["external_reference"] = external_reference
+    if reason:
+        payload["reason"] = reason
     secret = settings.WALLET_WEBHOOK_SECRETS[method]
     return api.post_raw(
         f"/api/v1/wallet/hooks/{method}",
         payload,
         headers=hooks.headers_for(secret, json.dumps(payload).encode()),
         expect=expect,
+        show=show,
     )
 
 
@@ -2257,10 +2263,21 @@ def section_wallet(api: Api) -> None:
     )
 
     note(
-        "A client reads the methods rather than hard-coding them, because turning "
-        "one on is an afternoon in the admin rather than a release."
+        "A fresh deployment has no way to pay at all, so `wallet_methods` writes "
+        "one method per rail -- switched off and charging nothing, because a fee "
+        "invented by a command is a fee nobody decided on. The three configured "
+        "above are left exactly as they are."
     )
-    api.get("/api/v1/wallet/methods")
+    _run_wallet_command("wallet_methods")
+
+    note(
+        "A client reads the methods rather than hard-coding them, because turning "
+        "one on is an afternoon in the admin rather than a release. The ones the "
+        "command just wrote are not here: switched off is unpublished."
+    )
+    methods = api.get("/api/v1/wallet/methods", show=False)
+    print(f"  {DIM}│ published: {', '.join(row['code'] for row in methods)}{OFF}")
+    api.get("/api/v1/wallet/methods/usdt")
 
     note("An empty wallet, opened by the first request that needed one.")
     api.get("/api/v1/wallet")
@@ -2326,6 +2343,21 @@ def section_wallet(api: Api) -> None:
     print(f"  {DIM}│ same entry returned: {again['id']}{OFF}")
 
     note(
+        "A rail knows one other thing: the money did not move. A declined card is "
+        "reported through the same signed door, and the movement ends `failed` -- "
+        "kept in the history, never part of any balance."
+    )
+    declined = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "25.00", "reference": "tour-card-declined"},
+        show=False,
+    )
+    failed = _confirm_as_the_rail(
+        api, declined["id"], event="failed", reason="Declined by the issuer.", show=False
+    )
+    print(f"  {DIM}│ {failed['status']}: {failed['metadata'].get('reason', '')}{OFF}")
+
+    note(
         "A deposit through a method that requires approval is a *request*: it is "
         "written down, it is visible, and it cannot settle until a person applies it."
     )
@@ -2345,6 +2377,30 @@ def section_wallet(api: Api) -> None:
     api.get("/api/v1/wallet/balance")
 
     note(
+        "Refusing one is the same stroke in the other direction, and it cancels "
+        "the movement with it: a refused request left pending would go on holding "
+        "money out of `available`, which is what refusing it was meant to release."
+    )
+    refused = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "counter", "amount": "900.00", "reference": "tour-counter-refused"},
+        show=False,
+    )
+    refused = wallet_service.reject(refused["id"], note="No cash was handed over.")
+    print(f"  {DIM}│ {refused['status']} / {refused['approval']}{OFF}")
+
+    note(
+        "One more request, left waiting. The admin section at the end of the tour "
+        "is where it gets decided, from the queue an operator actually works."
+    )
+    waiting = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "counter", "amount": "15.00", "reference": "tour-counter-2"},
+        show=False,
+    )
+    print(f"  {DIM}│ {waiting['status']}, awaiting approval: {waiting['awaiting_approval']}{OFF}")
+
+    note(
         "A payout in another currency, on a chain that has to be named. The same "
         "asset on the wrong chain is not a failed payment -- it is money gone to "
         "an address nobody holds a key for, so the address is checked first."
@@ -2361,7 +2417,7 @@ def section_wallet(api: Api) -> None:
         },
         expect=400,
     )
-    api.post(
+    payout = api.post(
         "/api/v1/wallet/withdrawals",
         {
             "method": "usdt",
@@ -2379,33 +2435,86 @@ def section_wallet(api: Api) -> None:
     )
     api.get("/api/v1/wallet/balance")
 
+    note("One movement read back, which is what a receipt page opens with.")
+    api.get(f"/api/v1/wallet/entries/{payout['id']}", show=False)
+
+    note(
+        "The customer changes their mind before the chain has it. Cancelling is "
+        "the one lifecycle verb that is the account's, because it asserts nothing "
+        "about the outside world -- and the money it held comes back to `available`."
+    )
+    api.post(
+        f"/api/v1/wallet/entries/{payout['id']}/cancel",
+        {"reason": "Sent to the wrong exchange account."},
+        show=False,
+    )
+    api.get("/api/v1/wallet/balance")
+
+    note("A movement that has already landed is past calling off.")
+    api.post(f"/api/v1/wallet/entries/{deposit['id']}/cancel", {}, expect=409)
+
+    note(
+        "Money to another account in this app: both sides written in one "
+        "transaction and settled at once, and free by construction -- nothing "
+        "left the app, so there is nothing to pass on."
+    )
+    from django.contrib.auth import get_user_model
+
+    zoe = get_user_model().objects.get(username="zoe")
+    ines = get_user_model().objects.create_user(username="ines", email="ines@example.com")
+    api.post(
+        "/api/v1/wallet/transfers",
+        {
+            "to_user_id": str(ines.pk),
+            "amount": "15.00",
+            "reference": "tour-transfer-1",
+            "description": "Half of dinner.",
+        },
+    )
+    received = api.get("/api/v1/wallet/balance", token=desk_token(ines), show=False)
+    print(f"  {DIM}│ ines now holds {received['settled']} settled, 15.00 of it from zoe{OFF}")
+    api.post(
+        "/api/v1/wallet/transfers",
+        {"to_user_id": str(zoe.pk), "amount": "1.00", "reference": "tour-transfer-self"},
+        expect=400,
+    )
+
+    note(
+        "Months later the cardholder disputes the first deposit. A settled "
+        "movement is never edited: an operator reverses it, which writes a "
+        "chargeback beside it and marks the original `reversed` -- so the ledger "
+        "still agrees with the processor that remembers the payment happening."
+    )
+    chargeback = wallet_service.reverse(
+        zoe, deposit["id"], reference="tour-chargeback-1", reason="Disputed by the cardholder."
+    )
+    print(f"  {DIM}│ {chargeback['kind']} of {chargeback['amount']}, charges kept: 0{OFF}")
+    api.get("/api/v1/wallet/balance")
+
     note("What this deployment converts at, with the spread published beside the rate.")
     api.get("/api/v1/wallet/rates")
     api.get("/api/v1/wallet/exchange?amount=100&base=USDT&quote=USD")
 
     note(
-        "Every movement the wallet has had, including what failed -- a customer "
-        "asking why a deposit never arrived is asking about exactly those rows."
+        "Every movement the wallet has had, including what failed, was cancelled "
+        "or was reversed -- a customer asking why a deposit never arrived is "
+        "asking about exactly those rows."
     )
-    api.get("/api/v1/wallet/entries?limit=5")
+    history = api.get("/api/v1/wallet/entries?limit=20", show=False)
+    for row in history["entries"]:
+        print(
+            f"  {DIM}│ {row['kind']:<13} {row['status']:<10} "
+            f"{row['signed_amount']:>9} {row['reference']}{OFF}"
+        )
 
     note(
-        "Folding the history into a checkpoint. Reading a balance is one row plus "
-        "the movements since it, so this is what keeps a five-year-old wallet as "
-        "cheap to read as a new one -- and the number does not move."
+        "Folding the history into a checkpoint, the way the daily job does. "
+        "Reading a balance is one row plus the movements since it, so this is "
+        "what keeps a five-year-old wallet as cheap to read as a new one -- and "
+        "the number does not move."
     )
     before = api.get("/api/v1/wallet/balance", show=False)["settled"]
-    from django.contrib.auth import get_user_model
-
-    from apps.wallet.balances import archive_wallet
-
-    zoe = get_user_model().objects.get(username="zoe")
-    result = archive_wallet(wallet_service.wallet_for(zoe), force=True)
-    print(
-        f"  {DIM}│ folded {result.archived} entries into checkpoint "
-        f"#{result.checkpoint.sequence if result.checkpoint else '-'}, "
-        f"left {result.skipped_pending} pending{OFF}"
-    )
+    _run_wallet_command("wallet_archive", "--force")
     after = api.get("/api/v1/wallet/balance")["settled"]
     if Decimal(str(before)) != Decimal(str(after)):
         raise WalkthroughError(f"archiving changed the balance: {before} became {after}")
@@ -2419,6 +2528,49 @@ def section_wallet(api: Api) -> None:
     )
     still_open = WalletEntry.objects.filter(checkpoint__isnull=True, status="pending").count()
     print(f"  {DIM}│ {still_open} pending movement(s) left unarchived{OFF}")
+
+    _wallet_surface_covered(api)
+
+
+def _run_wallet_command(name: str, *arguments: str) -> None:
+    """Run one of the wallet's management commands and print what it said."""
+    from django.core.management import call_command
+
+    stream = io.StringIO()
+    call_command(name, *arguments, stdout=stream, stderr=stream)
+    print(f"  {CYAN}{'CMD':<6}{OFF} manage.py {' '.join((name, *arguments))}")
+    for line in stream.getvalue().splitlines():
+        print(f"  {DIM}│ {line}{OFF}")
+
+
+def _wallet_surface_covered(api: Api) -> None:
+    """Assert the section above called every route the wallet publishes.
+
+    The same check the support section makes of itself, and for the same
+    reason: asked of the routers rather than of a list kept here, so a route
+    added to the app without a step in this tour fails the tour.
+    """
+    from apps.wallet.rest import router
+    from apps.wallet.rest.hooks import router as hooks_router
+
+    missed: list[str] = []
+    total = 0
+    for prefix, source in (("/api/v1/wallet", router), ("/api/v1/wallet/hooks", hooks_router)):
+        for path, view in source.path_operations.items():
+            literals = re.split(r"\{[^}]+\}", f"{prefix}{path}")
+            pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+            for operation in view.operations:
+                for method in operation.methods:
+                    total += 1
+                    if not any(
+                        seen_method == method and pattern.match(seen_path)
+                        for seen_method, seen_path in api.visited
+                    ):
+                        missed.append(f"{method} {prefix}{path}")
+
+    if missed:
+        raise WalkthroughError("the wallet tour skipped " + ", ".join(sorted(missed)))
+    print(f"  {DIM}│ toured {total} of {total} wallet endpoints{OFF}")
 
 
 def section_email_code(api: Api) -> None:
@@ -2769,6 +2921,20 @@ class AdminTour:
         self.visited += 1
         return response
 
+    def act(self, changelist: str, action: str, *pks: Any, label: str = "") -> Any:
+        """Run an admin action on some rows, as the changelist's Go button does."""
+        response = self.client.post(
+            changelist,
+            {"action": action, "_selected_action": [str(pk) for pk in pks], "index": 0},
+        )
+        ok = response.status_code == 302
+        tint = GREEN if ok else RED
+        suffix = f"  {DIM}{label}{OFF}" if label else ""
+        print(f"  {CYAN}{'POST':<6}{OFF} {changelist} {tint}→ {response.status_code}{OFF}{suffix}")
+        if not ok:
+            raise WalkthroughError(f"admin action {action} returned {response.status_code}")
+        return response
+
 
 def section_admin(api: Api) -> None:
     """Every registered admin, opened. The half of this project nobody curls."""
@@ -2810,12 +2976,13 @@ def section_admin(api: Api) -> None:
             )
 
     note(
-        "The changelists are only the door. Two screens are worth opening on "
-        "their own, because neither is an ordinary Django change form."
+        "The changelists are only the door. A few screens are worth opening on "
+        "their own, because none is an ordinary Django change form."
     )
     _admin_content_screen(tour)
     _admin_notification_form(tour)
     _admin_shop_order(tour)
+    _admin_wallet_queue(tour)
 
     note(f"{tour.visited} admin pages opened, all of them rendering.")
 
@@ -2880,6 +3047,43 @@ def _admin_shop_order(tour: AdminTour) -> None:
     note("The order placed above, as whoever packs it sees it.")
     tour.visit(reverse("admin:shop_order_change", args=(order.pk,)), f"order {order.number}")
     tour.visit(reverse("admin:shop_product_add"), "add a product")
+
+
+def _admin_wallet_queue(tour: AdminTour) -> None:
+    """The queue of movements waiting on a person, worked the way an operator works it."""
+    from django.apps import apps as django_apps
+    from django.urls import reverse
+
+    if not django_apps.is_installed("apps.wallet"):
+        return
+
+    from apps.wallet.catalog import PaymentMethod
+    from apps.wallet.models import Wallet, WalletEntry
+
+    waiting = WalletEntry.objects.awaiting_approval().first()
+    if waiting is None:  # pragma: no cover - only if the wallet section did not run
+        return
+    note(
+        "The request the wallet section left waiting. Every field on a movement "
+        "is read-only, for a superuser too: what changes one is an action, and "
+        "the action calls the same service the API calls."
+    )
+    queue = reverse("admin:wallet_walletentry_changelist")
+    tour.visit(reverse("admin:wallet_walletentry_change", args=(waiting.pk,)), "the request")
+    tour.act(queue, "reject_entries", waiting.pk, label="Refuse the selected requests")
+    waiting.refresh_from_db()
+    if waiting.approval != "rejected" or waiting.status != "cancelled":
+        raise WalkthroughError(
+            f"refusing from the admin left the request {waiting.status} / {waiting.approval}"
+        )
+    print(f"  {DIM}│ {waiting.status} / {waiting.approval}{OFF}")
+
+    wallet = Wallet.objects.get(user__username="zoe")
+    tour.visit(reverse("admin:wallet_wallet_change", args=(wallet.pk,)), "zoe's wallet and balance")
+    card = PaymentMethod.objects.get(code="card")
+    tour.visit(
+        reverse("admin:wallet_paymentmethod_change", args=(card.pk,)), "the card and its fees"
+    )
 
 
 def tour() -> int:
