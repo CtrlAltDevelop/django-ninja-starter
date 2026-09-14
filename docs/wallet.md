@@ -281,6 +281,11 @@ money on. Run a wallet on PostgreSQL or MySQL. The tests say the same thing out
 loud: the racing test in `tests/test_concurrency.py` skips itself rather than
 passing on a backend where it proves nothing.
 
+A test that skips proves nothing either, so CI runs the wallet suite a second
+time against a real PostgreSQL — the `locks` job — and fails if those tests
+skipped there too. Without it the whole "no double withdrawal" claim rests on a
+file that never ran.
+
 **A retry is not a second movement.** Every write takes a `reference`, unique per
 wallet, and a call carrying one that already exists returns the entry that
 already exists. That is what makes a client safe to retry on a timeout, which is
@@ -373,7 +378,10 @@ and a body naming the movement and what happened:
 {"entry_id": "…", "event": "done", "external_reference": "ch_3Qx"}
 ```
 
-`done` or `failed` — the only two things a rail knows. The secret is per method,
+`done`, `failed` or `reversed` — the only three things a rail knows. `reversed`
+is a chargeback: the money settled and the rail has taken it back, so it writes
+the opposing entry rather than editing the original, exactly as an operator's
+reversal in the admin does. The secret is per method,
 from `DJANGO_WALLET_WEBHOOK_SECRETS=stripe-card:whsec_…,coinbase:…`: per method
 because the secrets belong to different companies and one that leaks should not
 confirm movements on another's rail, and from the environment because a secret in
@@ -394,6 +402,102 @@ counter, a bank transfer read off a statement — `Movements → Apply` and
 `Settle` do the same thing behind a person. A movement waiting on approval stays
 waiting however loudly its processor confirms it: the rail's confirmation and the
 operator's approval are separate facts, and the webhook can only supply the first.
+
+## Giving up on a movement nothing confirmed
+
+A rail that simply never answers leaves a pending movement forever, and a pending
+payout has already claimed its money out of `available` — so the account is short
+by an amount nothing will ever explain.
+
+`manage.py wallet_expire` is what ends that. Set
+`DJANGO_WALLET_EXPIRE_AFTER_HOURS` to how long a movement may wait on its rail,
+run the command hourly, and anything older is expired and its claim released.
+Left at `0`, nothing expires and the command does nothing.
+
+**A movement waiting on a *person* is never expired by the job.** Expiry reads
+the two state axes together: `pending` because the rail has not answered is the
+app's problem to time out, and `pending` because nobody has applied the request
+yet is a queue, and a queue that silently empties itself is worse than one that
+grows. The same verb is available per movement as an admin action, for the one an
+operator wants to close now.
+
+## Correcting a balance by hand
+
+A bonus, a fee, a goodwill credit, a write-off. No rail, no processor, nothing to
+wait for — an operator's decision, settled at once and priced at nothing.
+
+`WalletService.adjust` writes it, and **Adjustments** in the admin is the only add
+form in this app, because a movement typed into a row is a balance change with no
+lock taken and no funds checked. Going through the service means a hand-written
+correction takes the wallet's lock like every other write, is written once per
+reference however many times the form is submitted, and is refused outright when
+a debit would take the wallet past its overdraft allowance — clawing back money
+the account has already spent is a conversation, not a row.
+
+A reason is required. An unexplained balance change is the one entry an auditor
+will certainly ask about, and the person who made it will not remember.
+
+Only four kinds may be written this way: `bonus`, `fee`, `adjustment_credit` and
+`adjustment_debit`. A deposit or a withdrawal has a rail and a price and is the
+account's to ask for, so neither can be conjured from the back office.
+
+## What a caller may put in `metadata`
+
+A JSON object, and the only field on a movement the client fills in freely. It is
+capped at `DJANGO_WALLET_MAX_METADATA_BYTES` — 4096 by default, `0` for no cap —
+because it is returned on every read of that entry: uncapped, an authenticated
+account can put megabytes into the ledger a movement at a time and make
+everybody's history expensive. It has to be an object rather than a list or a
+bare string, checked in the service because GraphQL's `JSON` scalar will accept
+any shape.
+
+## Freezing and closing a wallet
+
+`WalletService.set_wallet_status`, published as admin actions rather than an
+editable field, because a status this app enforces against should not be settable
+without the checks that go with it.
+
+**Frozen** refuses payouts and still takes money in, which is what a compliance
+hold actually means: you are not letting funds leave while you look at something,
+and refusing an incoming deposit would only create a second problem on the rail.
+
+**Closed** takes nothing either way, and is refused while there is anything left
+to strand — a settled balance that is not zero, or a movement still pending that
+would have nowhere to land. Pay it out or adjust it to zero first. A closed
+wallet stays closed; reopening one is opening a new account's history on top of
+an old one's, which needs more context than a status field carries.
+
+## Who did it
+
+Every hand-made change to a movement records the operator behind it, on the entry
+itself rather than in a server log that rotates. `approve` and `reject` fill in
+`reviewed_by`; settling, failing and expiring from the admin write
+`settled_by_operator`, `failed_by_operator` and `expired_by_operator` into the
+entry's metadata; a reversal writes `reversed_by_operator`, and an adjustment
+`adjusted_by`.
+
+Settling is the one that matters most, because it is where a row becomes money.
+An operator who can settle can turn a deposit nobody ever made into a real
+balance, and the defence against that is not a permission — somebody has to have
+it — but a record of who used it.
+
+A transition with **no** operator on it is not an omission: it came from a rail's
+signed confirmation, which carries its own `external_reference` instead, or from
+the account itself cancelling its own movement, or from the expiry job. The
+absence is the answer to "which person decided this?" — nobody did.
+
+## What the wallet announces
+
+`apps.wallet.signals` sends `entry_recorded`, `entry_settled`, `entry_failed`,
+`entry_reversed`, `payout_ready` and `wallet_status_changed`, each **after the
+transaction commits** — a receiver that fired inside the transaction could email
+somebody about a deposit that then rolled back.
+
+They carry plain dictionaries rather than model instances, the same shapes the
+transports serialise, so a receiver does not have to import this app's models or
+know which of them is authoritative. `payout_ready` is the one an integration
+actually wants: it fires when a withdrawal is recorded *and* approved, which is
+the moment there is something to send to a rail.
 
 ## Routes
 
@@ -420,6 +524,40 @@ operator's approval are separate facts, and the webhook can only supply the firs
 ## Models
 
 <!-- generated:models -->
+#### `BalanceAdjustment`
+
+An operator's correction to a balance: a bonus, a fee, a goodwill credit.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID | primary key, not editable |
+| `wallet` | ForeignKey | → `wallet.Wallet` |
+| `kind` | Char |  |
+| `direction` | Char | not editable |
+| `method` | Char |  |
+| `payment_method` | ForeignKey | → `wallet.PaymentMethod`, nullable |
+| `network` | ForeignKey | → `wallet.MethodNetwork`, nullable |
+| `amount` | Decimal |  |
+| `currency` | Char |  |
+| `gross_amount` | Decimal |  |
+| `fee_total` | Decimal |  |
+| `exchange_rate` | Decimal | nullable |
+| `destination` | Char |  |
+| `approval` | Char |  |
+| `reviewed_by` | ForeignKey | → `accounts.User`, nullable |
+| `reviewed_at` | DateTime | nullable |
+| `review_note` | Char |  |
+| `status` | Char |  |
+| `reference` | Char |  |
+| `external_reference` | Char |  |
+| `description` | Char |  |
+| `metadata` | JSON |  |
+| `counterparty` | ForeignKey | → `wallet.WalletEntry`, nullable |
+| `checkpoint` | ForeignKey | → `wallet.WalletCheckpoint`, nullable |
+| `created_at` | DateTime | not editable |
+| `updated_at` | DateTime | not editable |
+| `settled_at` | DateTime | nullable |
+
 #### `ExchangeRate`
 
 What one unit of ``base`` is worth in ``quote``, and what this deployment keeps.
@@ -607,13 +745,14 @@ the rows above it is worse than a wide column.
 <!-- generated:admin -->
 | Model | Editable | Actions | Columns |
 | --- | --- | --- | --- |
+| `BalanceAdjustment` | Yes | — | `created_at`, `wallet`, `kind`, `amount_display`, `description` |
 | `ExchangeRate` | Yes | — | `pair_display`, `rate`, `margin_percent`, `source`, `effective_from`, `is_enabled` |
 | `MethodCurrency` | Yes | — | `currency`, `method`, `bounds_display`, `network_count`, `is_enabled` |
 | `MethodFee` | Yes | — | `method`, `kind`, `label`, `applies_to`, `cost_display`, `absorbed`, `is_enabled` |
 | `PaymentMethod` | Yes | `enable_methods`, `disable_methods` | `name`, `code`, `rail`, `directions_display`, `currencies_display`, `fee_display`, `approval_display`, `is_enabled` |
-| `Wallet` | Yes | — | `user`, `currency`, `status`, `settled_display`, `available_display`, `created_at` |
+| `Wallet` | Yes | `freeze_wallets`, `unfreeze_wallets`, `close_wallets` | `user`, `currency`, `status`, `settled_display`, `available_display`, `created_at` |
 | `WalletCheckpoint` | Yes | — | `wallet`, `sequence`, `balance`, `credited`, `debited`, `entry_count`, `created_at` |
-| `WalletEntry` | Yes | `approve_entries`, `reject_entries`, `settle_entries`, `fail_entries` | `created_at`, `wallet`, `kind`, `method_display`, `amount_display`, `cost_display`, `status`, `approval_display` |
+| `WalletEntry` | Yes | `approve_entries`, `reject_entries`, `settle_entries`, `fail_entries`, `expire_entries`, `reverse_entries` | `created_at`, `wallet`, `kind`, `method_display`, `amount_display`, `cost_display`, `status`, `approval_display` |
 <!-- /generated:admin -->
 
 ## Settings
@@ -629,6 +768,7 @@ the rows above it is worse than a wide column.
 | `DJANGO_WALLET_AUTO_CREATE` | Optional | whether an account's first wallet request opens one for it. |
 | `DJANGO_WALLET_WEBHOOK_SECRETS` | Optional | the secret each payment rail signs its confirmations with, as `method-code:secret` pairs. |
 | `DJANGO_WALLET_WEBHOOK_TOLERANCE_SECONDS` | Optional | how far out of date a signed rail confirmation may be. Range 30–3600. |
+| `DJANGO_WALLET_EXPIRE_AFTER_HOURS` | Optional | how long a movement may wait on its rail before `manage.py wallet_expire` gives up on it, or zero for never. Range 0–8760. |
 | `DJANGO_WALLET_OVERDRAFT_LIMIT` | Optional | how far below zero a wallet may be taken, for a deployment that runs credit. 0 or more. |
 | `DJANGO_WALLET_MIN_DEPOSIT` | Optional | the smallest deposit worth the rail's fee, or zero for no floor. 0 or more. |
 | `DJANGO_WALLET_MAX_DEPOSIT` | Optional | the largest single deposit accepted, or zero for no ceiling. 0 or more. |
@@ -636,4 +776,5 @@ the rows above it is worse than a wide column.
 | `DJANGO_WALLET_MAX_WITHDRAWAL` | Optional | the largest single payout allowed without a human, or zero for no ceiling. 0 or more. |
 | `DJANGO_WALLET_PAGE_SIZE` | Optional | how many entries a listing returns when the caller does not say. Range 1–200. |
 | `DJANGO_WALLET_MAX_PAGE_SIZE` | Optional | the ceiling on `limit`, so one request cannot ask for a whole history. Range 1–1000. |
+| `DJANGO_WALLET_MAX_METADATA_BYTES` | Optional | how much client-supplied `metadata` one movement may carry, in bytes. Range 0–1048576. |
 <!-- /generated:settings -->
