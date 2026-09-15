@@ -701,6 +701,10 @@ CLUB_ROUTERS = (
 CLUB_EVENT_SOURCES = [
     path.strip() for path in os.getenv("DJANGO_CLUB_EVENT_SOURCES", "").split(",") if path.strip()
 ]
+# The slug of a club every new account is put in as it is created. Empty puts
+# nobody anywhere, and then a mission on `accounts.user.registered` never pays:
+# an account is in no club at the moment it exists.
+CLUB_JOIN_ON_SIGNUP = os.getenv("DJANGO_CLUB_JOIN_ON_SIGNUP", "").strip()
 CLUB_PAGE_SIZE = int(os.getenv("DJANGO_CLUB_PAGE_SIZE", "50"))
 CLUB_MAX_PAGE_SIZE = int(os.getenv("DJANGO_CLUB_MAX_PAGE_SIZE", "200"))
 

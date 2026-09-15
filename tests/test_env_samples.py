@@ -29,7 +29,7 @@ TEMPLATE_SAMPLE = ROOT / "src" / "django_ninja_starter" / "template" / "_env.exa
 EXAMPLE_SAMPLE = ROOT / "examples" / "env.example"
 SETTINGS = ROOT / "src" / "config" / "settings" / "base.py"
 
-FEATURE_APPS = ("CMS", "NOTIFICATIONS", "SHOP", "SUPPORT")
+FEATURE_APPS = ("CMS", "NOTIFICATIONS", "SHOP", "SUPPORT", "WALLET", "CLUB")
 
 
 def flag(sample: Path, app: str) -> str | None:

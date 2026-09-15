@@ -137,3 +137,67 @@ def test_every_changelist_renders_with_a_row_in_it(
             continue
         url = reverse(f"admin:club_{model._meta.model_name}_changelist")
         assert client.get(url).status_code == 200, url
+
+
+def test_the_membership_screen_links_to_the_grant_screen(member: Any, superuser: Any) -> None:
+    from apps.club.models import Membership
+
+    client = Client()
+    client.force_login(superuser)
+    membership = Membership.objects.get(user=member)
+
+    page = client.get(reverse("admin:club_membership_change", args=(membership.pk,)))
+
+    assert reverse("admin:club_membership_grant", args=(membership.pk,)) in page.content.decode()
+
+
+def test_the_grant_screen_pays_once_however_often_it_is_submitted(
+    member: Any, superuser: Any
+) -> None:
+    """The reference is issued with the page, so a double-submitted form is one grant."""
+    from apps.club.models import Membership
+
+    client = Client()
+    client.force_login(superuser)
+    membership = Membership.objects.get(user=member)
+    url = reverse("admin:club_membership_grant", args=(membership.pk,))
+
+    page = client.get(url)
+    assert page.status_code == 200
+    reference = page.context["form"].initial["reference"]
+    for _ in range(2):
+        answer = client.post(url, {"xp": 30, "reason": "Found a bug.", "reference": reference})
+        assert answer.status_code == 302
+
+    assert club_service.me(member)["xp"] == 30
+    award = XpAward.objects.get(membership=membership)
+    assert award.reason == "Found a bug."
+    assert award.metadata["granted_by"] == str(superuser.pk)
+
+
+def test_a_grant_without_a_reason_is_not_written(member: Any, superuser: Any) -> None:
+    from apps.club.models import Membership
+
+    client = Client()
+    client.force_login(superuser)
+    membership = Membership.objects.get(user=member)
+    url = reverse("admin:club_membership_grant", args=(membership.pk,))
+
+    answer = client.post(url, {"xp": 30, "reason": "", "reference": "grant:no-reason"})
+
+    assert answer.status_code == 200
+    assert club_service.me(member)["xp"] == 0
+
+
+def test_the_grant_screen_is_refused_without_permission_to_change_members(
+    member: Any, operator: Any
+) -> None:
+    from apps.club.models import Membership
+
+    client = Client()
+    client.force_login(operator)
+    membership = Membership.objects.get(user=member)
+
+    answer = client.get(reverse("admin:club_membership_grant", args=(membership.pk,)))
+
+    assert answer.status_code == 403

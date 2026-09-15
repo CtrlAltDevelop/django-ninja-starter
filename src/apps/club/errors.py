@@ -37,6 +37,16 @@ class NotAMember(ClubError):
     status = 409
 
 
+class MembershipSuspended(ClubError):
+    """An operator suspended this membership, and only an operator lifts it.
+
+    Refused rather than allowed through ``leave``: a suspension a member could
+    end by leaving and joining again is a suspension that lasts two requests.
+    """
+
+    status = 409
+
+
 class ClubClosed(ClubError):
     """The club is not taking members, or is not running at all."""
 

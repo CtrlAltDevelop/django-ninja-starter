@@ -73,10 +73,21 @@ by `apps.is_installed`, so a deployment running the club without the shop
 registers no shop events, and a mission referring to one is refused rather than
 quietly dead.
 
-Two bridge shapes are worth copying. `bridges/shop.py` only declares, and the
-emitting code calls `track` itself. `bridges/wallet.py` declares *and* connects a
-receiver to the wallet's existing signals, so the wallet needed no changes at all
-— which is the pattern for an app that already announces what it does.
+Every built-in bridge has the same shape, and it is the one to copy: declare the
+events, then connect a receiver to signals the emitting app already sends.
+`bridges/wallet.py` listens to the wallet's `entry_settled`, `bridges/shop.py` to
+the shop's `order_paid` and `review_published`, and `bridges/accounts.py` to the
+row every login method writes to the sign-in audit trail. None of those apps
+imports the club or calls `track`, so none of them had to change to be heard. An
+app of yours that announces nothing calls `track` where the thing happens instead.
+
+`accounts.user.registered` is heard from the user table rather than the audit
+trail, so an account created by a social callback, the admin or
+`createsuperuser` counts as well. An account is in no club at the moment it
+exists, so set `DJANGO_CLUB_JOIN_ON_SIGNUP` to a club's slug to put every new
+account in it first -- without it, a mission on that event has nobody to pay. A
+slug naming no club, or a club not taking members, is logged and never fails the
+sign-up.
 
 ## An account is in one club
 
@@ -94,6 +105,16 @@ somebody lose a ladder they had spent months on by tapping the wrong card.
 and the award history survive and rejoining picks the ladder back up where it was
 left. A club where leaving reset your progress is a club where the way out of a
 mistake is a thing people warn each other about.
+
+**A suspension is not left behind.** A suspended member's `leave` is a `409`: a
+suspension that leaving and joining again could lift is one that lasts two
+requests. Only an operator lifts it.
+
+**XP belongs to the club that paid it.** Every award records the club it was
+earned in, and a member's XP is the sum of their current club's awards. Moving to
+another club starts its ladder from zero, and coming back to the first finds the
+XP still there. Otherwise joining a new club would be a way to arrive at the top
+of its ladder.
 
 ## The ladder is a ladder
 
@@ -126,10 +147,19 @@ has no balance column: a stored total is a second copy of a fact the awards
 already hold, and the two disagree the first time a process dies between writing
 an award and updating the total.
 
+XP granted by hand is written from the grant screen linked on a member's page in
+the admin, through the same service, with a reason and the operator's name on the
+award. The screen issues the reference when it is drawn, so a form submitted twice
+grants once.
+
 Awards are immutable and idempotent — `reference` is unique per member — so a
 mission completion replayed by a retried request, a redelivered webhook or a job
 run twice pays once. `GET /club/awards` publishes the ledger, so a member can add
 it up and get the number the app reports, which is the point of deriving it.
+
+Progress is idempotent in the same way. A mission needing three events counts
+each `reference` once, so one event delivered three times is one step towards it
+rather than a completion.
 
 ## What a mission can ask for
 
@@ -199,6 +229,7 @@ who uses the deployment.
 | --- | --- | --- |
 | `DJANGO_CLUB_ENABLED` | **Yes** | whether this deployment carries clubs at all -- their tables, their routes and their admin. |
 | `DJANGO_CLUB_EVENT_SOURCES` | Optional | dotted module paths that register your own app's events, so missions can be built out of what your code does. |
+| `DJANGO_CLUB_JOIN_ON_SIGNUP` | Optional | the slug of a club every new account is put in as it is created, so a welcome can be earned by signing up. |
 | `DJANGO_CLUB_PAGE_SIZE` | Optional | how many rows a listing returns when the caller does not say. Range 1–200. |
 | `DJANGO_CLUB_MAX_PAGE_SIZE` | Optional | the ceiling on `limit`, so one request cannot ask for every member. Range 1–1000. |
 <!-- /generated:settings -->
@@ -237,6 +268,17 @@ One rung: what it is called, what it looks like, and the XP that reaches it.
 | `logo` | Char |  |
 | `perks` | Text |  |
 | `metadata` | JSON |  |
+| `created_at` | DateTime | not editable |
+
+#### `CountedOccurrence`
+
+One occurrence that already moved one member's progress on one mission.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | BigAuto | primary key |
+| `progress` | ForeignKey | → `club.MissionProgress` |
+| `reference` | Char |  |
 | `created_at` | DateTime | not editable |
 
 #### `Membership`
@@ -298,6 +340,7 @@ One payment of XP, kept forever. The sum of these is a member's XP.
 | --- | --- | --- |
 | `id` | UUID | primary key, not editable |
 | `membership` | ForeignKey | → `club.Membership` |
+| `club` | ForeignKey | → `club.Club` |
 | `mission` | ForeignKey | → `club.Mission`, nullable |
 | `xp` | PositiveInteger |  |
 | `reason` | Char |  |
@@ -315,5 +358,5 @@ One payment of XP, kept forever. The sum of these is a member's XP.
 | `Membership` | Yes | `grant_ten_xp` | `user`, `club`, `status`, `xp_display`, `level_display`, `joined_at` |
 | `Mission` | Yes | `enable_missions`, `disable_missions` | `title`, `club`, `event`, `xp`, `repeat`, `target_count`, `is_enabled` |
 | `MissionProgress` | Yes | — | `membership`, `mission`, `count`, `completions`, `last_completed_at` |
-| `XpAward` | Yes | — | `created_at`, `membership`, `xp`, `reason`, `mission` |
+| `XpAward` | Yes | — | `created_at`, `membership`, `club`, `xp`, `reason`, `mission` |
 <!-- /generated:admin -->

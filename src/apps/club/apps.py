@@ -69,6 +69,18 @@ class ClubConfig(AppConfig):
                 ),
             ),
             Requirement(
+                "CLUB_JOIN_ON_SIGNUP",
+                env="DJANGO_CLUB_JOIN_ON_SIGNUP",
+                purpose=(
+                    "the slug of a club every new account is put in as it is created, "
+                    "so a welcome can be earned by signing up"
+                ),
+                hint=(
+                    "Empty puts nobody anywhere. A slug that names no club, or an "
+                    "archived one, is logged and the account is left in none."
+                ),
+            ),
+            Requirement(
                 "CLUB_PAGE_SIZE",
                 env="DJANGO_CLUB_PAGE_SIZE",
                 purpose="how many rows a listing returns when the caller does not say",
@@ -111,10 +123,13 @@ class ClubConfig(AppConfig):
 
     def ready(self) -> None:
         """Fill the event registry: the floor, then each installed app, then yours."""
-        from apps.club.bridges import accounts  # noqa: F401
+        from apps.club.bridges import accounts
 
+        accounts.connect()
         if apps.is_installed("apps.shop"):
-            from apps.club.bridges import shop  # noqa: F401
+            from apps.club.bridges import shop
+
+            shop.connect()
         if apps.is_installed("apps.wallet"):
             from apps.club.bridges import wallet
 

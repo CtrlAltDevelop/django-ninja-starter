@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+
+{% comment %}
+Paying XP by hand, for one member. A page of its own rather than a field on the
+membership form: a grant is a decision with a reason and a name on it, and
+writing it through the service is what records both. The reference is issued
+when the page is drawn, so the form submitted twice grants once.
+{% endcomment %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    {{ membership.user }} is in {{ membership.club }} with {{ standing.xp }} XP{% if standing.level %}, on {{ standing.level.name }}{% endif %}.
+  </p>
+  <p>
+    A grant writes an award with your name and this reason on it. It is the only
+    record of why this level moved, so say why.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_div }}
+    <div class="submit-row">
+      <input type="submit" class="default" value="Grant">
+      <a href="{{ change_url }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

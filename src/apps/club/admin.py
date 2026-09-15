@@ -10,17 +10,23 @@ club with a gap at three that nobody notices until a member lands in it.
 
 **Nothing that moves XP is typed into a row.** Awards are read-only: they are
 what a member's level is derived from, so a hand-edited one is a level with no
-explanation. XP granted by hand goes through the service, on the membership
-screen, which writes an award with a reason and the operator's name on it.
+explanation. XP granted by hand goes through the service, from the grant screen linked on
+the membership form, which writes an award with a reason and the operator's name
+on it.
 """
 
 from typing import Any
+from uuid import UUID, uuid4
 
 from django import forms
 from django.contrib import admin, messages
-from django.core.exceptions import ValidationError
-from django.db.models import QuerySet, Sum
-from django.http import HttpRequest
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import QuerySet
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+from django.template.response import TemplateResponse
+from django.urls import URLPattern, path, reverse
+from django.utils.html import format_html
 
 from apps.club.errors import ClubError, InvalidLevels
 from apps.club.events import choices as event_choices
@@ -34,7 +40,7 @@ from apps.club.models import (
     XpAward,
 )
 from apps.club.services import _validated_ladder, club_service
-from apps.club.standing import ladder, level_for
+from apps.club.standing import standing_of, xp_of
 from apps.club.theme import (
     ChoicesDropdownFilter,
     ModelAdmin,
@@ -193,12 +199,14 @@ class GrantForm(forms.Form):
     reason = forms.CharField(
         max_length=255, help_text="Required. The only record of why this level moved."
     )
+    #: Issued when the page is drawn, so a double-submitted form is one grant.
+    reference = forms.CharField(max_length=200, widget=forms.HiddenInput)
 
 
 class XpAwardInline(TabularInline):
     model = XpAward
     extra = 0
-    fields = ("created_at", "xp", "reason", "mission", "reference")
+    fields = ("created_at", "club", "xp", "reason", "mission", "reference")
     readonly_fields = fields
     ordering = ("-created_at",)
 
@@ -223,17 +231,71 @@ class MembershipAdmin(ModelAdmin):
 
     def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> Any:
         """The XP is derived, so the screen shows it and cannot be used to set it."""
-        return ("joined_at", "left_at", "updated_at") if obj else ()
+        return ("joined_at", "left_at", "updated_at", "grant_link") if obj else ()
+
+    @display(description="Grant XP")
+    def grant_link(self, instance: Membership) -> str:
+        url = reverse("admin:club_membership_grant", args=(instance.pk,))
+        return format_html('<a href="{}">Grant XP by hand, with a reason</a>', url)
+
+    def get_urls(self) -> list[URLPattern]:
+        """Put the grant screen ahead of the admin's catch-all object route."""
+        grant = path(
+            "<uuid:membership_id>/grant/",
+            self.admin_site.admin_view(self.grant_view),
+            name="club_membership_grant",
+        )
+        return [grant, *super().get_urls()]
+
+    def grant_view(self, request: HttpRequest, membership_id: UUID) -> HttpResponse:
+        """Pay one member XP by hand, through the service, with a reason and a name on it."""
+        membership = get_object_or_404(
+            Membership.objects.select_related("user", "club"), pk=membership_id
+        )
+        if not self.has_change_permission(request, membership):
+            raise PermissionDenied
+        change_url = reverse("admin:club_membership_change", args=(membership.pk,))
+
+        if request.method == "POST":
+            form = GrantForm(request.POST)
+            if form.is_valid() and _run(
+                request,
+                club_service.grant,
+                membership.user,
+                xp=form.cleaned_data["xp"],
+                reason=form.cleaned_data["reason"],
+                reference=form.cleaned_data["reference"],
+                by=request.user,
+            ):
+                messages.success(
+                    request, f"Granted {form.cleaned_data['xp']} XP to {membership.user}."
+                )
+                return HttpResponseRedirect(change_url)
+        else:
+            form = GrantForm(initial={"reference": f"grant:{uuid4()}"})
+
+        return TemplateResponse(
+            request,
+            "admin/club/grant.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Grant XP to {membership.user}",
+                "opts": self.model._meta,
+                "membership": membership,
+                "standing": standing_of(membership),
+                "form": form,
+                "change_url": change_url,
+            },
+        )
 
     @display(description="XP")
     def xp_display(self, instance: Membership) -> str:
-        total = instance.awards.aggregate(total=Sum("xp"))["total"] or 0
-        return str(total)
+        """Asked of the standing, so this column and the API cannot disagree."""
+        return str(xp_of(instance))
 
     @display(description="Level")
     def level_display(self, instance: Membership) -> str:
-        total = instance.awards.aggregate(total=Sum("xp"))["total"] or 0
-        reached, _ = level_for(ladder(instance.club_id), int(total))
+        reached = standing_of(instance).level
         return str(reached) if reached is not None else "—"
 
     @admin.action(description="Grant 10 XP to the selected members")
@@ -265,8 +327,8 @@ class MembershipAdmin(ModelAdmin):
 class XpAwardAdmin(ModelAdmin):
     """The ledger a level is derived from. Read-only, in both directions."""
 
-    list_display = ("created_at", "membership", "xp", "reason", "mission")
-    list_filter = ("membership__club",)
+    list_display = ("created_at", "membership", "club", "xp", "reason", "mission")
+    list_filter = ("club",)
     search_fields = ("reason", "reference", "membership__user__username")
     date_hierarchy = "created_at"
 

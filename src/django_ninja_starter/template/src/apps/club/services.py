@@ -26,6 +26,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from apps.club import signals
@@ -36,6 +37,7 @@ from apps.club.errors import (
     ClubError,
     ClubNotFound,
     InvalidLevels,
+    MembershipSuspended,
     MissionRefused,
     NotAMember,
     UnknownEvent,
@@ -45,6 +47,7 @@ from apps.club.models import (
     Club,
     ClubLevel,
     ClubStatus,
+    CountedOccurrence,
     Membership,
     MembershipStatus,
     Mission,
@@ -86,6 +89,10 @@ WINDOWS: dict[str, timedelta | None] = {
     str(Repeat.WEEKLY): timedelta(weeks=1),
 }
 
+#: The event this app emits itself, when somebody joins. Registered in
+#: :mod:`apps.club.bridges.accounts`.
+JOINED = "club.member.joined"
+
 
 class ClubService:
     """The whole of what a club can do. One instance, held at the bottom of this module."""
@@ -96,7 +103,7 @@ class ClubService:
         """Every club somebody could be in, newest ladder counts included."""
         page = page_size(limit)
         rows = Club.objects.exclude(status=str(ClubStatus.ARCHIVED)).order_by("name")
-        return [club_payload(club) for club in rows[offset : offset + page]]
+        return [club_payload(club) for club in rows[max(0, offset) : max(0, offset) + page]]
 
     def club(self, slug: str) -> dict[str, Any]:
         """One club and the ladder it defines."""
@@ -131,13 +138,14 @@ class ClubService:
     ) -> list[dict[str, Any]]:
         """Every XP this account has been paid, newest first. The audit trail of a level."""
         membership = self.membership_for(user)
+        assert membership is not None
         page = page_size(limit)
         rows = (
-            XpAward.objects.filter(membership=membership)
+            XpAward.objects.filter(membership=membership, club_id=membership.club_id)
             .select_related("mission")
             .order_by("-created_at")
         )
-        return [award_payload(award) for award in rows[offset : offset + page]]
+        return [award_payload(award) for award in rows[max(0, offset) : max(0, offset) + page]]
 
     def missions(self, user: Any) -> list[dict[str, Any]]:
         """This account's club's missions, each with how far this member has got."""
@@ -171,11 +179,11 @@ class ClubService:
                 club_id=membership.club_id, status=str(MembershipStatus.ACTIVE)
             )
             .select_related("user")
-            .prefetch_related("awards")
+            .annotate(earned=Sum("awards__xp", filter=Q(awards__club_id=membership.club_id)))
         )
         ranked = []
         for member in members:
-            xp = sum(award.xp for award in member.awards.all())
+            xp = int(member.earned or 0)
             reached, _ = level_for(rungs, xp)
             ranked.append((xp, member, reached))
         ranked.sort(key=lambda row: (-row[0], row[1].joined_at))
@@ -248,6 +256,11 @@ class ClubService:
         except IntegrityError:
             # Lost the race to another request for this same account.
             raise AlreadyAMember("This account is already in a club.") from None
+        if known(JOINED):
+            # This app's own event, tracked like anybody else's, so a welcome
+            # mission is an ordinary mission. Keyed on the club: leaving and
+            # coming back is not a second welcome.
+            self.track(Occurrence(key=JOINED, user=user, reference=f"joined:{club.pk}"))
         return membership_payload(membership, standing_of(membership))
 
     def leave(self, user: Any) -> dict[str, Any]:
@@ -259,6 +272,10 @@ class ClubService:
         """
         membership = self.membership_for(user)
         assert membership is not None
+        if membership.status == str(MembershipStatus.SUSPENDED):
+            raise MembershipSuspended(
+                "This membership is suspended. An operator lifts a suspension; leaving does not."
+            )
         with transaction.atomic():
             membership.status = str(MembershipStatus.LEFT)
             membership.left_at = timezone.now()
@@ -347,6 +364,10 @@ class ClubService:
             raise MissionRefused("A mission has to need at least one event.")
         if repeat not in Repeat.values:
             raise MissionRefused(f"{repeat!r} is not a repeat mode.")
+        if not code.strip():
+            raise MissionRefused("A mission needs a code; it is how it is found again.")
+        if starts_at and ends_at and ends_at <= starts_at:
+            raise MissionRefused("A mission cannot end before it starts.")
         checked = validate(criteria)
         mission, _ = Mission.objects.update_or_create(
             club=club,
@@ -416,9 +437,19 @@ class ClubService:
         """
         with transaction.atomic():
             locked = Membership.objects.select_for_update().get(pk=membership.pk)
+            if not locked.is_active or locked.club_id != mission.club_id:
+                # Left, suspended or moved club while this event was on its way.
+                return None
             progress, _ = MissionProgress.objects.get_or_create(membership=locked, mission=mission)
             if not _may_run_again(mission, progress, now=now):
                 return None
+            if occurrence.reference:
+                _, fresh = CountedOccurrence.objects.get_or_create(
+                    progress=progress, reference=occurrence.reference
+                )
+                if not fresh:
+                    # The same event delivered again: it has already counted.
+                    return None
             progress.count += 1
             if progress.count < mission.target_count:
                 progress.save(update_fields=["count", "updated_at"])
@@ -468,6 +499,7 @@ class ClubService:
         try:
             award = XpAward.objects.create(
                 membership=membership,
+                club_id=membership.club_id,
                 mission=mission,
                 xp=xp,
                 reason=reason,

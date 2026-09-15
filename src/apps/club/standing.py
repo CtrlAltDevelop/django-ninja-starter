@@ -51,8 +51,13 @@ class Standing:
 
 
 def xp_of(membership: Membership) -> int:
-    """The sum of what this member has been awarded. The number, not a cached copy."""
-    total = XpAward.objects.filter(membership=membership).aggregate(total=Sum("xp"))["total"]
+    """The sum of what this member has been awarded in their current club.
+
+    The number, not a cached copy -- and only this club's, because a member who
+    moved here did not earn this ladder's rungs somewhere else.
+    """
+    earned = XpAward.objects.filter(membership=membership, club_id=membership.club_id)
+    total = earned.aggregate(total=Sum("xp"))["total"]
     return int(total or 0)
 
 

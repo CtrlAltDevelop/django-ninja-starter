@@ -328,10 +328,23 @@ class XpAward(models.Model):
     mission completion replayed by a retried request, a redelivered webhook or a
     job run twice pays once. ``mission`` is null for XP an operator granted by
     hand, which is the other way a member can be paid.
+
+    ``club`` is where it was earned. A membership can leave one club and join
+    another, and XP counted against the second club's ladder has to be XP that
+    club paid -- otherwise joining a new club is a way to arrive at its top rung.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     membership = models.ForeignKey(Membership, on_delete=models.CASCADE, related_name="awards")
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.PROTECT,
+        related_name="awards",
+        help_text=(
+            "The club this was earned in. A member who moves clubs does not carry "
+            "one ladder's XP up another."
+        ),
+    )
     mission = models.ForeignKey(
         Mission, on_delete=models.SET_NULL, null=True, blank=True, related_name="awards"
     )
@@ -355,3 +368,28 @@ class XpAward(models.Model):
 
     def __str__(self) -> str:
         return f"+{self.xp} XP to {self.membership}"
+
+
+class CountedOccurrence(models.Model):
+    """One occurrence that already moved one member's progress on one mission.
+
+    The award's own reference only covers the event that *finished* a run, so
+    without this a mission needing three events could be finished by one event
+    delivered three times. Written only when the caller gave a reference: an
+    occurrence without one cannot be told apart from a second, real one.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    progress = models.ForeignKey(MissionProgress, on_delete=models.CASCADE, related_name="counted")
+    reference = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("progress", "reference"), name="club_counted_reference_unique"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.progress}: {self.reference}"
