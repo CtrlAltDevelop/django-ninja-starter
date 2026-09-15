@@ -4,10 +4,11 @@
     python examples/walkthrough.py
 
 Four login methods, four second factors, four social providers, a token mode,
-the accounts and health endpoints, all five feature apps the starter ships --
+the accounts and health endpoints, all six feature apps the starter ships --
 the CMS, notifications with its socket, the shop from catalogue to settled
-invoice, the support desk from both sides of it, and the wallet from an empty
-balance to a settled one -- the notes app you would write yourself, the audit
+invoice, the support desk from both sides of it, the wallet from an empty
+balance to a settled one, and the club paying for what the other apps did --
+the notes app you would write yourself, the audit
 trail, the generated OpenAPI documents, and every admin screen any of them
 registers. All of it printed as a transcript of the calls a real client would
 make.
@@ -522,6 +523,8 @@ def section_configuration() -> None:
     if settings.SUPPORT_ENABLED:
         support = f"on, socket at {settings.SUPPORT_WS_PATH}"
     print(f"  support          {support}")
+    print(f"  wallet           {'on' if settings.WALLET_ENABLED else 'off'}")
+    print(f"  club             {'on' if settings.CLUB_ENABLED else 'off'}")
     print()
     for app in settings.INSTALLED_APPS:
         marker = " " if app.startswith("django.contrib") else "•"
@@ -2577,9 +2580,286 @@ def _wallet_surface_covered(api: Api) -> None:
     print(f"  {DIM}│ toured {total} of {total} wallet endpoints{OFF}")
 
 
-def section_email_code(api: Api) -> None:
+def section_club(api: Api) -> None:
+    """The sixth feature app: missions nobody claims, paid for by what the others did."""
+    from django.apps import apps as django_apps
+    from django.conf import settings
+
+    if not settings.CLUB_ENABLED or not django_apps.is_installed("apps.club"):
+        heading(12, "Club", "apps.club", "Not installed: DJANGO_CLUB_ENABLED is not set.")
+        return
+
+    from django.contrib.auth import get_user_model
+
+    from apps.club.errors import InvalidLevels, UnknownEvent
+    from apps.club.models import Club, JoinPolicy
+    from apps.club.services import club_service
+
     heading(
         12,
+        "A club, and missions nobody claims",
+        "apps.club",
+        "A ladder of levels, and missions that complete themselves. The shop, the "
+        "wallet and the sign-in trail say what happened; the club decides what it "
+        "was worth. No endpoint lets a client say it did something.",
+    )
+
+    note(
+        "What a mission can be built out of is generated from what is installed. "
+        "The shop and the wallet are on, so their events are listed; a deployment "
+        "without them would not list them, and a mission naming one would be refused."
+    )
+    for event in api.get("/api/v1/club/events", show=False):
+        print(f"  {DIM}│ {event['source']:<9} {event['key']}{OFF}")
+
+    note(
+        "An operator defines the clubs and a ladder for each. A ladder is checked as "
+        "a whole, so one with a gap in it is refused and the ladder already there is kept."
+    )
+    Club.objects.create(name="Explorers", slug="explorers", description="Where everybody starts.")
+    Club.objects.create(name="Insiders", slug="insiders", join_policy=str(JoinPolicy.INVITE))
+    club_service.set_levels(
+        "explorers",
+        [
+            {"position": 1, "name": "Bronze", "xp_required": 0, "perks": "A badge."},
+            {"position": 2, "name": "Silver", "xp_required": 100, "perks": "Free delivery."},
+            {"position": 3, "name": "Gold", "xp_required": 250, "perks": "Early access."},
+        ],
+    )
+    club_service.set_levels("insiders", [{"position": 1, "name": "Member", "xp_required": 0}])
+    try:
+        club_service.set_levels(
+            "explorers",
+            [
+                {"position": 1, "name": "Bronze", "xp_required": 0},
+                {"position": 3, "name": "Gold", "xp_required": 250},
+            ],
+        )
+    except InvalidLevels as refusal:
+        print(f"  {DIM}│ refused: {refusal}{OFF}")
+    else:
+        raise WalkthroughError("a ladder with a gap in it was accepted")
+
+    shop_on = django_apps.is_installed("apps.shop")
+    wallet_on = django_apps.is_installed("apps.wallet")
+    note(
+        "Missions are rules, not tasks: an event, which of those events count, and "
+        "what finishing one pays. Each of these listens to a different app."
+    )
+    missions: list[dict[str, Any]] = [
+        {"code": "welcome", "title": "Say hello", "event": "club.member.joined", "xp": 25},
+        {
+            "code": "come-back",
+            "title": "Sign in today",
+            "event": "accounts.user.signed_in",
+            "xp": 10,
+            "repeat": "daily",
+        },
+    ]
+    if shop_on:
+        missions.append(
+            {
+                "code": "first-order",
+                "title": "Your first order",
+                "event": "shop.order.paid",
+                "xp": 60,
+            }
+        )
+    if wallet_on:
+        missions.append(
+            {
+                "code": "top-up",
+                "title": "Top up 50 or more",
+                "event": "wallet.deposit.settled",
+                "xp": 40,
+                "repeat": "every_time",
+                "criteria": {"min_value": 50},
+            }
+        )
+    for mission in missions:
+        written = club_service.define_mission("explorers", is_enabled=True, **mission)
+        print(f"  {DIM}│ {written['event']:<26} +{written['xp']:<3} {written['title']}{OFF}")
+    expected = sum(int(mission["xp"]) for mission in missions)
+
+    note(
+        "A mission listening for an event nothing emits is refused when it is "
+        "written -- not discovered weeks later, when nobody has earned anything."
+    )
+    try:
+        club_service.define_mission(
+            "explorers", code="typo", title="Typo", event="shop.order.payed", xp=1
+        )
+    except UnknownEvent as refusal:
+        print(f"  {DIM}│ refused: {refusal}{OFF}")
+    else:
+        raise WalkthroughError("a mission on an event nothing registers was accepted")
+
+    note("A ladder is what somebody reads to decide whether to join, so it needs no membership.")
+    api.get("/api/v1/club/clubs")
+    api.get("/api/v1/club/clubs/explorers")
+    api.get("/api/v1/club/clubs/explorers/levels", show=False)
+
+    note(
+        "An account in no club is told so: a 409, not an empty object that reads "
+        "like a club with nothing in it."
+    )
+    api.get("/api/v1/club/me", expect=409)
+
+    note("An invite-only club is joined from the back office, never by asking.")
+    api.post("/api/v1/club/join", {"slug": "insiders"}, expect=409)
+
+    note(
+        "Joining is an event like any other, so the welcome mission pays on the way "
+        "in. A double-tapped join is the same membership, and not a second welcome."
+    )
+    api.post("/api/v1/club/join", {"slug": "explorers"})
+    again = api.post("/api/v1/club/join", {"slug": "explorers"}, show=False)
+    print(f"  {DIM}│ still {again['xp']} XP{OFF}")
+
+    note(
+        "Now the other apps, none of which knows the club exists. Every login "
+        "method already writes a row to the sign-in audit trail; the club listens "
+        "for the row, so signing in is all the client does."
+    )
+    api.post(
+        "/api/v1/auth/password/login",
+        {"identifier": "zoe", "password": PASSWORD},
+        token="",
+        show=False,
+    )
+
+    if shop_on:
+        from apps.shop.models import ShippingMethod
+
+        note(
+            "An order, settled by the desk. The shop announces it once the payment "
+            "has committed, and the club's bridge is what is listening."
+        )
+        api.post("/api/v1/shop/cart/items", {"product": "featherbook-14"}, show=False)
+        address = api.get("/api/v1/shop/addresses", show=False)[0]
+        standard = ShippingMethod.objects.get(name="Standard")
+        order = api.post(
+            "/api/v1/shop/checkout",
+            {"address": address["id"], "shipping_method": str(standard.pk)},
+            show=False,
+        )
+        _settle_as_the_desk(order["number"], reference="club-tour")
+        note("The gateway retries its callback. One order, so one payment for it.")
+        _settle_as_the_desk(order["number"], reference="club-tour")
+
+    if wallet_on:
+        note(
+            "A deposit the card rail confirms. The wallet already announced every "
+            "settled movement, so it needed no change for the club to hear this one."
+        )
+        deposit = api.post(
+            "/api/v1/wallet/deposits",
+            {"method": "card", "amount": "80.00", "reference": "tour-club-top-up"},
+            show=False,
+        )
+        _confirm_as_the_rail(api, deposit["id"], show=False)
+
+    note(
+        "Where zoe stands, having claimed nothing. Her XP is not a column: it is the "
+        "sum of the ledger below it, which a client can add up for itself."
+    )
+    me = api.get("/api/v1/club/me")
+    api.get("/api/v1/club/missions", show=False)
+    ledger = api.get("/api/v1/club/awards")
+    added_up = sum(award["xp"] for award in ledger["awards"])
+    if not me["xp"] == added_up == expected:
+        raise WalkthroughError(
+            f"the club reports {me['xp']} XP, the ledger adds up to {added_up}, "
+            f"and the missions above pay {expected}"
+        )
+    print(f"  {DIM}│ {added_up} XP, on {me['level']['name']}{OFF}")
+
+    note(
+        "Somebody added from the back office, and XP an operator grants by hand -- "
+        "with a reason, because an unexplained level is the one a member asks about."
+    )
+    yara = get_user_model().objects.create_user(username="yara", email="yara@example.com")
+    club_service.add_member(yara, "explorers")
+    club_service.grant(yara, xp=300, reason="Beta tester.", reference="tour-grant-yara")
+    note("The leaderboard is your own club's, with your own row flagged. There is no other.")
+    api.get("/api/v1/club/leaderboard")
+
+    note(
+        "An account is in no club the moment it exists, so a mission on "
+        "accounts.user.registered would have nobody to pay. DJANGO_CLUB_JOIN_ON_SIGNUP "
+        "names a club every new account is put in as it is created -- turned on "
+        "here for one sign-up."
+    )
+    from django.test import override_settings
+
+    club_service.define_mission(
+        "explorers",
+        code="signed-up",
+        title="Signed up",
+        event="accounts.user.registered",
+        xp=15,
+        is_enabled=True,
+    )
+    with override_settings(CLUB_JOIN_ON_SIGNUP="explorers"):
+        omar = api.post(
+            "/api/v1/auth/password/signup",
+            {"identifier": "omar", "password": PASSWORD, "email": "omar@example.com"},
+            token="",
+            show=False,
+        )
+    arrivals = api.get("/api/v1/club/awards", token=omar["credentials"]["access_token"], show=False)
+    earned = sorted(award["reason"] for award in arrivals["awards"])
+    if not {"Say hello", "Signed up"} <= set(earned):
+        raise WalkthroughError(f"a new account in the signup club was paid for {earned}")
+    print(f"  {DIM}│ omar, on arrival: {', '.join(earned)}{OFF}")
+
+    note("Leaving keeps the history, and coming back picks the ladder up where it was left.")
+    api.post("/api/v1/club/leave", show=False)
+    api.get("/api/v1/club/me", expect=409, show=False)
+    back = api.post("/api/v1/club/join", {"slug": "explorers"}, show=False)
+    if back["xp"] != me["xp"]:
+        raise WalkthroughError(f"rejoining changed the XP: {me['xp']} became {back['xp']}")
+    print(f"  {DIM}│ back with {back['xp']} XP{OFF}")
+
+    note(
+        "And there is no way to claim a mission, on any transport. A mission a "
+        "client can report is a mission a client can invent."
+    )
+    api.post("/api/v1/club/missions/first-order/claim", expect=404, show=False)
+
+    _club_surface_covered(api)
+
+
+def _club_surface_covered(api: Api) -> None:
+    """Assert the section above called every route the club publishes.
+
+    The same check the wallet and support sections make of themselves, asked of
+    the router rather than of a list kept here.
+    """
+    from apps.club.rest.v1 import router
+
+    missed: list[str] = []
+    total = 0
+    for path, view in router.path_operations.items():
+        literals = re.split(r"\{[^}]+\}", f"/api/v1/club{path}")
+        pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+        for operation in view.operations:
+            for method in operation.methods:
+                total += 1
+                if not any(
+                    seen_method == method and pattern.match(seen_path)
+                    for seen_method, seen_path in api.visited
+                ):
+                    missed.append(f"{method} /api/v1/club{path}")
+
+    if missed:
+        raise WalkthroughError("the club tour skipped " + ", ".join(sorted(missed)))
+    print(f"  {DIM}│ toured {total} of {total} club endpoints{OFF}")
+
+
+def section_email_code(api: Api) -> None:
+    heading(
+        13,
         "One-time code by email",
         "auth_email_code",
         "No password at all: a ticket goes to the client, a code goes to the "
@@ -2625,7 +2905,7 @@ def section_email_code(api: Api) -> None:
 
 def section_sms_code(api: Api) -> None:
     heading(
-        13,
+        14,
         "One-time code by SMS",
         "auth_sms_code",
         "The same two steps over a phone number, which is the one identifier "
@@ -2642,7 +2922,7 @@ def section_sms_code(api: Api) -> None:
 
 def section_magic_link(api: Api) -> None:
     heading(
-        14,
+        15,
         "Magic link",
         "auth_magic_link",
         "One emailed link, good once. The client never sees a code: the token in "
@@ -2658,7 +2938,7 @@ def section_magic_link(api: Api) -> None:
 
 def section_twofactor(api: Api) -> None:
     heading(
-        15,
+        16,
         "Second factors",
         "auth_twofactor",
         "Four factors on one app. Enrolment is not real until a code confirms "
@@ -2750,7 +3030,7 @@ def section_tokens(api: Api) -> None:
 
     mode = settings.AUTH_TOKEN_MODE
     heading(
-        16,
+        17,
         f"Token mode: {mode}",
         "no token app" if mode == "none" else f"oauth_core, oauth_{mode}",
         "All three modes publish the same endpoints under /auth/token, so a "
@@ -2808,7 +3088,7 @@ def section_social(api: Api) -> None:
     from django.conf import settings
 
     heading(
-        17,
+        18,
         "Social sign-in",
         ", ".join(f"oauth_{name}" for name in settings.OAUTH_PROVIDERS),
         "Each provider mounts a start and a callback. Start is the half this "
@@ -2828,7 +3108,7 @@ def section_audit(api: Api) -> None:
     from infrastructure.oauth.core import jwt_tokens
 
     heading(
-        18,
+        19,
         "What was recorded",
         "auth_core, oauth_core",
         "Every step above left an audit row, and every credential above was a "
@@ -2858,7 +3138,7 @@ def section_audit(api: Api) -> None:
 
 def section_openapi(api: Api) -> None:
     heading(
-        19,
+        20,
         "The document all of that produced",
         "config.api",
         "One NinjaAPI per registered version, every enabled app's router "
@@ -2946,7 +3226,7 @@ def section_admin(api: Api) -> None:
     from django.urls import reverse
 
     heading(
-        20,
+        21,
         "The admin, every app of it",
         "all apps",
         "The API is half the project; the other half is the screen the people "
@@ -2987,6 +3267,7 @@ def section_admin(api: Api) -> None:
     _admin_notification_form(tour)
     _admin_shop_order(tour)
     _admin_wallet_queue(tour)
+    _admin_club_member(tour)
 
     note(f"{tour.visited} admin pages opened, all of them rendering.")
 
@@ -3090,6 +3371,32 @@ def _admin_wallet_queue(tour: AdminTour) -> None:
     )
 
 
+def _admin_club_member(tour: AdminTour) -> None:
+    """A member's screen: XP that is derived, over a ledger nobody can type into."""
+    from django.apps import apps as django_apps
+    from django.urls import reverse
+
+    if not django_apps.is_installed("apps.club"):
+        return
+
+    from apps.club.models import Membership, Mission
+
+    membership = Membership.objects.filter(user__username="zoe").first()
+    if membership is None:  # pragma: no cover - only if the club section did not run
+        return
+    note(
+        "zoe's membership, with the awards her level is derived from underneath it. "
+        "Read-only: an award typed in by hand is a level with no explanation."
+    )
+    tour.visit(reverse("admin:club_membership_change", args=(membership.pk,)), "zoe in the club")
+    mission = Mission.objects.filter(code="welcome").first()
+    if mission is not None:
+        tour.visit(
+            reverse("admin:club_mission_change", args=(mission.pk,)),
+            "a mission, its event picked from what is registered",
+        )
+
+
 def tour() -> int:
     """The tour itself, running inside the example project."""
     configure()
@@ -3108,6 +3415,7 @@ def tour() -> int:
         section_shop(api)
         section_support(api)
         section_wallet(api)
+        section_club(api)
         section_email_code(api)
         section_sms_code(api)
         section_magic_link(api)

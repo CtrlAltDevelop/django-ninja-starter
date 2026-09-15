@@ -35,6 +35,7 @@ REPORTED_KEYS = (
     "shop",
     "support",
     "wallet",
+    "club",
     "socket",
 )
 
@@ -77,6 +78,7 @@ def test_the_example_project_has_every_app_on(example_project: Path) -> None:
     assert reported["shop"] == "on"
     assert reported["support"] == "on"
     assert reported["wallet"] == "on"
+    assert reported["club"] == "on"
     assert reported["socket"] == "/ws/notifications,/ws/support"
 
 
@@ -95,6 +97,7 @@ print("notifications=" + ("on" if settings.NOTIFICATIONS_ENABLED else "off"))
 print("shop=" + ("on" if settings.SHOP_ENABLED else "off"))
 print("support=" + ("on" if settings.SUPPORT_ENABLED else "off"))
 print("wallet=" + ("on" if settings.WALLET_ENABLED else "off"))
+print("club=" + ("on" if settings.CLUB_ENABLED else "off"))
 print("socket=" + ",".join(path for path, _ in websocket_routes()))
 """
 
@@ -164,6 +167,19 @@ def test_the_wallet_ships_with_the_generated_project(example_project: Path) -> N
     assert "no tests ran" not in result.stdout
 
 
+def test_the_club_ships_with_the_generated_project(example_project: Path) -> None:
+    """The club's own suite, run inside the project the generator wrote.
+
+    The one app whose tests reach into two others -- the shop's and the wallet's
+    announcements -- so it is also the one that notices when a template copy of
+    either stops sending them.
+    """
+    result = _run(example_project, "-m", "pytest", "-q", "--no-cov", "src/apps/club")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no tests ran" not in result.stdout
+
+
 def test_the_support_app_ships_with_the_generated_project(example_project: Path) -> None:
     """The socket half of it runs nowhere else, same as the notifications app's."""
     result = _run(example_project, "-m", "pytest", "-q", "--no-cov", "src/apps/support")
@@ -200,6 +216,10 @@ def test_the_walkthrough_visits_every_app(example_project: Path) -> None:
     assert wallet is not None, "the wallet section printed no coverage line"
     assert wallet.group(1) == wallet.group(2), result.stdout
     assert "manage.py wallet_archive" in result.stdout, "the archive job was not run"
+    assert "/api/v1/club/join" in result.stdout, "the club was not toured"
+    club = re.search(r"toured (\d+) of (\d+) club endpoints", result.stdout)
+    assert club is not None, "the club section printed no coverage line"
+    assert club.group(1) == club.group(2), result.stdout
     assert "admin pages opened" in result.stdout, "the admin was not toured"
 
 

@@ -21,9 +21,9 @@ alone is enough.
 1. Generates `example-api` with the packaged generator.
 2. Copies `env.example` in as the project's `.env` — four login methods, four
    second factors, four social providers and all three token modes installed
-   with `rotation` issuing, plus all five feature apps the template ships: the
-   **CMS**, **notifications**, the **shop**, the **support desk** and the
-   **wallet**.
+   with `rotation` issuing, plus all six feature apps the template ships: the
+   **CMS**, **notifications**, the **shop**, the **support desk**, the
+   **wallet** and the **club**.
 3. Runs the project's own `manage.py startapi notes --api-version v1` and `v2`,
    then copies `notes/` over the scaffolding it wrote.
 4. Runs `migrate`, so `make serve` inside the built project serves the API —
@@ -41,7 +41,7 @@ python examples/build.py --rebuild
 ## The tour
 
 `walkthrough.py` prints a transcript of the calls a real client would make,
-against every app the `.env` above turns on. Nineteen sections, in the order the
+against every app the `.env` above turns on. Twenty-one sections, in the order the
 tour runs them:
 
 | # | Section | Apps | What it shows |
@@ -57,15 +57,16 @@ tour runs them:
 | 9 | A shop | `apps.shop` | A public catalogue, then a basket, an order and a settled invoice that are nobody's but the caller's |
 | 10 | A support desk | `apps.support` | One conversation from both sides: a ticket, a queue, a staff-only note, and then the same thing live over a socket |
 | 11 | A wallet | `apps.wallet` | Every wallet route: configured payment methods, a priced deposit a signed webhook settles or fails, requests applied and refused, a payout cancelled, a free transfer, a chargeback the rail signs for, and a balance that survives being archived |
-| 12 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
-| 13 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
-| 14 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
-| 15 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
-| 16 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
-| 17 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
-| 18 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
-| 19 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
-| 20 | The admin, every app of it | all apps | Every model any installed app registered, opened as a superuser |
+| 12 | A club | `apps.club` | A ladder, and missions nobody claims: a welcome paid on joining, then a sign-in, an order and a deposit each paying XP without the client reporting any of them, a replayed settlement paying nothing, and a ledger that adds up to the level |
+| 13 | One-time code by email | `auth_email_code` | Ticket to the client, code to the inbox, neither alone a login |
+| 14 | One-time code by SMS | `auth_sms_code` | The same two steps over a phone number and no address at all |
+| 15 | Magic link | `auth_magic_link` | One emailed link, good exactly once |
+| 16 | Second factors | `auth_twofactor` | TOTP, SMS, email and recovery codes, enrolled and then used to log in |
+| 17 | Token mode | `oauth_core`, `oauth_rotation` | Sessions, refresh, ending another session, revoking your own |
+| 18 | Social sign-in | `oauth_google`, `oauth_apple`, `oauth_microsoft`, `oauth_github` | The start half of all four redirects |
+| 19 | What was recorded | `auth_core`, `oauth_core` | The audit rows all of the above left, and the JWT claims |
+| 20 | The document all of that produced | `config.api` | Both OpenAPI schemas, group by group |
+| 21 | The admin, every app of it | all apps | Every model any installed app registered, opened as a superuser |
 
 The rest of this section is what each one calls, and the property it is there to
 demonstrate. Every path below is printed by the tour, and is the path a real
@@ -181,7 +182,7 @@ as a draft — and then reads all of it back over the public API, unauthenticate
 The hero deliberately carries one field of each family — text, a text area, an
 image, a gallery of images, a choice, a colour and a reference to another page —
 because a type is only worth having if it changes what an editor types into, and
-a page of three text fields never shows that. Section 18 opens the content
+a page of three text fields never shows that. Section 21 opens the content
 screen those fields produce.
 
 | Call | What to notice |
@@ -347,6 +348,33 @@ fails if a route was left out.
 | `GET …/entries` | Failed, cancelled and reversed rows are listed with the rest |
 | `manage.py wallet_archive --force`, `GET …/checkpoints` | The balance does not move. A pending entry is never folded |
 
+### A club — `apps.club`
+
+Enabled by `DJANGO_CLUB_ENABLED=true` alone, and the one app here built to be
+told about what the *others* do. The tour defines two clubs and their ladders
+the way an operator would, writes four missions that each listen to a different
+app, and then has zoe do ordinary things. She never reports finishing anything,
+because there is nowhere to report it. The section ends by checking itself
+against the club's router, as the wallet and support ones do.
+
+| Call | What to notice |
+| --- | --- |
+| `GET /api/v1/club/events` | Generated from what is installed: the shop's and the wallet's events are listed because those apps are on |
+| `set_levels` with a gap in it | Refused as a whole, and the ladder already there is kept |
+| `define_mission` on `shop.order.payed` | Refused when it is written, rather than never firing |
+| `GET /api/v1/club/clubs`, `…/clubs/explorers`, `…/levels` | A ladder is readable before joining, because it is what somebody decides on |
+| `GET /api/v1/club/me` | A **409** in no club, not an empty object |
+| `POST /api/v1/club/join` (invite-only) | A **409**: that club is joined from the back office, never by asking |
+| `POST /api/v1/club/join` | Joining is an event too, so the welcome mission pays on the way in. Twice is the same membership, and no second welcome |
+| `POST /api/v1/auth/password/login` | Heard from the audit row every login method writes, so no login method calls the club |
+| `POST /api/v1/shop/checkout`, then settled twice | The shop announces the order once, after the payment commits. The retried settlement pays nothing |
+| `POST /api/v1/wallet/deposits` + a signed `done` | Heard on the wallet's own signal; the wallet needed no change to be heard |
+| `GET /api/v1/club/me`, `…/missions`, `…/awards` | XP is the sum of the ledger, and the tour fails if the two disagree |
+| `GET /api/v1/club/leaderboard` | Your own club's, with your own row flagged. The operator's grant above it carries a reason |
+| `POST /api/v1/auth/password/signup` with `DJANGO_CLUB_JOIN_ON_SIGNUP` | The new account is put in the club as it is created, and paid for arriving as well as for joining |
+| `POST /api/v1/club/leave`, then `join` | The history stays, and coming back picks the ladder up where it was left |
+| `POST /api/v1/club/missions/first-order/claim` | A **404**. No transport lets a client claim a mission |
+
 ### A feature app of your own — `apps.notes`
 
 The app `build.py` adds, and the only one here that the starter does not ship.
@@ -389,8 +417,8 @@ it — walked from Django's own registry rather than from a list written in the
 tour, so an app added tomorrow is covered without editing the file, and one that
 ships a broken changelist fails the run.
 
-With the `.env` above that is **56 models across 16 app labels, 61 pages**, all
-of them rendering. Four are worth opening on their own, because none is an
+With the `.env` above that is **80 models across 19 app labels, 91 pages**, all
+of them rendering. Five are worth opening on their own, because none is an
 ordinary Django change form:
 
 | Screen | What to notice |
@@ -399,6 +427,7 @@ ordinary Django change form:
 | `admin/notifications/notification/add/` | Writing to everybody is a form, not a shell session |
 | `admin/shop/order/{id}/change/` | The order placed in section 9, as whoever packs it sees it |
 | `admin/wallet/walletentry/` | The approval queue. The tour refuses the request section 11 left waiting with the changelist's own action, which calls the same service the API does. Also opened: that movement, zoe's wallet with its balance, and the card method with its fees |
+| `admin/club/membership/{id}/change/` | zoe's membership from section 12: XP and level derived rather than typed, over a ledger of awards nobody can add to, edit or delete. Also opened: the welcome mission, its event picked from what is registered |
 
 ## How the tour runs
 
@@ -430,19 +459,19 @@ DJANGO_AUTH_TOKEN_MODE=sliding python examples/walkthrough.py
 ```
 
 An app that is not enabled is not skipped silently: the CMS, notification, shop,
-support and wallet sections still print their heading and say which variable
+support, wallet and club sections still print their heading and say which variable
 would have turned them on.
 
-## The five feature apps that ship
+## The six feature apps that ship
 
-`cms/`, `notifications/`, `shop/`, `support/` and `wallet/` are not in this
+`cms/`, `notifications/`, `shop/`, `support/`, `wallet/` and `club/` are not in this
 directory. They come out of the generator inside every project it writes, and the
 `.env` above is the whole of what turns them on — which is the property worth
 seeing, so the tour reads their settings back before it calls them. Their full
 reference is [`docs/cms.md`](../docs/cms.md),
 [`docs/notifications.md`](../docs/notifications.md),
-[`docs/shop.md`](../docs/shop.md), [`docs/support.md`](../docs/support.md) and
-[`docs/wallet.md`](../docs/wallet.md).
+[`docs/shop.md`](../docs/shop.md), [`docs/support.md`](../docs/support.md),
+[`docs/wallet.md`](../docs/wallet.md) and [`docs/club.md`](../docs/club.md).
 
 ## The notes app
 
