@@ -8,6 +8,39 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The shop announces what happened: `apps.shop.signals`.** `order_paid` when a
+  payment settles and `review_published` when a review goes public, both after
+  commit and both once. Approval is a queryset `update`, which sends no
+  `post_save`, so until now nothing outside the shop could hear a moderated review
+  at all.
+- **The club hears the shop, the wallet and the sign-in trail by itself.** Each
+  bridge connects to signals its app already sends and none of those apps calls
+  the club, so missions on `shop.order.paid`, `shop.review.published`,
+  `accounts.user.signed_in` and `club.member.joined` now pay. Until now only the
+  wallet's events were delivered: the rest were registered and offered in the
+  admin's dropdown, and nothing ever sent them.
+- **Club XP can no longer be carried, replayed or used to dodge a suspension.** An
+  award records the club that paid it and a member's XP is their current club's,
+  so moving clubs no longer lands somebody high on a new ladder. A mission needing
+  several events counts each `reference` once, so one redelivered event cannot
+  finish it. A suspended member can no longer lift the suspension by leaving and
+  joining again. `apps.club.track` returns nothing in a project without the club
+  installed, as its docstring always said, instead of failing on an import.
+- **A club new accounts join by themselves: `DJANGO_CLUB_JOIN_ON_SIGNUP`.** The
+  slug of a club every account is put in as it is created -- by any route, social
+  callbacks and the admin included -- which is what lets a mission on
+  `accounts.user.registered` pay anybody. A slug naming no club is logged and
+  never fails a sign-up.
+- **Granting XP by hand has a screen.** A member's admin page links to it; it
+  writes through the service with a reason and the operator's name, and a form
+  submitted twice grants once. The form existed before, and nothing rendered it.
+- **The generated project's `.env` ships the wallet off**, like every other
+  feature app. It shipped on, and the test guarding that promise did not list the
+  wallet or the club.
+- **The example project turns the club on and tours it**, as section 12: a welcome
+  paid on joining, then a sign-in, an order and a deposit each paying XP without
+  the client reporting any of them, checked against the award ledger and against
+  the club's router.
 - **A new feature app: `apps.wallet`.** A wallet per account, every way money
   gets in and out, and a balance that is **derived from the movements rather than
   stored beside them** -- because a balance column is a second copy of a fact the
