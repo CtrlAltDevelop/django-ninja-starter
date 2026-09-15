@@ -289,6 +289,21 @@ person entitled to know your own review exists.
 A review never publishes an address. The author is a display name, because
 reviews are the most-read and most-scraped page a shop has.
 
+## What it announces
+
+Two signals in `apps/shop/signals.py`, so another app can react to the shop
+without the shop importing it -- the club's bridge is the one that ships. Both are
+sent after the transaction commits and carry plain dictionaries, so a receiver
+needs none of the shop's models, and one receiver failing cannot fail a checkout.
+
+| Signal | Sent when | Carries |
+| --- | --- | --- |
+| `order_paid` | `settle_order` marks a pending order paid. Settling one already paid sends nothing | `id`, `number`, `user_id`, `total`, `currency`, `items` |
+| `review_published` | A review is written while moderation is off, or a moderator approves it | `id`, `user_id`, `product_id`, `rating` |
+
+Approving from the admin is a queryset `update`, which raises no `post_save`, so a
+receiver on the model would never hear a moderated review. Listen to the signal.
+
 ## Models
 
 <!-- generated:models -->

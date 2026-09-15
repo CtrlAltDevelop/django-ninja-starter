@@ -34,7 +34,7 @@ from django.db.models import Count, F, Q, QuerySet, Value
 from django.db.models.functions import Greatest
 from django.utils import timezone
 
-from apps.shop import options
+from apps.shop import options, signals
 from apps.shop.attributes import AttributeType, normalize_value
 from apps.shop.models import (
     RESTOCKING_STATUSES,
@@ -605,6 +605,16 @@ class ShopService:
         except ValidationError as invalid:
             raise ShopRefused("; ".join(invalid.messages)) from None
         review.refresh_from_db()
+        if review.status == ReviewStatus.APPROVED:
+            signals.announce(
+                signals.review_published,
+                review={
+                    "id": review.pk,
+                    "user_id": review.user_id,
+                    "product_id": review.product_id,
+                    "rating": review.rating,
+                },
+            )
         return review_payload(review)
 
     def delete_review(self, user: Any, slug: str) -> dict[str, Any]:
@@ -1031,6 +1041,17 @@ class ShopService:
                 status=OrderStatus.PAID,
                 note=f"Paid via {payment.provider}.",
                 actor=actor,
+            )
+            signals.announce(
+                signals.order_paid,
+                order={
+                    "id": locked.pk,
+                    "number": locked.number,
+                    "user_id": locked.user_id,
+                    "total": locked.total,
+                    "currency": locked.currency,
+                    "items": locked.items.count(),
+                },
             )
         return locked
 

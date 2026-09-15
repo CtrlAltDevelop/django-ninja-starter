@@ -48,7 +48,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 
-from apps.shop import options
+from apps.shop import options, signals
 from apps.shop.models import (
     Address,
     Brand,
@@ -1086,7 +1086,16 @@ class ReviewAdmin(ModelAdmin):
         from apps.shop.models import refresh_review_stats
 
         products = list(queryset.values_list("product_id", flat=True).distinct())
+        published = (
+            list(queryset.exclude(status=status).values("id", "user_id", "product_id", "rating"))
+            if status == str(ReviewStatus.APPROVED)
+            else []
+        )
         changed = queryset.update(status=status)
+        for review in published:
+            # `update` sends no `post_save`, so the announcement is made here, for
+            # exactly the reviews this verdict made public.
+            signals.announce(signals.review_published, review=review)
         for product_id in products:
             refresh_review_stats(product_id)
         return changed
