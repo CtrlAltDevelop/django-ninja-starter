@@ -297,6 +297,16 @@ class TestCoupons:
 
         assert coupon.used_count == 1
 
+    def test_cancelling_gives_the_use_back(
+        self, basket: Any, address: Address, shipping: ShippingMethod, coupon: Coupon
+    ) -> None:
+        """Otherwise placing and cancelling over and over drains a limited coupon."""
+        order = _checkout(basket, address, shipping, coupon_code="WELCOME")
+        shop_service.cancel_order(basket, order.number)
+        coupon.refresh_from_db()
+
+        assert coupon.used_count == 0
+
     def test_an_amount_coupon_never_takes_more_than_the_basket_holds(
         self, alice: Any, tshirt: Product, address: Address, shipping: ShippingMethod
     ) -> None:
@@ -392,7 +402,8 @@ class TestCancellation:
         order = _checkout(basket, address, shipping)
         shop_service.cancel_order(basket, order.number)
 
-        assert shop_service.confirm_payment(basket, order.number).status == OrderStatus.CANCELLED
+        with pytest.raises(ShopRefused, match="cancelled"):
+            shop_service.confirm_payment(basket, order.number)
 
     def test_an_untracked_product_has_no_stock_to_put_back(
         self, alice: Any, laptop: Product, address: Address, shipping: ShippingMethod

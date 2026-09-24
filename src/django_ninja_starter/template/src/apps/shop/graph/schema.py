@@ -287,6 +287,14 @@ class Query:
     def shop_addresses(self, info: Info[Any, Any]) -> list[AddressType]:
         return [address_type(row) for row in shop_service.addresses(_caller(info))]
 
+    @strawberry.field(description="One of your saved delivery addresses.")
+    @resolver
+    def shop_address(self, info: Info[Any, Any], address_id: str) -> AddressType:
+        try:
+            return address_type(shop_service.address(_caller(info), address_id))
+        except ShopNotFound as error:
+            raise _refuse(error) from None
+
     @strawberry.field(
         description=("Every delivery option, costed for your basket where you are signed in.")
     )

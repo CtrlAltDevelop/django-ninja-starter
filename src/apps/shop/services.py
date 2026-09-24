@@ -29,7 +29,7 @@ from typing import Any
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, F, Q, QuerySet, Value
 from django.db.models.functions import Greatest
 from django.utils import timezone
@@ -593,17 +593,26 @@ class ShopService:
         """
         product = self._product_row(slug)
         status = ReviewStatus.PENDING if options.review_moderation() else ReviewStatus.APPROVED
-        review = Review.objects.filter(product=product, user=user).first() or Review(
-            product=product, user=user
-        )
-        review.rating = rating
-        review.title = title
-        review.body = body
-        review.status = status
-        try:
-            review.save()
-        except ValidationError as invalid:
-            raise ShopRefused("; ".join(invalid.messages)) from None
+        # Twice at most: a double-submit can race past the lookup, and the loser
+        # of the one-review-per-account constraint becomes an update instead.
+        for attempt in range(2):
+            review = Review.objects.filter(product=product, user=user).first() or Review(
+                product=product, user=user
+            )
+            review.rating = rating
+            review.title = title
+            review.body = body
+            review.status = status
+            try:
+                with transaction.atomic():
+                    review.save()
+                break
+            except (ValidationError, IntegrityError) as error:
+                if not attempt and review._state.adding:
+                    continue
+                if isinstance(error, ValidationError):
+                    raise ShopRefused("; ".join(error.messages)) from None
+                raise
         review.refresh_from_db()
         if review.status == ReviewStatus.APPROVED:
             signals.announce(
@@ -714,9 +723,11 @@ class ShopService:
         self._check_stock(product, variant, quantity, offer)
         with transaction.atomic():
             cart = Cart.for_user(user)
-            line = CartItem.objects.filter(
-                cart=cart, product=product, variant=variant, offer=offer
-            ).first()
+            line = (
+                CartItem.objects.select_for_update()
+                .filter(cart=cart, product=product, variant=variant, offer=offer)
+                .first()
+            )
             wanted = (line.quantity if line else 0) + quantity
             ceiling = options.max_item_quantity()
             if wanted > ceiling:
@@ -1013,6 +1024,8 @@ class ShopService:
         """
         with transaction.atomic():
             locked = Order.objects.select_for_update().get(pk=order.pk)
+            if locked.status == OrderStatus.CANCELLED:
+                raise ShopRefused("This order was cancelled, so it cannot be paid.")
             if locked.status != OrderStatus.PENDING:
                 return locked
             payment = (
@@ -1118,6 +1131,8 @@ class ShopService:
             if order.status != OrderStatus.PENDING:
                 raise ShopRefused("Only an unpaid order can be cancelled here.")
             self._release_stock(order)
+            self._refund_payments(order)
+            self._return_coupon(order)
             order.status = OrderStatus.CANCELLED
             order.save(update_fields=["status", "updated_at"])
             OrderEvent.objects.create(
@@ -1178,7 +1193,11 @@ class ShopService:
             if wanted in RESTOCKING_STATUSES:
                 self._release_stock(locked)
             changed = ["status", "updated_at"]
-            if wanted == OrderStatus.REFUNDED:
+            if wanted == OrderStatus.CANCELLED:
+                self._return_coupon(locked)
+            if wanted in RESTOCKING_STATUSES:
+                # A cancelled order's pending attempt is closed too, or somebody
+                # could still settle a payment for an order that no longer exists.
                 self._refund_payments(locked)
             if wanted == OrderStatus.SHIPPED:
                 locked.shipped_at = timezone.now()
@@ -1270,6 +1289,13 @@ class ShopService:
         for reservation in order.reservations.filter(released_at__isnull=True):
             Product.objects.filter(pk=reservation.product_id).update(
                 sales_count=Greatest(F("sales_count") - reservation.quantity, Value(0))
+            )
+
+    def _return_coupon(self, order: Order) -> None:
+        """Give back the use an unpaid order took, or cancelling drains a limited coupon."""
+        if order.coupon_id is not None:
+            Coupon.objects.filter(pk=order.coupon_id).update(
+                used_count=Greatest(F("used_count") - 1, Value(0))
             )
 
     def _refund_payments(self, order: Order) -> None:

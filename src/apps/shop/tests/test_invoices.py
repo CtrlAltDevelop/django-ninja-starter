@@ -242,9 +242,12 @@ class TestSettlingByHand:
             shop_service.reject_payment(placed)
 
     def test_a_cancelled_order_cannot_be_settled(self, placed: Order, alice: Any) -> None:
+        """Its pending attempt is closed too, so nothing is left waiting to be paid."""
         shop_service.cancel_order(alice, placed.number)
 
-        assert shop_service.settle_order(placed).status == OrderStatus.CANCELLED
+        with pytest.raises(ShopRefused, match="cancelled"):
+            shop_service.settle_order(placed)
+        assert not placed.payments.filter(status=PaymentStatus.PENDING).exists()
 
     def test_an_order_whose_payments_are_all_spent_cannot_be_settled(self, placed: Order) -> None:
         Payment.objects.filter(order=placed).update(status=PaymentStatus.FAILED)
