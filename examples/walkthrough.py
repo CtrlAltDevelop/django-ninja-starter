@@ -2442,16 +2442,16 @@ def section_wallet(api: Api) -> None:
     api.get(f"/api/v1/wallet/entries/{payout['id']}", show=False)
 
     note(
-        "The customer changes their mind before the chain has it. Cancelling is "
-        "the one lifecycle verb that is the account's, because it asserts nothing "
-        "about the outside world -- and the money it held comes back to `available`."
+        "Cancelling is the one lifecycle verb that is the account's -- but only "
+        "while nothing has been sent. This payout needed no approval, so it went "
+        "straight to its rail, which may already be paying it: calling it off now "
+        "would release the hold and pay the money twice, so it is refused."
     )
     api.post(
         f"/api/v1/wallet/entries/{payout['id']}/cancel",
         {"reason": "Sent to the wrong exchange account."},
-        show=False,
+        expect=409,
     )
-    api.get("/api/v1/wallet/balance")
 
     note("A movement that has already landed is past calling off.")
     api.post(f"/api/v1/wallet/entries/{deposit['id']}/cancel", {}, expect=409)

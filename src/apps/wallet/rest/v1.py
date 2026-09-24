@@ -15,7 +15,6 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from django.contrib.auth import get_user_model
 from django.http import HttpRequest
 from ninja import Router
 from ninja.errors import HttpError
@@ -209,7 +208,7 @@ def list_entries(
         # have clamped it, and a client paging on the number it sent would step
         # straight over the rows it never saw.
         "limit": page_size(limit),
-        "offset": offset,
+        "offset": max(0, offset),
     }
 
 
@@ -308,9 +307,7 @@ def transfer(request: HttpRequest, payload: TransferIn) -> dict[str, Any]:
     transfer, because a conversion nobody chose a rate for is a loss somebody
     discovers later.
     """
-    recipient = get_user_model().objects.filter(pk=payload.to_user_id).first()
-    if recipient is None:
-        raise HttpError(404, "No such account.")
+    recipient = _run(wallet_service.recipient, payload.to_user_id)
     return _run(
         wallet_service.transfer,
         request.user,

@@ -21,6 +21,7 @@ from django_socio_grpc import generics
 from django_socio_grpc.decorators import grpc_action
 
 from apps.wallet.grpc.serializers import (
+    Balance,
     Checkpoint,
     Entry,
     Exchange,
@@ -339,6 +340,42 @@ class WalletService(generics.GenericService):
         return _pb2().MethodList(methods=[_method(row) for row in rows])
 
     @grpc_action(
+        request=[],
+        response=[{"name": "balance", "type": Balance}],
+        response_name="BalanceResult",
+    )
+    @action
+    async def GetBalance(self, request: Any, context: Any) -> Any:
+        """Both numbers: what is there, and what is on its way. Authorise against `available`."""
+        user = require_caller(await grpc_caller(context))
+        try:
+            row = await sync_to_async(wallet_service.balance)(user)
+        except WalletError as refusal:
+            raise _refuse(refusal) from None
+        return _pb2().BalanceResult(balance=_balance(row))
+
+    @grpc_action(
+        request=[
+            {"name": "code", "type": "string"},
+            {"name": "direction", "type": "string"},
+        ],
+        request_name="MethodRequest",
+        response=[{"name": "method", "type": Method}],
+        response_name="MethodResult",
+    )
+    @action
+    async def GetMethod(self, request: Any, context: Any) -> Any:
+        """One method in full: its currencies, its chains, and what it charges."""
+        require_caller(await grpc_caller(context))
+        try:
+            row = await sync_to_async(wallet_service.method)(
+                request.code, direction=request.direction or None
+            )
+        except WalletError as refusal:
+            raise _refuse(refusal) from None
+        return _pb2().MethodResult(method=_method(row))
+
+    @grpc_action(
         request=[
             {"name": "method", "type": "string"},
             {"name": "direction", "type": "string"},
@@ -408,7 +445,7 @@ class WalletService(generics.GenericService):
             total=total,
             # The page served, not the one asked for.
             limit=page_size(limit),
-            offset=request.offset,
+            offset=max(0, request.offset),
         )
 
     @grpc_action(
@@ -575,15 +612,9 @@ class WalletService(generics.GenericService):
     @action
     async def Transfer(self, request: Any, context: Any) -> Any:
         """Move money to another wallet here. Free: nothing leaves, so nothing is charged."""
-        from django.contrib.auth import get_user_model
-
         user = require_caller(await grpc_caller(context))
-        recipient = await sync_to_async(
-            get_user_model().objects.filter(pk=request.to_user_id).first
-        )()
-        if recipient is None:
-            raise ApiError("No such account.", status=404, title=ResponseTitle.NOT_FOUND)
         try:
+            recipient = await sync_to_async(wallet_service.recipient)(request.to_user_id)
             row = await sync_to_async(wallet_service.transfer)(
                 user,
                 to_user=recipient,

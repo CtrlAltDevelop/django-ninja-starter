@@ -206,6 +206,17 @@ OPERATOR_KEYS = {
 }
 
 
+def _entry_id(value: Any) -> UUID:
+    """An entry id from a caller, where anything that is not a UUID names nothing."""
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except ValueError:
+        raise WalletNotFound("No such entry.") from None
+
+
+_STAFF_ONLY_KEYS = frozenset({*OPERATOR_KEYS.values(), "reversed_by_operator"})
+
+
 def _operator_note(status: str, by: Any) -> dict[str, str]:
     """The attribution to merge into an entry's metadata, or nothing."""
     key = OPERATOR_KEYS.get(status)
@@ -595,6 +606,23 @@ class WalletService:
             metadata=metadata,
         )
 
+    def recipient(self, account_id: Any) -> Any:
+        """The account a transfer is addressed to, as every transport resolves it.
+
+        Unknown, malformed and closed all get the same answer, so the transfer
+        form is not a way to find out which account ids exist or are active.
+        """
+        from django.contrib.auth import get_user_model
+
+        try:
+            pk = UUID(str(account_id))
+        except ValueError:
+            pk = None
+        user = get_user_model().objects.filter(pk=pk, is_active=True).first() if pk else None
+        if user is None:
+            raise WalletNotFound("No such account.")
+        return user
+
     def transfer(
         self,
         user: Any,
@@ -647,7 +675,11 @@ class WalletService:
             sender, recipient = locked[sender.pk], locked[recipient.pk]
             if existing := self._existing(sender, reference):
                 self._check_same_request(
-                    existing, kind=str(EntryKind.TRANSFER_OUT), amount=money(amount), method=""
+                    existing,
+                    kind=str(EntryKind.TRANSFER_OUT),
+                    amount=money(amount),
+                    method="",
+                    counterparty=recipient.pk,
                 )
                 return entry_payload(existing)
             if sender.currency != recipient.currency:
@@ -1280,7 +1312,13 @@ class WalletService:
         return wallet.entries.filter(reference=reference).first()
 
     def _check_same_request(
-        self, existing: WalletEntry, *, kind: str, amount: Decimal, method: str
+        self,
+        existing: WalletEntry,
+        *,
+        kind: str,
+        amount: Decimal,
+        method: str,
+        counterparty: Any = None,
     ) -> None:
         """Refuse a reference that has been reused to mean something else.
 
@@ -1299,6 +1337,7 @@ class WalletService:
             existing.kind != kind
             or money(existing.amount) != money(amount)
             or (existing.payment_method.code if existing.payment_method_id else "") != method
+            or (counterparty is not None and existing.counterparty.wallet_id != counterparty)
         )
         if differs:
             raise ReferenceReused(
@@ -1445,7 +1484,15 @@ class WalletService:
             network_code=network,
         )
         self._check_destination(priced, direction, destination)
-        self._check_amount(priced.wallet_amount, direction)
+        # The figure the customer named, in the wallet's currency: for a deposit
+        # that is before the charges come off, or a gross just over the ceiling
+        # would pass because the fees brought the net under it.
+        named = (
+            money(priced.gross * priced.conversion.effective_rate)
+            if direction == str(Direction.CREDIT)
+            else priced.wallet_amount
+        )
+        self._check_amount(named, direction)
 
         with transaction.atomic():
             locked = Wallet.objects.select_for_update().get(pk=wallet.pk)
@@ -1574,7 +1621,7 @@ class WalletService:
             self.wallet_for(user)
             .entries.select_related("wallet", "payment_method", "network")
             .prefetch_related("charges")
-            .filter(pk=entry_id)
+            .filter(pk=_entry_id(entry_id))
             .first()
         )
         if entry is None:
@@ -1590,7 +1637,7 @@ class WalletService:
         """
         entry = (
             WalletEntry.objects.select_related("wallet", "payment_method", "network")
-            .filter(wallet=wallet, pk=entry_id)
+            .filter(wallet=wallet, pk=_entry_id(entry_id))
             .first()
         )
         if entry is None:
@@ -1607,7 +1654,9 @@ class WalletService:
         read outside the lock is a number that was true a moment ago.
         """
         wallet_id = (
-            WalletEntry.objects.filter(pk=entry_id).values_list("wallet_id", flat=True).first()
+            WalletEntry.objects.filter(pk=_entry_id(entry_id))
+            .values_list("wallet_id", flat=True)
+            .first()
         )
         if wallet_id is None:
             raise WalletNotFound("No such entry.")
@@ -1677,6 +1726,14 @@ class WalletService:
                 raise InvalidTransition(
                     f"A {entry.get_status_display().lower()} entry cannot become "
                     f"{EntryStatus(status).label.lower()}."
+                )
+            # Once `payout_ready` has fired the rail may already be sending the
+            # money; cancelling would release the hold and the payout would be
+            # paid twice. Only the rail or an operator can end it from here.
+            if status == str(EntryStatus.CANCELLED) and _payout_ready(entry):
+                raise InvalidTransition(
+                    "This payout has already been sent to be paid, so it can no "
+                    "longer be cancelled."
                 )
             if status == str(EntryStatus.DONE) and entry.direction == str(Direction.DEBIT):
                 # Re-checked at settlement, not only at recording: money can have
@@ -1778,7 +1835,9 @@ def entry_payload(entry: WalletEntry) -> dict[str, Any]:
         "reference": entry.reference,
         "external_reference": entry.external_reference,
         "description": entry.description,
-        "metadata": entry.metadata,
+        # Who in the back office acted stays on the row for the admin and audit;
+        # a customer reading their own movement is not told staff account ids.
+        "metadata": {k: v for k, v in entry.metadata.items() if k not in _STAFF_ONLY_KEYS},
         "counterparty_id": entry.counterparty_id,
         "archived": entry.checkpoint_id is not None,
         "created_at": entry.created_at.isoformat(),

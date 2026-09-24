@@ -46,7 +46,7 @@ from apps.wallet.graph.types import (
     rate_type,
     wallet_type,
 )
-from apps.wallet.services import WalletError, WalletNotFound, page_size, wallet_service
+from apps.wallet.services import WalletError, page_size, wallet_service
 from infrastructure.common.errors import ApiError
 from infrastructure.common.graph.errors import require_caller, resolver
 from infrastructure.common.identity import caller
@@ -138,7 +138,7 @@ class Query:
             _run(wallet_service.entries, account, limit=limit, offset=offset, **filters),
             _run(wallet_service.count, account, **filters),
             page_size(limit),
-            offset,
+            max(0, offset),
         )
 
     @strawberry.field(description="One movement out of this account's own wallet.")
@@ -293,11 +293,7 @@ class Mutation:
         description: str = "",
         metadata: JSON | None = None,
     ) -> EntryType:
-        from django.contrib.auth import get_user_model
-
-        recipient = get_user_model().objects.filter(pk=to_user_id).first()
-        if recipient is None:
-            raise _refuse(WalletNotFound("No such account."))
+        recipient = _run(wallet_service.recipient, to_user_id)
         return entry_type(
             _run(
                 wallet_service.transfer,

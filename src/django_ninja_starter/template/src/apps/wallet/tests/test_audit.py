@@ -46,9 +46,10 @@ def test_settling_from_the_admin_records_the_operator(
         admin_request(operator_account), WalletEntry.objects.filter(pk=entry["id"])
     )
 
-    settled = wallet_service.entry(alice, entry["id"])
-    assert settled["status"] == "done"
-    assert settled["metadata"]["settled_by_operator"] == str(operator_account.pk)
+    settled = WalletEntry.objects.get(pk=entry["id"])
+    assert settled.status == "done"
+    assert settled.metadata["settled_by_operator"] == str(operator_account.pk)
+    assert "settled_by_operator" not in wallet_service.entry(alice, entry["id"])["metadata"]
 
 
 def test_failing_from_the_admin_records_the_operator(
@@ -59,9 +60,8 @@ def test_failing_from_the_admin_records_the_operator(
 
     screen.fail_entries(admin_request(operator_account), WalletEntry.objects.filter(pk=entry["id"]))
 
-    assert wallet_service.entry(alice, entry["id"])["metadata"]["failed_by_operator"] == str(
-        operator_account.pk
-    )
+    metadata = WalletEntry.objects.get(pk=entry["id"]).metadata
+    assert metadata["failed_by_operator"] == str(operator_account.pk)
 
 
 def test_expiring_from_the_admin_records_the_operator(
@@ -74,9 +74,8 @@ def test_expiring_from_the_admin_records_the_operator(
         admin_request(operator_account), WalletEntry.objects.filter(pk=entry["id"])
     )
 
-    assert wallet_service.entry(alice, entry["id"])["metadata"]["expired_by_operator"] == str(
-        operator_account.pk
-    )
+    metadata = WalletEntry.objects.get(pk=entry["id"]).metadata
+    assert metadata["expired_by_operator"] == str(operator_account.pk)
 
 
 def test_a_rail_confirmation_records_no_operator(alice: Any, cash: PaymentMethod) -> None:
@@ -87,15 +86,13 @@ def test_a_rail_confirmation_records_no_operator(alice: Any, cash: PaymentMethod
 
 
 def test_an_account_cancelling_its_own_movement_is_not_recorded_as_an_operator(
-    funded: Any, card: PaymentMethod
+    alice: Any, counter: PaymentMethod
 ) -> None:
-    payout = wallet_service.withdraw(
-        funded, amount=Decimal("100"), method="card", reference="w", destination="4242"
-    )
+    request = wallet_service.deposit(alice, amount=Decimal("50"), method="counter", reference="r")
 
-    wallet_service.cancel(funded, payout["id"], reason="Changed my mind.")
+    wallet_service.cancel(alice, request["id"], reason="Changed my mind.")
 
-    metadata = wallet_service.entry(funded, payout["id"])["metadata"]
+    metadata = wallet_service.entry(alice, request["id"])["metadata"]
     assert "cancelled_by_operator" not in metadata
     assert metadata["reason"] == "Changed my mind."
 

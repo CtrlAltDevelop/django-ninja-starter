@@ -60,10 +60,20 @@ class WalletControllerStub:
                 request_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntriesRequest.SerializeToString,
                 response_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryPage.FromString,
                 _registered_method=True)
+        self.GetBalance = channel.unary_unary(
+                '/config.wallet.WalletController/GetBalance',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.BalanceResult.FromString,
+                _registered_method=True)
         self.GetEntry = channel.unary_unary(
                 '/config.wallet.WalletController/GetEntry',
                 request_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryRequest.SerializeToString,
                 response_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryResult.FromString,
+                _registered_method=True)
+        self.GetMethod = channel.unary_unary(
+                '/config.wallet.WalletController/GetMethod',
+                request_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.MethodRequest.SerializeToString,
+                response_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.MethodResult.FromString,
                 _registered_method=True)
         self.GetWallet = channel.unary_unary(
                 '/config.wallet.WalletController/GetWallet',
@@ -130,7 +140,19 @@ class WalletControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetBalance(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetEntry(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetMethod(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -200,10 +222,20 @@ def add_WalletControllerServicer_to_server(servicer, server):
                     request_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntriesRequest.FromString,
                     response_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryPage.SerializeToString,
             ),
+            'GetBalance': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetBalance,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.BalanceResult.SerializeToString,
+            ),
             'GetEntry': grpc.unary_unary_rpc_method_handler(
                     servicer.GetEntry,
                     request_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryRequest.FromString,
                     response_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryResult.SerializeToString,
+            ),
+            'GetMethod': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetMethod,
+                    request_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.MethodRequest.FromString,
+                    response_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.MethodResult.SerializeToString,
             ),
             'GetWallet': grpc.unary_unary_rpc_method_handler(
                     servicer.GetWallet,
@@ -382,6 +414,33 @@ class WalletController:
             _registered_method=True)
 
     @staticmethod
+    def GetBalance(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.wallet.WalletController/GetBalance',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            apps_dot_wallet_dot_grpc_dot_wallet__pb2.BalanceResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def GetEntry(request,
             target,
             options=(),
@@ -398,6 +457,33 @@ class WalletController:
             '/config.wallet.WalletController/GetEntry',
             apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryRequest.SerializeToString,
             apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetMethod(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.wallet.WalletController/GetMethod',
+            apps_dot_wallet_dot_grpc_dot_wallet__pb2.MethodRequest.SerializeToString,
+            apps_dot_wallet_dot_grpc_dot_wallet__pb2.MethodResult.FromString,
             options,
             channel_credentials,
             insecure,

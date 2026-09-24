@@ -37,7 +37,9 @@ class WalletControllerStub:
     Convert: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.ExchangeRequest, _wallet_pb2.ExchangeResult]
     Deposit: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.DepositRequest, _wallet_pb2.DepositResult]
     Entries: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.EntriesRequest, _wallet_pb2.EntryPage]
+    GetBalance: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _wallet_pb2.BalanceResult]
     GetEntry: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.EntryRequest, _wallet_pb2.EntryResult]
+    GetMethod: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.MethodRequest, _wallet_pb2.MethodResult]
     GetWallet: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _wallet_pb2.WalletResult]
     Methods: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.MethodsRequest, _wallet_pb2.MethodList]
     PriceMovement: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.QuoteRequest, _wallet_pb2.QuoteResult]
@@ -53,7 +55,9 @@ class WalletControllerAsyncStub(WalletControllerStub):
     Convert: _aio.UnaryUnaryMultiCallable[_wallet_pb2.ExchangeRequest, _wallet_pb2.ExchangeResult]  # type: ignore[assignment]
     Deposit: _aio.UnaryUnaryMultiCallable[_wallet_pb2.DepositRequest, _wallet_pb2.DepositResult]  # type: ignore[assignment]
     Entries: _aio.UnaryUnaryMultiCallable[_wallet_pb2.EntriesRequest, _wallet_pb2.EntryPage]  # type: ignore[assignment]
+    GetBalance: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _wallet_pb2.BalanceResult]  # type: ignore[assignment]
     GetEntry: _aio.UnaryUnaryMultiCallable[_wallet_pb2.EntryRequest, _wallet_pb2.EntryResult]  # type: ignore[assignment]
+    GetMethod: _aio.UnaryUnaryMultiCallable[_wallet_pb2.MethodRequest, _wallet_pb2.MethodResult]  # type: ignore[assignment]
     GetWallet: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _wallet_pb2.WalletResult]  # type: ignore[assignment]
     Methods: _aio.UnaryUnaryMultiCallable[_wallet_pb2.MethodsRequest, _wallet_pb2.MethodList]  # type: ignore[assignment]
     PriceMovement: _aio.UnaryUnaryMultiCallable[_wallet_pb2.QuoteRequest, _wallet_pb2.QuoteResult]  # type: ignore[assignment]
@@ -98,11 +102,25 @@ class WalletControllerServicer(metaclass=_abc_1.ABCMeta):
     ) -> _typing.Union[_wallet_pb2.EntryPage, _abc.Awaitable[_wallet_pb2.EntryPage]]: ...
 
     @_abc_1.abstractmethod
+    def GetBalance(
+        self,
+        request: _empty_pb2.Empty,
+        context: _ServicerContext,
+    ) -> _typing.Union[_wallet_pb2.BalanceResult, _abc.Awaitable[_wallet_pb2.BalanceResult]]: ...
+
+    @_abc_1.abstractmethod
     def GetEntry(
         self,
         request: _wallet_pb2.EntryRequest,
         context: _ServicerContext,
     ) -> _typing.Union[_wallet_pb2.EntryResult, _abc.Awaitable[_wallet_pb2.EntryResult]]: ...
+
+    @_abc_1.abstractmethod
+    def GetMethod(
+        self,
+        request: _wallet_pb2.MethodRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_wallet_pb2.MethodResult, _abc.Awaitable[_wallet_pb2.MethodResult]]: ...
 
     @_abc_1.abstractmethod
     def GetWallet(

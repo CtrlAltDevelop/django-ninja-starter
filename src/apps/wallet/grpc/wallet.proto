@@ -10,7 +10,9 @@ service WalletController {
     rpc Convert(ExchangeRequest) returns (ExchangeResult) {}
     rpc Deposit(DepositRequest) returns (DepositResult) {}
     rpc Entries(EntriesRequest) returns (EntryPage) {}
+    rpc GetBalance(google.protobuf.Empty) returns (BalanceResult) {}
     rpc GetEntry(EntryRequest) returns (EntryResult) {}
+    rpc GetMethod(MethodRequest) returns (MethodResult) {}
     rpc GetWallet(google.protobuf.Empty) returns (WalletResult) {}
     rpc Methods(MethodsRequest) returns (MethodList) {}
     rpc PriceMovement(QuoteRequest) returns (QuoteResult) {}
@@ -29,6 +31,10 @@ message Balance {
     bool has_pending = 7;
     int32 checkpoint_sequence = 8;
     int32 unarchived_entries = 9;
+}
+
+message BalanceResult {
+    Balance balance = 1;
 }
 
 message CancelRequest {
@@ -204,6 +210,15 @@ message Method {
 
 message MethodList {
     repeated Method methods = 1;
+}
+
+message MethodRequest {
+    string code = 1;
+    string direction = 2;
+}
+
+message MethodResult {
+    Method method = 1;
 }
 
 message MethodsRequest {

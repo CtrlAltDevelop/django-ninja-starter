@@ -496,3 +496,65 @@ def test_the_queue_holds_only_what_somebody_can_still_act_on(
     queue = [row["id"] for row in wallet_service.awaiting_approval()]
 
     assert queue == [live["id"]]
+
+
+def test_a_payout_handed_to_its_rail_cannot_be_cancelled_by_the_account(
+    funded: Any, card: PaymentMethod
+) -> None:
+    """Cancelling would release the hold while the rail pays: the money goes twice."""
+    payout = wallet_service.withdraw(
+        funded, amount=Decimal("100"), method="card", reference="w", destination="4242"
+    )
+
+    with pytest.raises(InvalidTransition, match="can no longer be cancelled"):
+        wallet_service.cancel(funded, payout["id"])
+
+    assert wallet_service.entry(funded, payout["id"])["status"] == EntryStatus.PENDING
+
+
+def test_a_deposit_ceiling_is_on_what_the_customer_named(alice: Any, card: PaymentMethod) -> None:
+    """Card fees would bring 101 under a ceiling of 100 if the net were checked."""
+    from apps.wallet.errors import InvalidAmount
+
+    with override_settings(WALLET_MAX_DEPOSIT="100"), pytest.raises(InvalidAmount):
+        wallet_service.deposit(alice, amount=Decimal("101"), method="card", reference="d")
+
+
+def test_a_transfer_reference_reused_for_someone_else_is_refused(
+    funded: Any, bob: Any, cash: PaymentMethod
+) -> None:
+    """Returning the old transfer would tell the sender the new recipient was paid."""
+    from django.contrib.auth import get_user_model
+
+    from apps.wallet.errors import ReferenceReused
+
+    carol = get_user_model().objects.create_user(username="carol", email="carol@example.test")
+    wallet_service.transfer(funded, to_user=bob, amount=Decimal("10"), reference="r1")
+
+    with pytest.raises(ReferenceReused):
+        wallet_service.transfer(funded, to_user=carol, amount=Decimal("10"), reference="r1")
+
+
+def test_a_recipient_that_is_unknown_malformed_or_closed_looks_the_same(db: None) -> None:
+    """The transfer form must not say which account ids exist or are active."""
+    from uuid import uuid4
+
+    from django.contrib.auth import get_user_model
+
+    from apps.wallet.errors import WalletNotFound
+
+    gone = get_user_model().objects.create_user(
+        username="gone", email="gone@example.test", is_active=False
+    )
+    for account_id in ("nope", str(uuid4()), str(gone.pk)):
+        with pytest.raises(WalletNotFound, match="No such account"):
+            wallet_service.recipient(account_id)
+
+
+def test_a_malformed_entry_id_is_not_found_rather_than_an_error(alice: Any) -> None:
+    from apps.wallet.errors import WalletNotFound
+
+    with pytest.raises(WalletNotFound):
+        wallet_service.entry(alice, "nope")  # type: ignore[arg-type]
+    with pytest.raises(WalletNotFound):
+        wallet_service.cancel(alice, "nope")  # type: ignore[arg-type]

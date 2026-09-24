@@ -158,3 +158,16 @@ def test_metadata_that_is_not_a_json_object_is_refused(
         )
 
     assert refusal.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_the_balance_and_one_method_are_readable_on_their_own(
+    paying: Any, grpc_call: Callable[..., Any]
+) -> None:
+    """The same two reads REST and GraphQL publish, so no transport is short of one."""
+    token = access_token(paying)
+
+    balance = grpc_call(Stub, "GetBalance", Empty(), token=token).balance
+    method = grpc_call(Stub, "GetMethod", wallet_pb2.MethodRequest(code="card"), token=token).method
+
+    assert Decimal(balance.available) == Decimal("0")
+    assert method.code == "card"

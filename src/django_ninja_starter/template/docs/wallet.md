@@ -360,6 +360,9 @@ an operator in the admin.
 
 The one lifecycle verb an account does get is **cancel**, because giving up on a
 payment you started asserts nothing about whether money moved.
+The exception is a payout that has already been handed to its rail (it is
+pending, approved and has fired `payout_ready`): the rail may be sending the
+money, so cancelling it is refused and only the rail or an operator can end it.
 
 ## Confirming a movement
 
@@ -475,6 +478,10 @@ itself rather than in a server log that rotates. `approve` and `reject` fill in
 `settled_by_operator`, `failed_by_operator` and `expired_by_operator` into the
 entry's metadata; a reversal writes `reversed_by_operator`, and an adjustment
 `adjusted_by`.
+
+Those `*_by_operator` keys are for the back office: they stay on the row and in
+the admin, but the entry an account reads over HTTP, GraphQL or gRPC leaves them
+out, so customers are never handed staff account ids.
 
 Settling is the one that matters most, because it is where a row becomes money.
 An operator who can settle can turn a deposit nobody ever made into a real

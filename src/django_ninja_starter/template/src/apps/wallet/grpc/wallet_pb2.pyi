@@ -62,6 +62,26 @@ class Balance(_message.Message):
 Global___Balance: _TypeAlias = Balance  # noqa: Y015
 
 @_typing.final
+class BalanceResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    BALANCE_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def balance(self) -> Global___Balance: ...
+    def __init__(
+        self,
+        *,
+        balance: Global___Balance | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["balance", b"balance"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["balance", b"balance"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___BalanceResult: _TypeAlias = BalanceResult  # noqa: Y015
+
+@_typing.final
 class CancelRequest(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
@@ -737,6 +757,48 @@ class MethodList(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___MethodList: _TypeAlias = MethodList  # noqa: Y015
+
+@_typing.final
+class MethodRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    CODE_FIELD_NUMBER: _builtins.int
+    DIRECTION_FIELD_NUMBER: _builtins.int
+    code: _builtins.str
+    direction: _builtins.str
+    def __init__(
+        self,
+        *,
+        code: _builtins.str = ...,
+        direction: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["code", b"code", "direction", b"direction"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___MethodRequest: _TypeAlias = MethodRequest  # noqa: Y015
+
+@_typing.final
+class MethodResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    METHOD_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def method(self) -> Global___Method: ...
+    def __init__(
+        self,
+        *,
+        method: Global___Method | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["method", b"method"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["method", b"method"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___MethodResult: _TypeAlias = MethodResult  # noqa: Y015
 
 @_typing.final
 class MethodsRequest(_message.Message):
