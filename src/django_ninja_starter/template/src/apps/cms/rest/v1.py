@@ -70,11 +70,14 @@ async def read_page(
 ) -> dict:
     """The whole page: metadata, sections -- its own and shared -- and every field.
 
-    A draft is a 404 unless ``?preview=`` carries a token that names this page.
+    A draft is a 404 unless ``?preview=`` -- or an ``X-Preview-Token`` header,
+    which stays out of access logs and Referer -- carries a token that names
+    this page.
     """
+    token = preview or request.headers.get("X-Preview-Token") or None
     try:
         return await content_service.page(
-            page_name, resolve_language(request, language), preview=preview
+            page_name, resolve_language(request, language), preview=token
         )
     except ContentNotFound as missing:
         raise HttpError(404, str(missing)) from None

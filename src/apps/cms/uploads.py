@@ -34,7 +34,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 
-from apps.cms.fields import UPLOAD_EXTENSIONS
+from apps.cms.fields import REFUSED_EXTENSIONS, UPLOAD_EXTENSIONS
 
 #: What survives of an uploaded file's own name. Everything else becomes a
 #: hyphen, because the name ends up in a URL and a storage key, and "final
@@ -82,13 +82,15 @@ def check(upload: Any, field_type: Any) -> None:
     size = getattr(upload, "size", 0) or 0
     if limit and size > limit:
         raise ValidationError(f"That file is {size // 1024} KB. The limit is {limit // 1024} KB.")
+    extension = extension_of(getattr(upload, "name", ""))
+    if extension in REFUSED_EXTENSIONS:
+        raise ValidationError(f"{extension} files are not accepted: a browser would run them.")
     allowed = UPLOAD_EXTENSIONS.get(field_type)
     if not allowed:
         # An empty tuple means "this type takes anything" -- which is what a
         # generic File field is for. `None` means the type takes no uploads at
         # all, and the form never offers one, so there is nothing to refuse.
         return
-    extension = extension_of(getattr(upload, "name", ""))
     if extension not in allowed:
         raise ValidationError(
             f"{extension or 'That file'} is not one this field takes. "

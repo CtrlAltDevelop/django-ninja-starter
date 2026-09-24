@@ -79,3 +79,29 @@ def test_menus_are_listed(transactional_db: None, grpc_call: Callable[..., Any])
     reply = grpc_call(Stub, "Menus", Empty())
 
     assert list(reply.menus) == []
+
+
+def test_a_section_says_which_section_it_sits_in(
+    published: Page, grpc_call: Callable[..., Any]
+) -> None:
+    """Flattened, but not lost: the tree can be put back together."""
+    reply = grpc_call(Stub, "Page", cms_pb2.PageRequest(name="home"))
+
+    parents = {section.id: section.parent for section in reply.sections}
+    assert parents["plans"] == ""
+    assert parents["basic"] == "plans"
+
+
+def test_a_page_carries_its_structured_data(published: Page, grpc_call: Callable[..., Any]) -> None:
+    reply = grpc_call(Stub, "Page", cms_pb2.PageRequest(name="home"))
+
+    assert json.loads(reply.json_ld_json)["@context"] == "https://schema.org"
+
+
+def test_a_menu_keeps_its_sub_entries(
+    transactional_db: None, main_menu: Any, grpc_call: Callable[..., Any]
+) -> None:
+    reply = grpc_call(Stub, "Menu", cms_pb2.MenuRequest(name="main"))
+
+    about = next(item for item in reply.items if item.label == "About")
+    assert [child.label for child in about.children] == ["Team"]

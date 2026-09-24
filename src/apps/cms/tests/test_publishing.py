@@ -57,15 +57,23 @@ class TestState:
 
 
 class TestPreviewLinks:
+    def test_a_token_for_a_page_that_gave_up_its_slug_does_not(
+        self, client: Client, draft: Page
+    ) -> None:
+        """Renamed, and another draft took the old slug: the old link must not open it."""
+        token = make_token("secret", "someone-else")
+
+        assert client.get(f"{PAGES}/secret?preview={token}").status_code == 404
+
     def test_a_token_opens_the_draft_it_names(self, client: Client, draft: Page) -> None:
-        response = client.get(f"{PAGES}/secret?preview={make_token('secret')}")
+        response = client.get(f"{PAGES}/secret?preview={make_token('secret', draft.pk)}")
 
         assert data(response)["id"] == "secret"
         assert data(response)["status"] == "draft"
 
     def test_a_token_for_another_page_does_not(self, client: Client, draft: Page) -> None:
         """One preview link must not be a key to every unpublished page."""
-        response = client.get(f"{PAGES}/secret?preview={make_token('some-other-page')}")
+        response = client.get(f"{PAGES}/secret?preview={make_token('some-other-page', draft.pk)}")
 
         assert response.status_code == 404
 
@@ -75,11 +83,37 @@ class TestPreviewLinks:
     def test_an_expired_token_does_not(self, client: Client, draft: Page, settings: Any) -> None:
         settings.CMS_PREVIEW_TTL_SECONDS = -1
 
-        assert client.get(f"{PAGES}/secret?preview={make_token('secret')}").status_code == 404
+        assert (
+            client.get(f"{PAGES}/secret?preview={make_token('secret', draft.pk)}").status_code
+            == 404
+        )
 
     def test_a_scheduled_page_can_be_previewed_before_its_date(
         self, client: Client, scheduled: Page
     ) -> None:
-        response = client.get(f"{PAGES}/launch?preview={make_token('launch')}")
+        response = client.get(f"{PAGES}/launch?preview={make_token('launch', scheduled.pk)}")
 
         assert data(response)["id"] == "launch"
+
+
+@pytest.mark.parametrize("name", ["x.html", "logo.svg", "feed.xml", "app.js"])
+def test_nothing_a_browser_would_run_is_stored(name: str) -> None:
+    """Served from this origin it would run as whichever editor opened it."""
+    from django.core.exceptions import ValidationError
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    from apps.cms import uploads
+    from apps.cms.fields import FieldType
+
+    for field_type in (FieldType.FILE, FieldType.IMAGE):
+        with pytest.raises(ValidationError):
+            uploads.check(SimpleUploadedFile(name, b"<x/>"), field_type)
+
+
+def test_a_preview_token_can_travel_in_a_header(client: Client, draft: Page) -> None:
+    """Kept out of the URL, and so out of access logs and Referer."""
+    from apps.cms.preview import make_token
+
+    response = client.get(f"{PAGES}/secret", HTTP_X_PREVIEW_TOKEN=make_token("secret", draft.pk))
+
+    assert response.status_code == 200

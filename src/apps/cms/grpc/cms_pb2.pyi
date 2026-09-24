@@ -53,6 +53,34 @@ class ContentField(_message.Message):
 Global___ContentField: _TypeAlias = ContentField  # noqa: Y015
 
 @_typing.final
+class MenuChild(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    LABEL_FIELD_NUMBER: _builtins.int
+    PAGE_FIELD_NUMBER: _builtins.int
+    URL_FIELD_NUMBER: _builtins.int
+    NEW_TAB_FIELD_NUMBER: _builtins.int
+    label: _builtins.str
+    page: _builtins.str
+    url: _builtins.str
+    new_tab: _builtins.bool
+    def __init__(
+        self,
+        *,
+        label: _builtins.str = ...,
+        page: _builtins.str = ...,
+        url: _builtins.str = ...,
+        new_tab: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["label", b"label", "new_tab", b"new_tab", "page", b"page", "url", b"url"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___MenuChild: _TypeAlias = MenuChild  # noqa: Y015
+
+@_typing.final
 class MenuDetail(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
@@ -86,10 +114,13 @@ class MenuItem(_message.Message):
     PAGE_FIELD_NUMBER: _builtins.int
     URL_FIELD_NUMBER: _builtins.int
     NEW_TAB_FIELD_NUMBER: _builtins.int
+    CHILDREN_FIELD_NUMBER: _builtins.int
     label: _builtins.str
     page: _builtins.str
     url: _builtins.str
     new_tab: _builtins.bool
+    @_builtins.property
+    def children(self) -> _containers.RepeatedCompositeFieldContainer[Global___MenuChild]: ...
     def __init__(
         self,
         *,
@@ -97,10 +128,11 @@ class MenuItem(_message.Message):
         page: _builtins.str = ...,
         url: _builtins.str = ...,
         new_tab: _builtins.bool = ...,
+        children: _abc.Iterable[Global___MenuChild] | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["label", b"label", "new_tab", b"new_tab", "page", b"page", "url", b"url"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["children", b"children", "label", b"label", "new_tab", b"new_tab", "page", b"page", "url", b"url"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -180,10 +212,12 @@ class PageDetail(_message.Message):
     STATUS_FIELD_NUMBER: _builtins.int
     META_FIELD_NUMBER: _builtins.int
     SECTIONS_FIELD_NUMBER: _builtins.int
+    JSON_LD_JSON_FIELD_NUMBER: _builtins.int
     id: _builtins.str
     name: _builtins.str
     language: _builtins.str
     status: _builtins.str
+    json_ld_json: _builtins.str
     @_builtins.property
     def meta(self) -> Global___PageMeta: ...
     @_builtins.property
@@ -197,10 +231,11 @@ class PageDetail(_message.Message):
         status: _builtins.str = ...,
         meta: Global___PageMeta | None = ...,
         sections: _abc.Iterable[Global___Section] | None = ...,
+        json_ld_json: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["meta", b"meta"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["id", b"id", "language", b"language", "meta", b"meta", "name", b"name", "sections", b"sections", "status", b"status"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["id", b"id", "json_ld_json", b"json_ld_json", "language", b"language", "meta", b"meta", "name", b"name", "sections", b"sections", "status", b"status"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
@@ -343,9 +378,11 @@ class Section(_message.Message):
     NAME_FIELD_NUMBER: _builtins.int
     SHARED_FIELD_NUMBER: _builtins.int
     FIELDS_FIELD_NUMBER: _builtins.int
+    PARENT_FIELD_NUMBER: _builtins.int
     id: _builtins.str
     name: _builtins.str
     shared: _builtins.bool
+    parent: _builtins.str
     @_builtins.property
     def fields(self) -> _containers.RepeatedCompositeFieldContainer[Global___ContentField]: ...
     def __init__(
@@ -355,10 +392,11 @@ class Section(_message.Message):
         name: _builtins.str = ...,
         shared: _builtins.bool = ...,
         fields: _abc.Iterable[Global___ContentField] | None = ...,
+        parent: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["fields", b"fields", "id", b"id", "name", b"name", "shared", b"shared"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["fields", b"fields", "id", b"id", "name", b"name", "parent", b"parent", "shared", b"shared"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

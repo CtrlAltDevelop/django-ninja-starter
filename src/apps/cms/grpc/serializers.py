@@ -33,6 +33,9 @@ class Section(serializers.Serializer[dict[str, object]]):
     name = serializers.CharField()
     shared = serializers.BooleanField()
     fields = ContentField(many=True)
+    #: The id of the section this one sits inside, empty at the top level, so the
+    #: flat list can be put back into the tree REST and GraphQL return.
+    parent = serializers.CharField()
 
 
 class PageMeta(serializers.Serializer[dict[str, object]]):
@@ -44,6 +47,15 @@ class PageMeta(serializers.Serializer[dict[str, object]]):
     og_url = serializers.CharField()
 
 
+class MenuChild(serializers.Serializer[dict[str, object]]):
+    """An entry under another. One level, as the menu itself nests only one."""
+
+    label = serializers.CharField()
+    page = serializers.CharField()
+    url = serializers.CharField()
+    new_tab = serializers.BooleanField()
+
+
 class MenuItem(serializers.Serializer[dict[str, object]]):
     """One entry. ``page`` names a page in this CMS; ``url`` is anything else."""
 
@@ -51,6 +63,7 @@ class MenuItem(serializers.Serializer[dict[str, object]]):
     page = serializers.CharField()
     url = serializers.CharField()
     new_tab = serializers.BooleanField()
+    children = MenuChild(many=True)
 
 
 class PageSummary(serializers.Serializer[dict[str, object]]):

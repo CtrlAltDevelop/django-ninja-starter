@@ -852,7 +852,7 @@ def section_cms(api: Api) -> None:
     )
     api.get("/api/v1/cms/pages/about-us", token="", expect=404, show=False)
     api.get(
-        f"/api/v1/cms/pages/about-us?preview={make_token('about-us')}",
+        f"/api/v1/cms/pages/about-us?preview={make_token('about-us', about.pk)}",
         token="",
         show=False,
     )

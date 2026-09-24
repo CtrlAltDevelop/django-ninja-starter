@@ -110,7 +110,11 @@ open another.
 GET /api/v1/cms/pages/about-us?preview=ImFib3V0LXVzIg:1x1P3Q:5fKeYc…
 ```
 
-The admin shows the link on the page it belongs to.
+The admin shows the link on the page it belongs to. A link in a URL ends up in
+proxy logs and `Referer` headers, so a client that fetches the page itself can
+send the same token as an `X-Preview-Token` header instead. Either way it opens
+only the page it was made for, and not a different page that later takes the
+same address.
 
 ## Shared sections
 
@@ -214,8 +218,11 @@ production.
 Two things are refused before anything reaches storage:
 
 - **an extension the type does not take.** An image field takes `.avif`, `.gif`,
-  `.jpeg`, `.jpg`, `.png`, `.svg`, `.webp`; video and audio their own lists; a
-  `file` field takes anything, which is what it is for. Checked by extension
+  `.jpeg`, `.jpg`, `.png`, `.webp`; video and audio their own lists; a
+  `file` field takes anything else. Nothing a browser would run is taken by any
+  field — `.html`, `.htm`, `.xhtml`, `.svg`, `.xml`, `.js` — because served from
+  this origin it runs as whoever opens it; link to vector art on a CDN instead.
+  Checked by extension
   rather than by the browser's reported MIME type, because the extension is at
   least the name the file will be served under.
 - **a file over `DJANGO_CMS_MAX_UPLOAD_MB`** (20 by default; `0` means no limit,

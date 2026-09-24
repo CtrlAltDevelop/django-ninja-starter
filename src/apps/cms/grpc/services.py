@@ -47,22 +47,32 @@ def _field(field: dict[str, Any]) -> Any:
     )
 
 
-def _section(section: dict[str, Any]) -> Any:
+def _section(section: dict[str, Any], parent: str = "") -> Any:
     return _pb2().Section(
         id=section["id"],
         name=section["name"],
         shared=section.get("shared", False),
         fields=[_field(field) for field in section.get("fields", [])],
+        parent=parent,
     )
 
 
-def _flattened(sections: list[dict[str, Any]]) -> list[Any]:
+def _flattened(sections: list[dict[str, Any]], parent: str = "") -> list[Any]:
     """Walk the section tree depth-first into the flat list the message carries."""
     flat: list[Any] = []
     for section in sections:
-        flat.append(_section(section))
-        flat.extend(_flattened(section.get("children", [])))
+        flat.append(_section(section, parent))
+        flat.extend(_flattened(section.get("children", []), section["id"]))
     return flat
+
+
+def _menu_entry(message: Any, item: dict[str, Any]) -> Any:
+    return message(
+        label=item["label"],
+        page=item.get("page") or "",
+        url=item.get("url") or "",
+        new_tab=item.get("new_tab", False),
+    )
 
 
 class ContentService(generics.GenericService):
@@ -178,6 +188,9 @@ class ContentService(generics.GenericService):
                     page=item.get("page") or "",
                     url=item.get("url") or "",
                     new_tab=item.get("new_tab", False),
+                    children=[
+                        _menu_entry(pb2.MenuChild, child) for child in item.get("children", [])
+                    ],
                 )
                 for item in menu.get("items", [])
             ],
@@ -197,6 +210,7 @@ class ContentService(generics.GenericService):
             {"name": "status", "type": "string"},
             {"name": "meta", "type": PageMeta},
             {"name": "sections", "cardinality": "repeated", "type": Section},
+            {"name": "json_ld_json", "type": "string"},
         ],
         response_name="PageDetail",
     )
@@ -226,6 +240,7 @@ class ContentService(generics.GenericService):
                 og_url=meta.get("og_url", ""),
             ),
             sections=_flattened(page.get("sections", [])),
+            json_ld_json=json.dumps(page.get("json_ld", {}), default=str),
         )
 
 

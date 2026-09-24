@@ -21,21 +21,27 @@ def token_ttl() -> int:
     return int(getattr(settings, "CMS_PREVIEW_TTL_SECONDS", 60 * 60 * 24))
 
 
-def make_token(slug: str) -> str:
-    """A token that says "this page, for a while"."""
-    return signing.dumps(slug, salt=SALT)
+def make_token(slug: str, pk: object) -> str:
+    """A token that says "this page, for a while".
+
+    The row's id as well as its slug: a page renamed and another draft given
+    its old slug must not open for a link that was sent about the first one.
+    """
+    return signing.dumps([str(pk), slug], salt=SALT)
 
 
 def preview_url(page: object) -> str:
     """The link an editor copies. Relative, so it works wherever this is served."""
     slug = getattr(page, "slug", "")
-    return f"/api/v1/cms/pages/{slug}?preview={make_token(slug)}"
+    return f"/api/v1/cms/pages/{slug}?preview={make_token(slug, getattr(page, 'pk', ''))}"
 
 
-def slug_from_token(token: str) -> str | None:
-    """The page the token names, or ``None`` if it is stale, forged or truncated."""
+def target_of(token: str) -> tuple[str, str] | None:
+    """The ``(id, slug)`` the token names, or ``None`` if it is stale, forged or truncated."""
     try:
-        slug = signing.loads(token, salt=SALT, max_age=token_ttl())
+        target = signing.loads(token, salt=SALT, max_age=token_ttl())
     except signing.BadSignature:
         return None
-    return slug if isinstance(slug, str) else None
+    if isinstance(target, list) and len(target) == 2 and all(isinstance(x, str) for x in target):
+        return target[0], target[1]
+    return None

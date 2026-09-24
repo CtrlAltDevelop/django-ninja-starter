@@ -86,3 +86,11 @@ def test_a_page_carries_its_sections_and_typed_fields(home: Page) -> None:
     assert page["id"] == "home"
     assert page["sections"]
     assert all("type" in field for section in page["sections"] for field in section["fields"])
+
+
+def test_a_page_carries_its_structured_data(home: Any) -> None:
+    query = "query($name: String!) { cmsPage(name: $name) { jsonLd } }"
+
+    assert graphql(query, name="home")["data"]["cmsPage"]["jsonLd"]["@context"] == (
+        "https://schema.org"
+    )
