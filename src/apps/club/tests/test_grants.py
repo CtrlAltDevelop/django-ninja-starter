@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from apps.club.errors import ClubError, NotAMember
+from apps.club.models import XpAward
 from apps.club.services import club_service
 
 pytestmark = pytest.mark.django_db
@@ -20,7 +21,9 @@ def test_a_grant_pays_and_records_who_made_it(member: Any, operator: Any) -> Non
     )
 
     assert award["xp"] == 75
-    assert award["metadata"]["granted_by"] == str(operator.pk)
+    # Recorded on the row for the back office, and never shown to the member.
+    assert XpAward.objects.get(reference="goodwill:1").metadata["granted_by"] == str(operator.pk)
+    assert "granted_by" not in award["metadata"]
     assert club_service.me(member)["xp"] == 75
 
 

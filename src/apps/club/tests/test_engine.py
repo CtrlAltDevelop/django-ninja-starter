@@ -171,3 +171,61 @@ def test_a_mission_for_another_club_is_not_earned(
 
     assert track(member, test_event) == []
     assert club_service.me(member)["xp"] == 0
+
+
+def test_an_archived_club_pays_nothing(
+    member: Any, club: Club, mission: Mission, test_event: str
+) -> None:
+    """Its members are still `active`, but the club itself has stopped."""
+    Club.objects.filter(pk=club.pk).update(status="archived")
+
+    assert track(member, test_event) == []
+    assert not XpAward.objects.exists()
+
+
+def test_a_broken_signal_receiver_does_not_fail_the_join(
+    alice: Any, club: Club, django_capture_on_commit_callbacks: Any
+) -> None:
+    """Committed is committed: a receiver's mail error must not turn it into a 500."""
+    from apps.club import signals
+
+    def broken(**kwargs: Any) -> None:
+        raise RuntimeError("the mail server is down")
+
+    signals.member_joined.connect(broken)
+    try:
+        with django_capture_on_commit_callbacks(execute=True):
+            club_service.join(alice, club.slug)
+    finally:
+        signals.member_joined.disconnect(broken)
+
+    assert club_service.me(alice)["club"]["slug"] == club.slug
+
+
+def test_the_leaderboard_is_ranked_and_cut_by_the_database(
+    member: Any, bob: Any, club: Club
+) -> None:
+    club_service.join(bob, club.slug)
+    club_service.grant(bob, xp=10, reason="r", reference="b")
+
+    board = club_service.leaderboard(member, limit=1)
+
+    assert [row["username"] for row in board] == [bob.username]
+
+
+def test_rejoining_starts_the_membership_again(member: Any, club: Club, other_club: Club) -> None:
+    from apps.club.models import Membership
+
+    first = Membership.objects.get(user=member).joined_at
+    club_service.leave(member)
+    club_service.join(member, other_club.slug)
+
+    assert Membership.objects.get(user=member).joined_at > first
+
+
+def test_the_award_count_is_every_award_not_the_page(member: Any) -> None:
+    for number in range(3):
+        club_service.grant(member, xp=1, reason="r", reference=f"g{number}")
+
+    assert len(club_service.awards(member, limit=1)) == 1
+    assert club_service.award_count(member) == 3

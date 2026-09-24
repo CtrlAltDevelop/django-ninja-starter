@@ -215,6 +215,21 @@ class XpAwardInline(TabularInline):
         return False
 
 
+class MembershipForm(forms.ModelForm):
+    """Refuses, on add, the club the service would refuse: one taking nobody."""
+
+    class Meta:
+        model = Membership
+        fields = ("user", "club", "status", "left_at")
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean()
+        club = cleaned.get("club")
+        if self.instance._state.adding and club is not None and not club.accepts_members:
+            raise ValidationError(f"{club.name} is not taking members.")
+        return cleaned
+
+
 @admin.register(Membership)
 class MembershipAdmin(ModelAdmin):
     """Who is in which club, what they have earned, and the one way to pay by hand."""
@@ -222,6 +237,7 @@ class MembershipAdmin(ModelAdmin):
     list_display = ("user", "club", "status", "xp_display", "level_display", "joined_at")
     list_filter = (dropdown_filter("status", ChoicesDropdownFilter), "club")
     search_fields = ("user__username", "user__email", "club__name")
+    form = MembershipForm
     autocomplete_fields = ("user", "club")
     inlines = (XpAwardInline,)
     actions = ("grant_ten_xp",)
@@ -230,8 +246,15 @@ class MembershipAdmin(ModelAdmin):
         return super().get_queryset(request).select_related("user", "club")
 
     def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> Any:
-        """The XP is derived, so the screen shows it and cannot be used to set it."""
-        return ("joined_at", "left_at", "updated_at", "grant_link") if obj else ()
+        """The XP is derived, so the screen shows it and cannot be used to set it.
+
+        Account and club are fixed once saved: reassigning the account would hand
+        all its awards to somebody else, and moving club is joining, which is the
+        service's to do.
+        """
+        if obj is None:
+            return ()
+        return ("user", "club", "joined_at", "left_at", "updated_at", "grant_link")
 
     @display(description="Grant XP")
     def grant_link(self, instance: Membership) -> str:
@@ -361,4 +384,8 @@ class MissionProgressAdmin(ModelAdmin):
         return False
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        """No. Deleting progress resets its run count, and the next run's award is lost."""
         return False

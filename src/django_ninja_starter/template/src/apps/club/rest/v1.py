@@ -136,7 +136,7 @@ def list_awards(request: HttpRequest, limit: int | None = None, offset: int = 0)
     the point of deriving it.
     """
     awards = _run(club_service.awards, request.user, limit=limit, offset=offset)
-    return {"awards": awards, "count": len(awards)}
+    return {"awards": awards, "count": _run(club_service.award_count, request.user)}
 
 
 @router.get("/leaderboard", response=list[RankOut], summary="Your club, by XP")

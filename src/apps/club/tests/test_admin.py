@@ -201,3 +201,24 @@ def test_the_grant_screen_is_refused_without_permission_to_change_members(
     answer = client.get(reverse("admin:club_membership_grant", args=(membership.pk,)))
 
     assert answer.status_code == 403
+
+
+def test_mission_progress_cannot_be_deleted_by_hand(db: None) -> None:
+    """Deleting it resets the run count, and the next run's award then never pays."""
+    from django.contrib.admin.sites import AdminSite
+
+    from apps.club.admin import MissionProgressAdmin
+    from apps.club.models import MissionProgress
+
+    assert not MissionProgressAdmin(MissionProgress, AdminSite()).has_delete_permission(None)
+
+
+def test_a_membership_cannot_be_added_to_an_archived_club(alice: Any, club: Any) -> None:
+    from apps.club.admin import MembershipForm
+
+    club.status = "archived"
+    club.save()
+    form = MembershipForm(data={"user": alice.pk, "club": club.pk, "status": "active"})
+
+    assert not form.is_valid()
+    assert "not taking members" in str(form.errors)

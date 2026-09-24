@@ -27,6 +27,7 @@ from uuid import UUID
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.club import signals
@@ -147,6 +148,12 @@ class ClubService:
         )
         return [award_payload(award) for award in rows[max(0, offset) : max(0, offset) + page]]
 
+    def award_count(self, user: Any) -> int:
+        """How many awards :meth:`awards` pages through, so a client knows when to stop."""
+        membership = self.membership_for(user)
+        assert membership is not None
+        return XpAward.objects.filter(membership=membership, club_id=membership.club_id).count()
+
     def missions(self, user: Any) -> list[dict[str, Any]]:
         """This account's club's missions, each with how far this member has got."""
         membership = self.membership_for(user)
@@ -179,14 +186,17 @@ class ClubService:
                 club_id=membership.club_id, status=str(MembershipStatus.ACTIVE)
             )
             .select_related("user")
-            .annotate(earned=Sum("awards__xp", filter=Q(awards__club_id=membership.club_id)))
+            .annotate(
+                earned=Coalesce(Sum("awards__xp", filter=Q(awards__club_id=membership.club_id)), 0)
+            )
+            # Sorted and cut in the database: a big club is not loaded to show ten rows.
+            .order_by("-earned", "joined_at")[:page]
         )
         ranked = []
         for member in members:
-            xp = int(member.earned or 0)
+            xp = int(member.earned)
             reached, _ = level_for(rungs, xp)
             ranked.append((xp, member, reached))
-        ranked.sort(key=lambda row: (-row[0], row[1].joined_at))
         return [
             {
                 "position": index + 1,
@@ -196,7 +206,7 @@ class ClubService:
                 "level": level_payload(reached) if reached is not None else None,
                 "is_you": member.pk == membership.pk,
             }
-            for index, (xp, member, reached) in enumerate(ranked[:page])
+            for index, (xp, member, reached) in enumerate(ranked)
         ]
 
     # -- joining and leaving ----------------------------------------------
@@ -242,10 +252,19 @@ class ClubService:
         try:
             with transaction.atomic():
                 if existing is not None:
+                    # Re-read under a lock: two rejoins at once would otherwise both
+                    # see `left`, both succeed, and both announce a join.
+                    existing = Membership.objects.select_for_update().get(pk=existing.pk)
+                    if existing.status != str(MembershipStatus.LEFT):
+                        raise AlreadyAMember("This account is already in a club.")
                     existing.club = club
                     existing.status = str(MembershipStatus.ACTIVE)
                     existing.left_at = None
-                    existing.save(update_fields=["club", "status", "left_at", "updated_at"])
+                    # A rejoin is a new membership of this club, possibly a different one.
+                    existing.joined_at = timezone.now()
+                    existing.save(
+                        update_fields=["club", "status", "left_at", "joined_at", "updated_at"]
+                    )
                     membership = existing
                 else:
                     membership = Membership.objects.create(user=user, club=club)
@@ -410,6 +429,9 @@ class ClubService:
         membership = self.membership_for(occurrence.user, required=False)
         if membership is None or not membership.is_active:
             return []
+        if membership.club.status == str(ClubStatus.ARCHIVED):
+            # An archived club has stopped: nothing in it earns XP any more.
+            return []
         now = timezone.now()
         candidates = [
             mission
@@ -436,9 +458,16 @@ class ClubService:
         write the same progress row.
         """
         with transaction.atomic():
-            locked = Membership.objects.select_for_update().get(pk=membership.pk)
+            locked = (
+                Membership.objects.select_for_update(of=("self",))
+                .select_related("club")
+                .get(pk=membership.pk)
+            )
             if not locked.is_active or locked.club_id != mission.club_id:
                 # Left, suspended or moved club while this event was on its way.
+                return None
+            if locked.club.status == str(ClubStatus.ARCHIVED):
+                # Archived while this event was on its way.
                 return None
             progress, _ = MissionProgress.objects.get_or_create(membership=locked, mission=mission)
             if not _may_run_again(mission, progress, now=now):
@@ -497,15 +526,18 @@ class ClubService:
         rungs = ladder(membership.club_id)
         before, _ = level_for(rungs, xp_of(membership))
         try:
-            award = XpAward.objects.create(
-                membership=membership,
-                club_id=membership.club_id,
-                mission=mission,
-                xp=xp,
-                reason=reason,
-                reference=reference,
-                metadata=metadata or {},
-            )
+            # A savepoint, so a collision rolls back only this insert and not the
+            # caller's whole transaction (PostgreSQL aborts it otherwise).
+            with transaction.atomic():
+                award = XpAward.objects.create(
+                    membership=membership,
+                    club_id=membership.club_id,
+                    mission=mission,
+                    xp=xp,
+                    reason=reason,
+                    reference=reference,
+                    metadata=metadata or {},
+                )
         except IntegrityError:
             return None
         after, _ = level_for(rungs, xp_of(membership))
@@ -718,7 +750,9 @@ def award_payload(award: XpAward) -> dict[str, Any]:
         "reason": award.reason,
         "reference": award.reference,
         "mission_id": award.mission_id,
-        "metadata": award.metadata,
+        # `granted_by` is the operator's account id: kept on the row for the
+        # admin, never handed to the member reading their own awards.
+        "metadata": {k: v for k, v in award.metadata.items() if k != "granted_by"},
         "created_at": award.created_at.isoformat(),
     }
 

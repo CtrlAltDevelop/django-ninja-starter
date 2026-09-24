@@ -10,10 +10,13 @@ authoritative one. `level_changed` is the one an integration actually wants --
 it is the moment there is something to tell a member about.
 """
 
+import logging
 from typing import Any
 
 import django.dispatch
 from django.db import transaction
+
+logger = logging.getLogger(__name__)
 
 #: An account joined a club. ``membership``.
 member_joined = django.dispatch.Signal()
@@ -35,4 +38,15 @@ mission_completed = django.dispatch.Signal()
 
 def announce(signal: django.dispatch.Signal, **payload: Any) -> None:
     """Send one signal once the work that caused it is really committed."""
-    transaction.on_commit(lambda: signal.send(sender=None, **payload))
+    transaction.on_commit(lambda: _send(signal, payload))
+
+
+def _send(signal: django.dispatch.Signal, payload: dict[str, Any]) -> None:
+    """Deliver to every receiver: one broken listener must not fail a join or stop the rest."""
+    for receiver, outcome in signal.send_robust(sender=None, **payload):
+        if isinstance(outcome, Exception):
+            logger.error(
+                "A club signal receiver failed: %r",
+                receiver,
+                exc_info=(type(outcome), outcome, outcome.__traceback__),
+            )
