@@ -25,7 +25,12 @@ from apps.notifications.rest.schemas import (
     ReadOut,
     UnreadCountOut,
 )
-from apps.notifications.services import DEFAULT_PAGE, NotificationNotFound, notification_service
+from apps.notifications.services import (
+    DEFAULT_PAGE,
+    NotificationNotFound,
+    notification_service,
+    window,
+)
 
 try:  # pragma: no cover - exercised by whichever branch the project installs
     from infrastructure.auth.core.sessions import api_auth
@@ -83,8 +88,28 @@ def list_notifications(
             request.user, limit=limit, offset=offset, **filters
         ),
         "total": notification_service.count(request.user, **filters),
-        "limit": limit,
-        "offset": offset,
+        "limit": window(limit, offset)[0],
+        "offset": window(limit, offset)[1],
+    }
+
+
+@router.get("/count", response=UnreadCountOut, summary="Count what matches a filter")
+def count_notifications(
+    request: HttpRequest,
+    unread: bool | None = None,
+    level: Level | None = None,
+    audience: Audience | None = None,
+    include_dismissed: bool = False,
+) -> dict[str, int]:
+    """How many rows the list would page through, without the rows. The same filters."""
+    return {
+        "count": notification_service.count(
+            request.user,
+            unread=unread,
+            level=level,
+            audience=audience,
+            include_dismissed=include_dismissed,
+        )
     }
 
 

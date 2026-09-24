@@ -90,6 +90,12 @@ class NotificationsConfig(AppConfig):
                 minimum=0,
                 maximum=500,
             ),
+            Requirement(
+                "NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE",
+                env="DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE",
+                purpose="how many commands one socket may send a minute; zero turns it off",
+                minimum=0,
+            ),
         ),
     )
 

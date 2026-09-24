@@ -335,7 +335,7 @@ AUTH_SMS_FROM = os.getenv("DJANGO_AUTH_SMS_FROM", "")
 AUTH_MAGIC_LINK_BASE_URL = os.getenv("DJANGO_AUTH_MAGIC_LINK_BASE_URL", "")
 AUTH_PASSWORD_RESET_BASE_URL = os.getenv("DJANGO_AUTH_PASSWORD_RESET_BASE_URL", "")
 AUTH_AUTO_CREATE_USERS = os.getenv("DJANGO_AUTH_AUTO_CREATE_USERS", "true").lower() == "true"
-AUTH_TOTP_ISSUER = os.getenv("DJANGO_AUTH_TOTP_ISSUER", "{{ project_title }}")
+AUTH_TOTP_ISSUER = os.getenv("DJANGO_AUTH_TOTP_ISSUER", "Django Ninja Starter")
 AUTH_RECOVERY_CODE_COUNT = int(os.getenv("DJANGO_AUTH_RECOVERY_CODE_COUNT", "10"))
 
 # Signed credentials. HS256 needs only DJANGO_SECRET_KEY to work out of the box;
@@ -344,7 +344,7 @@ AUTH_RECOVERY_CODE_COUNT = int(os.getenv("DJANGO_AUTH_RECOVERY_CODE_COUNT", "10"
 AUTH_JWT_ALGORITHM = os.getenv("DJANGO_AUTH_JWT_ALGORITHM", "HS256").upper()
 AUTH_JWT_SIGNING_KEY = os.getenv("DJANGO_AUTH_JWT_SIGNING_KEY", "")
 AUTH_JWT_VERIFYING_KEY = os.getenv("DJANGO_AUTH_JWT_VERIFYING_KEY", "")
-AUTH_JWT_ISSUER = os.getenv("DJANGO_AUTH_JWT_ISSUER", "{{ project_name }}")
+AUTH_JWT_ISSUER = os.getenv("DJANGO_AUTH_JWT_ISSUER", "django-ninja-starter")
 AUTH_JWT_AUDIENCE = os.getenv("DJANGO_AUTH_JWT_AUDIENCE", "")
 AUTH_JWT_LEEWAY_SECONDS = int(os.getenv("DJANGO_AUTH_JWT_LEEWAY_SECONDS", "30"))
 
@@ -522,6 +522,12 @@ NOTIFICATIONS_CHANNEL_PREFIX = os.getenv("DJANGO_NOTIFICATIONS_CHANNEL_PREFIX", 
 # endpoint is where the rest of the history lives; this is only so that a client
 # that reconnects does not have to make an HTTP call to find out what it missed.
 NOTIFICATIONS_SOCKET_BACKLOG = int(os.getenv("DJANGO_NOTIFICATIONS_SOCKET_BACKLOG", "20"))
+# How many commands one socket may send a minute before it is refused; zero
+# turns the limit off. Each `list` is two queries and each `authenticate` a
+# token lookup, so a loop on one connection would otherwise cost the database.
+NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE = int(
+    os.getenv("DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE", "120")
+)
 # How long a notification is kept. `manage.py notifications_prune` deletes what
 # is older, and nothing does so on its own: deleting rows on a timer nobody
 # asked for is the kind of surprise a starter should not ship. Zero -- the

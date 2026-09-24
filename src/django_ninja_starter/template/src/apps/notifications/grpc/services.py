@@ -16,7 +16,12 @@ from django_socio_grpc import generics
 from django_socio_grpc.decorators import grpc_action
 
 from apps.notifications.grpc.serializers import Notification
-from apps.notifications.services import DEFAULT_PAGE, NotificationNotFound, notification_service
+from apps.notifications.services import (
+    DEFAULT_PAGE,
+    NotificationNotFound,
+    notification_service,
+    window,
+)
 from infrastructure.common.errors import ApiError
 from infrastructure.common.grpc.errors import action, require_caller
 from infrastructure.common.identity import grpc_caller
@@ -100,8 +105,8 @@ class NotificationService(generics.GenericService):
         return _pb2().NotificationList(
             notifications=[_notification(row) for row in rows],
             total=total,
-            limit=limit,
-            offset=request.offset,
+            limit=window(limit, request.offset)[0],
+            offset=window(limit, request.offset)[1],
         )
 
     @grpc_action(

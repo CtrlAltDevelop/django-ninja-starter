@@ -55,10 +55,7 @@ class Command(BaseCommand):
             )
             return
 
-        # Counted before the delete, because `prune` reports rows across every
-        # cascaded table and "3 deleted" should mean three notifications.
-        count = Notification.objects.filter(created_at__lt=cutoff).count()
-        prune(cutoff)
+        count = prune(cutoff)
         self.stdout.write(
             self.style.SUCCESS(
                 f"Deleted {count} notification(s) created before {cutoff:%Y-%m-%d %H:%M}."

@@ -18,6 +18,7 @@ guide.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/notifications` | Bearer | List every notification this account can see |
+| `GET` | `/api/v1/notifications/count` | Bearer | Count what matches a filter |
 | `POST` | `/api/v1/notifications/dismiss-all` | Bearer | Empty the tray |
 | `POST` | `/api/v1/notifications/read-all` | Bearer | Mark everything read |
 | `GET` | `/api/v1/notifications/unread-count` | Bearer | Count what is still unread |
@@ -169,6 +170,19 @@ this order:
 | Subprotocol | `Sec-WebSocket-Protocol: bearer, …` | A browser that would rather not put a token in a URL |
 | Header | `Authorization: Bearer …` | A native or server-side client |
 | Cookie | `sessionid=…` | A browser signed in through Django's own login |
+
+Prefer the subprotocol or an `authenticate` frame over `?token=`: a URL ends up
+in proxy and server access logs, and whoever reads those can replay the token
+until it expires. Use the query string only for a short-lived access token.
+
+An open connection re-checks its credential about once a minute. A token that
+was revoked, or an account that was deactivated, is answered with a
+`deauthenticated` frame carrying `"reason": "expired"`, and private delivery
+stops.
+
+Each connection may send `DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE`
+commands a minute (120 by default, zero for no limit); past that a command is
+answered with a `RATE_LIMITED` error. A frame larger than 64 KB is refused.
 
 A subprotocol that is offered is echoed on accept, because a browser that
 offered one and is answered with none closes the connection itself. A handshake
@@ -444,6 +458,7 @@ broadcasts being the case every caller forgets.
 | `DJANGO_NOTIFICATIONS_BROKER` | Recommended | how a notification created in one process reaches sockets held by another. |
 | `DJANGO_NOTIFICATIONS_RETENTION_DAYS` | Optional | how long notifications are kept before `manage.py notifications_prune` deletes them. 0 or more. |
 | `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG` | Optional | how many unread notifications a client is caught up with on connect. Range 0–500. |
+| `DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE` | Optional | how many commands one socket may send a minute; zero turns it off. 0 or more. |
 <!-- /generated:settings -->
 
 ```bash

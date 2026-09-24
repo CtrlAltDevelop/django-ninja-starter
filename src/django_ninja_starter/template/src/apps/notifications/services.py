@@ -27,6 +27,8 @@ from uuid import UUID
 
 from apps.notifications.events import payload, publish_state
 from apps.notifications.models import (
+    Audience,
+    Level,
     Notification,
     dismiss,
     dismiss_all,
@@ -36,6 +38,8 @@ from apps.notifications.models import (
     restore,
     unread_count,
 )
+from infrastructure.common.errors import ApiError
+from infrastructure.common.responses import ResponseTitle
 
 MAX_PAGE = 200
 DEFAULT_PAGE = 50
@@ -47,6 +51,15 @@ class NotificationNotFound(LookupError):
     The two are deliberately the same answer: saying which is which would
     confirm the existence of another account's mail.
     """
+
+
+def window(limit: int, offset: int) -> tuple[int, int]:
+    """The page actually served for a requested ``limit`` and ``offset``.
+
+    Every transport echoes these rather than what it was sent, so a client
+    paging by ``offset += limit`` never steps over rows it was not given.
+    """
+    return max(1, min(limit, MAX_PAGE)), max(0, offset)
 
 
 class NotificationService:
@@ -63,6 +76,14 @@ class NotificationService:
         audience: str | None,
         include_dismissed: bool,
     ) -> Any:
+        # Checked here rather than per transport: GraphQL, gRPC and the socket take
+        # these as free strings, and a typo should be refused, not an empty page.
+        for name, value, choices in (("level", level, Level), ("audience", audience, Audience)):
+            if value and value not in choices.values:
+                raise ApiError(
+                    f"Unknown {name} {value!r}. Use one of: {', '.join(choices.values)}.",
+                    title=ResponseTitle.VALIDATION_ERROR,
+                )
         notifications = Notification.objects.for_user(user, include_dismissed=include_dismissed)
         if unread is True:
             notifications = notifications.unread()
@@ -94,8 +115,7 @@ class NotificationService:
         on their own. Dismissed rows are left out unless asked for, because
         dismissing is a request not to be shown something again.
         """
-        page = max(1, min(limit, MAX_PAGE))
-        start = max(0, offset)
+        page, start = window(limit, offset)
         notifications = self._page(
             user,
             unread=unread,

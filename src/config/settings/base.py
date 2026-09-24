@@ -522,6 +522,12 @@ NOTIFICATIONS_CHANNEL_PREFIX = os.getenv("DJANGO_NOTIFICATIONS_CHANNEL_PREFIX", 
 # endpoint is where the rest of the history lives; this is only so that a client
 # that reconnects does not have to make an HTTP call to find out what it missed.
 NOTIFICATIONS_SOCKET_BACKLOG = int(os.getenv("DJANGO_NOTIFICATIONS_SOCKET_BACKLOG", "20"))
+# How many commands one socket may send a minute before it is refused; zero
+# turns the limit off. Each `list` is two queries and each `authenticate` a
+# token lookup, so a loop on one connection would otherwise cost the database.
+NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE = int(
+    os.getenv("DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE", "120")
+)
 # How long a notification is kept. `manage.py notifications_prune` deletes what
 # is older, and nothing does so on its own: deleting rows on a timer nobody
 # asked for is the kind of surprise a starter should not ship. Zero -- the

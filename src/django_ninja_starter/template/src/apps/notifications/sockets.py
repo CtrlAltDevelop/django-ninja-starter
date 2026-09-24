@@ -45,6 +45,7 @@ client translates one set of strings rather than two.
 
 import asyncio
 import json
+import time
 from typing import Any
 from uuid import UUID
 
@@ -65,13 +66,24 @@ from apps.notifications.services import (
     DEFAULT_PAGE,
     NotificationNotFound,
     notification_service,
+    window,
 )
+from infrastructure.common.errors import ApiError
 
 AUTHENTICATION_REQUIRED = "AUTHENTICATION_REQUIRED"
 BAD_REQUEST = "BAD_REQUEST"
 CONFLICT = "CONFLICT"
 NOT_FOUND = "NOT_FOUND"
 TOKEN_INVALID = "TOKEN_INVALID"
+
+#: How often, at most, a signed-in connection re-checks its credential. A token
+#: revoked or an account deactivated stops private delivery within this long.
+RECHECK_SECONDS = 60
+
+#: The largest command frame accepted. Every command is a few fields of JSON.
+MAX_FRAME_BYTES = 64 * 1024
+
+RATE_LIMITED = "RATE_LIMITED"
 
 
 class SocketError(Exception):
@@ -147,6 +159,14 @@ class NotificationSocket:
         self._send = send
         self._subscription: Subscription | None = None
         self._user: Any | None = None
+        # The account whose private channel this connection has joined. Kept
+        # after sign-out, because the channel cannot be left again.
+        self._joined: Any | None = None
+        # What signed this connection in, re-resolved every RECHECK_SECONDS.
+        self._credentials: Credentials | None = None
+        self._checked = 0.0
+        # When this connection's recent commands arrived, for the per-minute limit.
+        self._recent: list[float] = []
 
     # -- plumbing ---------------------------------------------------------
 
@@ -156,9 +176,12 @@ class NotificationSocket:
     async def _send_error(self, title: str, description: str) -> None:
         await self._send_json({"type": "error", "title": title, "description": description})
 
-    async def _adopt(self, user: Any) -> None:
+    async def _adopt(self, user: Any, credentials: Credentials) -> None:
         """Attach an account to this connection and start delivering its private channel."""
         self._user = user
+        self._joined = user.pk
+        self._credentials = credentials
+        self._checked = time.monotonic()
         assert self._subscription is not None
         await self._subscription.add(user_channel(user.pk))
 
@@ -179,7 +202,7 @@ class NotificationSocket:
             await self._subscription.add(global_channel())
             user = await sync_to_async(user_from_credentials)(credentials)
             if user is not None:
-                await self._adopt(user)
+                await self._adopt(user, credentials)
             await self._send_json(
                 {
                     "type": "ready",
@@ -235,6 +258,7 @@ class NotificationSocket:
                 done, _ = await asyncio.wait(
                     {from_client, from_broker}, return_when=asyncio.FIRST_COMPLETED
                 )
+                await self._recheck()
                 if from_broker in done:
                     frame = from_broker.result()
                     if self._is_for_us(frame):
@@ -250,12 +274,50 @@ class NotificationSocket:
             for task in (from_client, from_broker):
                 task.cancel()
 
+    def _over_limit(self) -> bool:
+        """Whether this command is one more than the connection may send this minute."""
+        allowed = settings.NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE
+        if not allowed:
+            return False
+        now = time.monotonic()
+        self._recent = [at for at in self._recent if now - at < 60]
+        if len(self._recent) >= allowed:
+            return True
+        self._recent.append(now)
+        return False
+
+    async def _recheck(self) -> None:
+        """Sign the connection out if its credential no longer names an active account.
+
+        Resolved once at sign-in and then trusted would mean a revoked token or a
+        deactivated account kept receiving private notifications until the
+        socket happened to close.
+        """
+        if self._user is None or self._credentials is None:
+            return
+        if time.monotonic() - self._checked < RECHECK_SECONDS:
+            return
+        self._checked = time.monotonic()
+        user = await sync_to_async(user_from_credentials)(self._credentials)
+        if user is not None and user.pk == self._user.pk and user.is_active:
+            return
+        was, self._user = self._user, None
+        await self._send_json(
+            {"type": "deauthenticated", "user": user_summary(was), "reason": "expired"}
+        )
+
     # -- commands ---------------------------------------------------------
 
     async def _handle(self, message: dict[str, Any]) -> None:
         text = message.get("text")
         if text is None:
             await self._send_error(BAD_REQUEST, "Send text frames, not binary ones.")
+            return
+        if len(text) > MAX_FRAME_BYTES:
+            await self._send_error(BAD_REQUEST, "That frame is too large to be a command.")
+            return
+        if self._over_limit():
+            await self._send_error(RATE_LIMITED, "Too many commands. Slow down and try again.")
             return
         try:
             frame = json.loads(text)
@@ -282,6 +344,8 @@ class NotificationSocket:
             await handler(frame)
         except SocketError as error:
             await self._send_error(error.title, error.description)
+        except ApiError as error:
+            await self._send_error(str(error.title or BAD_REQUEST), str(error))
 
     #: Every command this socket accepts, in the order the documentation lists
     #: them: the four that answer with no account at all, then the rest, which
@@ -342,11 +406,17 @@ class NotificationSocket:
             raise SocketError(
                 CONFLICT, "This connection is already signed in. Open a new one instead."
             )
+        if self._joined is not None and self._joined != user.pk:
+            # Signed out, but still joined to the last account's channel:
+            # signing somebody else in here would hand them that feed.
+            raise SocketError(
+                CONFLICT, "This connection belonged to another account. Open a new one instead."
+            )
         return user
 
-    async def _welcome(self, user: Any) -> None:
+    async def _welcome(self, user: Any, token: str) -> None:
         """Adopt an account, say so, and hand over what it missed while away."""
-        await self._adopt(user)
+        await self._adopt(user, Credentials(token=token))
         await self._send_json(
             {
                 "type": "authenticated",
@@ -376,7 +446,7 @@ class NotificationSocket:
             return
         user = await self._account_for(token)
         if self._user is None:
-            await self._welcome(user)
+            await self._welcome(user, token)
 
     async def _authenticate(self, frame: dict[str, Any]) -> None:
         """Prove who you are, and start receiving what was addressed to you.
@@ -385,7 +455,8 @@ class NotificationSocket:
         answered -- a client that refreshed its token should neither have to
         reconnect nor be left waiting for a reply that never comes.
         """
-        await self._welcome(await self._account_for(str(frame.get("token", ""))))
+        token = str(frame.get("token", ""))
+        await self._welcome(await self._account_for(token), token)
 
     async def _whoami(self, frame: dict[str, Any]) -> None:
         """Who this connection currently belongs to, if anybody.
@@ -450,8 +521,8 @@ class NotificationSocket:
                 "type": "list",
                 "notifications": notifications,
                 "total": total,
-                "limit": limit,
-                "offset": offset,
+                "limit": window(limit, offset)[0],
+                "offset": window(limit, offset)[1],
             }
         )
 

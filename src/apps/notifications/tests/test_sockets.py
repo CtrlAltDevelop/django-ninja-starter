@@ -1154,6 +1154,22 @@ def test_signing_back_in_after_signing_out_works(alice: Any) -> None:
     assert back["user"]["username"] == "alice"
 
 
+def test_another_account_cannot_sign_in_where_one_signed_out(alice: Any, bob: Any) -> None:
+    """The connection is still on Alice's channel, so Bob would get her feed."""
+    alices, bobs = access_token(alice), access_token(bob)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={alices}")
+        await client.open()
+        await client.next_frame()
+        await client.command({"command": "deauthenticate"})
+        refusal = await client.command({"command": "authenticate", "token": bobs})
+        await client.close()
+        return refusal
+
+    assert run(scenario())["title"] == "CONFLICT"
+
+
 def test_signing_out_when_nobody_was_signed_in_is_answered_not_refused() -> None:
     async def scenario() -> dict[str, Any]:
         client = socket()
@@ -1187,3 +1203,66 @@ def test_the_list_command_honours_the_unread_flag(alice: Any) -> None:
     outstanding, done = run(scenario())
     assert [row["subject"] for row in outstanding["notifications"]] == ["Still outstanding"]
     assert [row["subject"] for row in done["notifications"]] == ["Old news"]
+
+
+def test_a_deactivated_account_is_signed_out_of_an_open_socket(
+    alice: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The credential is re-checked, so private delivery stops once it no longer holds."""
+    from apps.notifications import sockets
+
+    token = access_token(alice)
+    monkeypatch.setattr(sockets, "RECHECK_SECONDS", 0)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await sync_to_async(type(alice).objects.filter(pk=alice.pk).update)(is_active=False)
+        gone = await client.command({"command": "ping"})
+        await client.close()
+        return gone
+
+    gone = run(scenario())
+    assert gone["type"] == "deauthenticated"
+    assert gone["reason"] == "expired"
+
+
+def test_a_socket_that_sends_too_many_commands_is_refused(alice: Any) -> None:
+    """One connection looping `list` would otherwise cost two queries a frame."""
+    token = access_token(alice)
+
+    async def scenario() -> list[str]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        answers = [(await client.command({"command": "ping"}))["type"] for _ in range(3)]
+        await client.close()
+        return answers
+
+    with override_settings(NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE=2):
+        answers = run(scenario())
+    assert answers[:2] == ["pong", "pong"]
+    assert answers[2] == "error"
+
+
+def test_an_unknown_level_is_refused_rather_than_an_empty_page(alice: Any) -> None:
+    from apps.notifications.services import notification_service
+    from infrastructure.common.errors import ApiError
+
+    with pytest.raises(ApiError, match="Unknown level"):
+        notification_service.list(alice, level="loud")
+
+
+def test_dismissing_everything_keeps_when_each_was_first_read(alice: Any) -> None:
+    from apps.notifications.models import NotificationReceipt, dismiss_all, mark_read
+
+    earlier = notify_user(alice, "Seen last week")
+    mark_read(alice, earlier)
+    first_read = NotificationReceipt.objects.get(notification=earlier, user=alice).read_at
+
+    dismiss_all(alice)
+
+    receipt = NotificationReceipt.objects.get(notification=earlier, user=alice)
+    assert receipt.read_at == first_read
+    assert receipt.dismissed_at is not None
