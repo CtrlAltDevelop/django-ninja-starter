@@ -936,16 +936,65 @@ def section_notifications(api: Api) -> None:
     api.get("/api/v1/notifications?unread=true", show=False)
 
     note(
+        "`/count` takes the list's filters and answers with the number alone -- "
+        '"3 warnings" without fetching them.'
+    )
+    api.get("/api/v1/notifications/count?level=warning")
+
+    note(
         "Another account's notification is a 404, the same answer an id that "
         "never existed gets: saying which would confirm somebody else's mail."
     )
     theirs = Notification.objects.filter(recipient=stranger).get()
     api.post(f"/api/v1/notifications/{theirs.pk}/read", expect=404, show=False)
 
+    note("One notification on its own -- what a link in an email opens.")
+    api.get(f"/api/v1/notifications/{export.pk}", show=False)
+
+    note("Marked unread again, then taken out of the tray and put back: each is per account.")
+    api.post(f"/api/v1/notifications/{export.pk}/unread", show=False)
+    api.post(f"/api/v1/notifications/{export.pk}/dismiss", show=False)
+    api.post(f"/api/v1/notifications/{export.pk}/restore", show=False)
+
     note("Clearing the tray, so the socket below starts from a known count.")
     api.post("/api/v1/notifications/read-all")
 
     asyncio.run(_notification_sockets(api, zoe))
+
+    note(
+        "Emptying the tray dismisses everything, and keeps the moment each one was "
+        "first read -- a notification read last week was not read just now."
+    )
+    api.post("/api/v1/notifications/dismiss-all")
+
+    _notifications_surface_covered(api)
+
+
+def _notifications_surface_covered(api: Api) -> None:
+    """Assert the section above called every route notifications publishes.
+
+    The same check the support, wallet and club sections make of themselves,
+    asked of the router rather than of a list kept here.
+    """
+    from apps.notifications.rest.v1 import router
+
+    missed: list[str] = []
+    total = 0
+    for path, view in router.path_operations.items():
+        literals = re.split(r"\{[^}]+\}", f"/api/v1/notifications{path}")
+        pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+        for operation in view.operations:
+            for method in operation.methods:
+                total += 1
+                if not any(
+                    seen_method == method and pattern.match(seen_path)
+                    for seen_method, seen_path in api.visited
+                ):
+                    missed.append(f"{method} /api/v1/notifications{path}")
+
+    if missed:
+        raise WalkthroughError("the notifications tour skipped " + ", ".join(sorted(missed)))
+    print(f"  {DIM}│ toured {total} of {total} notification endpoints{OFF}")
 
 
 async def _notification_sockets(api: Api, user: Any) -> None:

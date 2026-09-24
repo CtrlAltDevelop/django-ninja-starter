@@ -255,8 +255,12 @@ class NotificationSocket:
         from_broker = asyncio.ensure_future(self._subscription.get())
         try:
             while True:
+                # Woken at least every RECHECK_SECONDS, so an idle connection
+                # is told promptly that its credential no longer holds.
                 done, _ = await asyncio.wait(
-                    {from_client, from_broker}, return_when=asyncio.FIRST_COMPLETED
+                    {from_client, from_broker},
+                    timeout=max(RECHECK_SECONDS, 1),
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
                 await self._recheck()
                 if from_broker in done:

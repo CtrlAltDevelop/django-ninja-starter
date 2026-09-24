@@ -252,3 +252,12 @@ def test_the_badge_is_readable_on_its_own(
     announcement: Notification, for_alice: Notification, alice: Any
 ) -> None:
     assert graphql(LIST, alice)["data"]["unreadNotificationCount"] == 2
+
+
+def test_a_filtered_count_matches_rest_and_grpc(
+    announcement: Notification, for_alice: Notification, alice: Any
+) -> None:
+    query = "query($level: String) { notificationCount(level: $level) }"
+
+    assert graphql(query, alice)["data"]["notificationCount"] == 2
+    assert "errors" in graphql(query, alice, level="loud")

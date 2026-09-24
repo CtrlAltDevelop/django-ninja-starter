@@ -94,6 +94,24 @@ class Query:
     def unread_notification_count(self, info: Info[Any, Any]) -> int:
         return notification_service.unread_count(_caller(info))
 
+    @strawberry.field(description="How many notifications match a filter, without the rows.")
+    @resolver
+    def notification_count(
+        self,
+        info: Info[Any, Any],
+        unread: bool | None = None,
+        level: str | None = None,
+        audience: str | None = None,
+        include_dismissed: bool = False,
+    ) -> int:
+        return notification_service.count(
+            _caller(info),
+            unread=unread,
+            level=level,
+            audience=audience,
+            include_dismissed=include_dismissed,
+        )
+
 
 @strawberry.type
 class Mutation:
