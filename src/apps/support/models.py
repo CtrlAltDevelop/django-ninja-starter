@@ -664,9 +664,9 @@ class Ticket(models.Model):
     def staff_ids(self) -> list[Any]:
         """The accounts on the desk side of this thread, for addressing a notification."""
         return list(
-            self.participants.filter(role__in=(Role.AGENT, Role.OBSERVER)).values_list(
-                "user_id", flat=True
-            )
+            self.participants.filter(
+                role__in=(Role.AGENT, Role.OBSERVER), user__is_staff=True
+            ).values_list("user_id", flat=True)
         )
 
 
@@ -1094,7 +1094,7 @@ def _advance_ticket(ticket: Ticket, message: Message, author: Any | None) -> Non
     if not from_staff and substantive and ticket.status in (Status.PENDING, Status.RESOLVED):
         ticket.status = Status.OPEN
         ticket.resolved_at = None
-        fields.extend(["status", "resolved_at"])
+        fields.extend(["status", "resolved_at", *_clear_rating(ticket)])
 
     ticket.save(update_fields=sorted(set(fields)))
 
@@ -1199,8 +1199,10 @@ def set_status(ticket: Ticket, status: str, *, by: Any | None = None) -> bool:
     fields = ["status", "updated_at"]
     ticket.status = status
     if status == Status.RESOLVED:
+        # From closed as well as from live: a resolved thread is not closed.
         ticket.resolved_at = now
-        fields.append("resolved_at")
+        ticket.closed_at = None
+        fields.extend(["resolved_at", "closed_at"])
     if status == Status.CLOSED:
         ticket.closed_at = now
         ticket.resolved_at = ticket.resolved_at or now
@@ -1208,9 +1210,21 @@ def set_status(ticket: Ticket, status: str, *, by: Any | None = None) -> bool:
     if status in LIVE_STATUSES:
         ticket.resolved_at = None
         ticket.closed_at = None
-        fields.extend(["resolved_at", "closed_at"])
+        fields.extend(["resolved_at", "closed_at", *_clear_rating(ticket)])
     ticket.save(update_fields=sorted(set(fields)))
     return True
+
+
+def _clear_rating(ticket: Ticket) -> list[str]:
+    """Drop the rating of a thread going back to live: it is only rated once settled.
+
+    Otherwise the satisfaction figure counts a conversation that is still going,
+    and the admin form refuses the row on its next save.
+    """
+    ticket.rating = None
+    ticket.rating_comment = ""
+    ticket.rated_at = None
+    return ["rating", "rating_comment", "rated_at"]
 
 
 def assign(ticket: Ticket, agent: Any | None) -> bool:

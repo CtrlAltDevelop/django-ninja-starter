@@ -23,6 +23,9 @@ already written to storage before anybody notices.
   attachment a stranger sent is exactly the click that turns that into a session.
   A desk that needs vector art and serves its uploads from a separate origin can
   put it back through ``DJANGO_SUPPORT_UPLOAD_EXTENSIONS``.
+
+  ``.xml`` is left off for the same reason: an XML file with an XHTML-namespace
+  ``<script>`` runs just as an SVG does.
 * **a file over ``SUPPORT_MAX_UPLOAD_BYTES``**, checked before the read rather
   than after, so an oversized upload costs a rejection and not a disk.
 * **too many staged uploads at once**, so a client cannot use the staging area
@@ -65,7 +68,6 @@ ALLOWED_EXTENSIONS = (
     ".log",
     ".csv",
     ".json",
-    ".xml",
     ".md",
     ".doc",
     ".docx",

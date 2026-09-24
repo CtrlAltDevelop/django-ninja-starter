@@ -696,3 +696,27 @@ def test_leaving_a_channel_stops_delivering_it(client_user: Any, other_client: A
         return left
 
     assert run(scenario())["left"] is True
+
+
+def test_a_room_left_stops_sending_its_ticket_frames(client_user: Any) -> None:
+    """The subscription outlives `leave`, so the filter has to drop the room's updates."""
+    from apps.support.broadcast import ticket_channel
+
+    connection = SupportSocket({}, None, None)
+    connection._user = client_user
+    connection._left.add(ticket_channel("r1"))
+    update = {"type": "ticket", "ticket": {"id": "r1"}, "reason": "update"}
+
+    assert not connection._is_for_us(update)
+    assert connection._is_for_us({**update, "reason": "invited"})
+    assert connection._is_for_us(update)
+
+
+def test_a_client_is_sent_no_tags_on_a_ticket_frame(client_user: Any, agent: Any) -> None:
+    connection = SupportSocket({}, None, None)
+    frame = {"type": "ticket", "ticket": {"id": "t", "tags": ["abusive"]}}
+
+    connection._user = client_user
+    assert connection._for_viewer(frame)["ticket"]["tags"] == []
+    connection._user = agent
+    assert connection._for_viewer(frame)["ticket"]["tags"] == ["abusive"]

@@ -253,6 +253,10 @@ class SupportSocket:
         #: but not removed from, and this is the set that says what the account
         #: currently signed in was actually allowed to join.
         self._joined: set[str] = set()
+        #: Rooms this connection left with ``leave``. Their ``ticket`` frames keep
+        #: arriving on the subscription, and are dropped until an invitation or
+        #: a rejoin puts the account back in.
+        self._left: set[str] = set()
 
     # -- plumbing ---------------------------------------------------------
 
@@ -360,10 +364,22 @@ class SupportSocket:
         ):
             return False
         ticket_id = frame.get("ticket")
+        if isinstance(ticket_id, dict) and frame.get("type") == "ticket":
+            channel = ticket_channel(ticket_id.get("id"))
+            if frame.get("reason") == "invited":
+                self._left.discard(channel)
+            return channel not in self._left
         per_thread = {"message", "typing", "read", "presence"}
         if isinstance(ticket_id, str) and frame.get("type") in per_thread:
             return ticket_channel(ticket_id) in self._joined
         return True
+
+    def _for_viewer(self, frame: dict[str, Any]) -> dict[str, Any]:
+        """A thread's tags are notes about the client, so a client is sent none."""
+        ticket = frame.get("ticket")
+        if isinstance(ticket, dict) and not getattr(self._user, "is_staff", False):
+            return {**frame, "ticket": {**ticket, "tags": []}}
+        return frame
 
     async def _pump(self) -> None:
         """Serve whichever comes first: a frame from the client, or one from the broker.
@@ -383,7 +399,7 @@ class SupportSocket:
                 if from_broker in done:
                     frame = from_broker.result()
                     if self._is_for_us(frame):
-                        await self._send_json(frame)
+                        await self._send_json(self._for_viewer(frame))
                     from_broker = asyncio.ensure_future(self._subscription.get())
                 if from_client in done:
                     message = from_client.result()
@@ -827,6 +843,7 @@ class SupportSocket:
         ticket_id = _identifier(frame.get("ticket") or frame.get("id"))
         result = await sync_to_async(support_service.leave_room)(user, ticket_id)
         self._joined.discard(ticket_channel(ticket_id))
+        self._left.add(ticket_channel(ticket_id))
         await self._send_json({"type": "left", **result})
 
     async def _subscribe_to(self, ticket_id: str) -> None:
@@ -838,6 +855,7 @@ class SupportSocket:
         """
         channel = ticket_channel(ticket_id)
         self._joined.add(channel)
+        self._left.discard(channel)
         await self._join_channel(channel)
 
     # -- the desk's own ---------------------------------------------------

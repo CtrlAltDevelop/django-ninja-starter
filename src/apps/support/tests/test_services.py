@@ -504,6 +504,21 @@ def test_two_agents_cannot_both_claim_it(agent: Any, second_agent: Any, ticket: 
         support_service.claim(second_agent, ticket.pk)
 
 
+def test_a_claim_racing_another_is_refused_rather_than_overwriting_it(
+    agent: Any, second_agent: Any, ticket: Ticket, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both agents read it unassigned; the one who writes second must be told no."""
+    stale = support_service._desk_ticket(second_agent, ticket.pk)
+    support_service.claim(agent, ticket.pk)
+    monkeypatch.setattr(support_service, "_desk_ticket", lambda user, ticket_id: stale)
+
+    with pytest.raises(NotPermitted, match="agatha"):
+        support_service.claim(second_agent, ticket.pk)
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id == agent.pk
+
+
 def test_claiming_what_you_already_have_is_not_a_conflict(agent: Any, ticket: Ticket) -> None:
     support_service.claim(agent, ticket.pk)
 
@@ -707,3 +722,75 @@ def test_typing_reports_what_it_published(client_user: Any, ticket: Ticket) -> N
         "ticket": str(ticket.pk),
         "present": False,
     }
+
+
+def test_a_client_is_not_shown_the_desks_tags(
+    client_user: Any, agent: Any, ticket: Ticket, tag: Any
+) -> None:
+    """A tag is a note about the client; `abusive` is not theirs to read."""
+    support_service.tag(agent, ticket.pk, [tag.slug])
+
+    assert support_service.ticket(agent, ticket.pk)["tags"] == [tag.slug]
+    assert support_service.ticket(client_user, ticket.pk)["tags"] == []
+    assert [row["tags"] for row in support_service.tickets(client_user)] == [[]]
+
+
+def test_a_rating_goes_when_the_thread_comes_back_to_life(
+    client_user: Any, agent: Any, ticket: Ticket
+) -> None:
+    """Rated only once settled: a reopened thread with a score is incoherent."""
+    support_service.status(agent, ticket.pk, "resolved")
+    support_service.rate(client_user, ticket.pk, 1, "Slow.")
+    support_service.send(client_user, ticket.pk, "Still broken.")
+
+    ticket.refresh_from_db()
+    assert ticket.status == "open"
+    assert (ticket.rating, ticket.rating_comment, ticket.rated_at) == (None, "", None)
+
+
+def test_resolving_a_closed_thread_clears_its_closed_stamp(agent: Any, ticket: Ticket) -> None:
+    support_service.status(agent, ticket.pk, "closed")
+    support_service.status(agent, ticket.pk, "resolved")
+
+    ticket.refresh_from_db()
+    assert ticket.closed_at is None
+
+
+def test_an_agent_cannot_close_a_channel(client_user: Any, agent: Any) -> None:
+    """Every agent can see every channel; closing one would lock out all its members."""
+    room = support_service.create_channel(client_user, "General")
+
+    with pytest.raises(TicketNotFound):
+        support_service.status(agent, room["id"], "closed")
+
+
+def test_xml_is_not_an_allowed_upload(client_user: Any) -> None:
+    """It can carry an XHTML script, and runs on this origin the way an SVG would."""
+    from django.core.exceptions import ValidationError
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    from apps.support import uploads
+
+    with pytest.raises(ValidationError):
+        uploads.check(client_user, SimpleUploadedFile("x.xml", b"<x/>"))
+
+
+def test_an_edit_cannot_empty_a_message_with_nothing_attached(
+    client_user: Any, ticket: Ticket
+) -> None:
+    sent = support_service.send(client_user, ticket.pk, "Hello.")
+
+    with pytest.raises(InvalidRequest):
+        support_service.edit(client_user, sent["id"], "")
+
+
+def test_an_invitation_is_as_an_agent_or_an_observer_only(
+    agent: Any, other_client: Any, ticket: Ticket
+) -> None:
+    """A client given `agent` or `owner` would be counted as the desk."""
+    for role in ("owner", "agent"):
+        with pytest.raises(InvalidRequest):
+            support_service.invite(agent, ticket.pk, other_client.pk, role=role)
+
+    support_service.invite(agent, ticket.pk, other_client.pk)
+    assert other_client.pk not in ticket.staff_ids()

@@ -36,6 +36,7 @@ from django.dispatch import receiver
 
 from apps.support.broadcast import get_broker, staff_channel, ticket_channel, user_channel
 from apps.support.models import (
+    DESK_KINDS,
     Message,
     MessageKind,
     Participant,
@@ -136,7 +137,9 @@ def sla_payload(ticket: Ticket) -> dict[str, Any]:
     }
 
 
-def ticket_payload(ticket: Ticket, *, unread: int | None = None) -> dict[str, Any]:
+def ticket_payload(
+    ticket: Ticket, *, unread: int | None = None, staff: bool = True
+) -> dict[str, Any]:
     """One thread as a client receives it, without its messages.
 
     ``unread`` is per account and therefore an argument rather than a field:
@@ -164,7 +167,8 @@ def ticket_payload(ticket: Ticket, *, unread: int | None = None) -> dict[str, An
         }
         if ticket.category_id
         else None,
-        "tags": [tag.slug for tag in ticket.tags.all()],
+        # A tag is a note about the client, so the client is shown none.
+        "tags": [tag.slug for tag in ticket.tags.all()] if staff else [],
         "data": ticket.data,
         "created_at": ticket.created_at.isoformat(),
         "updated_at": ticket.updated_at.isoformat() if ticket.updated_at else None,
@@ -242,7 +246,11 @@ def _publish_badges(ticket: Ticket, *, exclude: Any = None) -> None:
             continue
         frame = {
             "type": TICKET_FRAME,
-            "ticket": ticket_payload(ticket, unread=unread_count(ticket, participant.user)),
+            "ticket": ticket_payload(
+                ticket,
+                unread=unread_count(ticket, participant.user),
+                staff=getattr(participant.user, "is_staff", False),
+            ),
             "reason": "message",
         }
         _after_commit(user_channel(participant.user_id), frame)
@@ -327,7 +335,11 @@ def publish_read(ticket: Ticket, user: Any, at: Any) -> None:
         user_channel(user.pk),
         {
             "type": TICKET_FRAME,
-            "ticket": ticket_payload(ticket, unread=unread_count(ticket, user)),
+            "ticket": ticket_payload(
+                ticket,
+                unread=unread_count(ticket, user),
+                staff=getattr(user, "is_staff", False),
+            ),
             "reason": "read",
         },
     )
@@ -366,7 +378,10 @@ def _broadcast_ticket(
     sender: type[Ticket], instance: Ticket, created: bool, **kwargs: object
 ) -> None:
     """Announce a new thread to the desk, and any change to whoever is in it."""
-    publish_ticket(instance, reason="opened" if created else "update", to_desk=created)
+    # Only desk threads go to the desk: a group or a direct chat is private to
+    # its members, and staff are not allowed to see it.
+    to_desk = created and instance.kind in DESK_KINDS
+    publish_ticket(instance, reason="opened" if created else "update", to_desk=to_desk)
 
 
 def connect() -> None:

@@ -46,8 +46,9 @@ could do that would be a surveillance tool with a help widget attached. So:
   staff included, and an id somebody guessed is answered with a 404;
 - a channel is visible to anybody signed in, because a room nobody can find is
   a room nobody can join;
-- the desk's own verbs — claim, assign, prioritise, tag, rate — refuse a room
-  outright, so a channel can never land in an agent's queue;
+- the desk's own verbs — claim, assign, prioritise, tag, rate, invite and the
+  status changes — refuse a room outright, so a channel can never land in an
+  agent's queue or be closed on its members;
 - the queue and your own thread list never include a channel you have not
   joined. `GET /support/channels` is the only listing in the app that shows you
   something you are not already part of.
@@ -201,7 +202,8 @@ curl -H "$AUTH" "$API/stats"
 
 `tags` is a **replacement**, not an add: a tag picker sends the set it is now
 showing and does not have to work out the difference from what it was showing
-before.
+before. Tags are the desk's notes about a client, so a client reading their own
+thread — over any transport or the socket — is sent an empty `tags` list.
 
 **Settling it.** Either side may close; only the client may rate, and only once
 it is settled:

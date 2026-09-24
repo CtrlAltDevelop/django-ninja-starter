@@ -30,6 +30,7 @@ concerned -- see :class:`TicketNotFound`.
 from typing import Any
 from uuid import UUID
 
+from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, F, Q
 from django.utils.text import slugify
 
@@ -88,6 +89,10 @@ class NotPermitted(PermissionError):
 
 class InvalidRequest(ValueError):
     """An argument that is not one: a status that does not exist, an empty message."""
+
+
+def _is_staff(user: Any) -> bool:
+    return bool(getattr(user, "is_staff", False))
 
 
 def _staff_only(user: Any, what: str) -> None:
@@ -253,7 +258,9 @@ class SupportService:
             .ordered_for_queue()
         )
         rows = [
-            events.ticket_payload(ticket, unread=getattr(ticket, "unread", 0))
+            events.ticket_payload(
+                ticket, unread=getattr(ticket, "unread", 0), staff=_is_staff(user)
+            )
             for ticket in tickets[start : start + page]
         ]
         if breached is None:
@@ -271,7 +278,9 @@ class SupportService:
         "an agent", not as a roster of who has been reading their complaint.
         """
         ticket = self._ticket(user, ticket_id)
-        payload = events.ticket_payload(ticket, unread=unread_count(ticket, user))
+        payload = events.ticket_payload(
+            ticket, unread=unread_count(ticket, user), staff=_is_staff(user)
+        )
         payload["participants"] = self._participants(user, ticket)
         return payload
 
@@ -393,7 +402,9 @@ class SupportService:
         turns off.
         """
         _staff_only(user, "read the desk statistics")
-        counts = Ticket.objects.aggregate(
+        # The desk's own threads: channels, groups and direct chats are not queue work.
+        desk = Ticket.objects.filter(kind__in=DESK_KINDS)
+        counts = desk.aggregate(
             total=Count("id"),
             open=Count("id", filter=Q(status=Status.OPEN)),
             pending=Count("id", filter=Q(status=Status.PENDING)),
@@ -404,8 +415,10 @@ class SupportService:
             chats=Count("id", filter=Q(kind=Kind.CHAT)),
             rated=Count("id", filter=Q(rating__isnull=False)),
         )
-        averages = Ticket.objects.aggregate(satisfaction=Avg("rating"))
-        live = Ticket.objects.live().select_related("category")
+        averages = desk.aggregate(satisfaction=Avg("rating"))
+        live = desk.live().select_related("category")
+        # ponytail: breach is computed against the clock per ticket, so the live
+        # queue is walked in Python; move it into SQL if the open queue gets huge.
         breached = sum(1 for ticket in live if ticket.breached)
         awaiting = live.filter(first_response_at__isnull=True).count()
         return {
@@ -509,15 +522,22 @@ class SupportService:
         text = _body(body, uploads=len(uploads))
         staff = getattr(user, "is_staff", False)
         join(ticket, user, role=str(Role.AGENT) if staff else str(Role.CLIENT))
-        message = post_message(
-            ticket,
-            user,
-            text,
-            kind=str(MessageKind.NOTE) if internal else str(MessageKind.REPLY),
-            visibility=str(Visibility.INTERNAL) if internal else str(Visibility.PUBLIC),
-            data=data or {},
-            uploads=uploads,
-        )
+        try:
+            with transaction.atomic():
+                message = post_message(
+                    ticket,
+                    user,
+                    text,
+                    kind=str(MessageKind.NOTE) if internal else str(MessageKind.REPLY),
+                    visibility=str(Visibility.INTERNAL) if internal else str(Visibility.PUBLIC),
+                    data=data or {},
+                    uploads=uploads,
+                )
+        except IntegrityError:
+            # Another send attached the same upload between `_claim` and here.
+            raise InvalidRequest(
+                "One of those uploads does not exist, or is already attached."
+            ) from None
         # Sending is also reading: whatever was in the thread when you replied
         # to it, you have seen. Doing it here rather than making the client send
         # a second command is what stops a badge surviving a conversation.
@@ -529,7 +549,8 @@ class SupportService:
         message = self._message(user, message_id)
         if not message.editable_by(user):
             raise NotPermitted("You can only edit your own messages, and not once they are gone.")
-        return events.message_payload(edit_message(message, _body(body, uploads=1)))
+        attached = message.attachments.count()
+        return events.message_payload(edit_message(message, _body(body, uploads=attached)))
 
     def delete(self, user: Any, message_id: UUID) -> dict[str, Any]:
         """Retract a message. Leaves a tombstone; never removes the row."""
@@ -547,7 +568,10 @@ class SupportService:
         fires this from two tabs cannot un-read its own progress.
         """
         ticket = self._ticket(user, ticket_id)
-        changed = mark_read(ticket, user)
+        # Reading a public channel you never joined changes nothing: marking it
+        # read would otherwise make you a member, and only `join_room` does that.
+        unjoined = ticket.kind == Kind.CHANNEL and ticket.participant_for(user) is None
+        changed = False if unjoined else mark_read(ticket, user)
         participant = ticket.participant_for(user)
         if changed:
             events.publish_read(ticket, user, participant.last_read_at if participant else None)
@@ -582,7 +606,9 @@ class SupportService:
         client" about themselves is not a thing that means anything.
         """
         status = _choice(status, Status, "status")
-        ticket = self._ticket(user, ticket_id)
+        # A desk thread only: closing a channel would lock out everyone in it,
+        # and any agent can see every channel.
+        ticket = self._desk_ticket(user, ticket_id)
         if not getattr(user, "is_staff", False):
             if ticket.client_id != user.pk:
                 raise NotPermitted("Only the client who opened a ticket can settle it.")
@@ -650,9 +676,13 @@ class SupportService:
         """
         _staff_only(user, "claim a ticket")
         ticket = self._desk_ticket(user, ticket_id)
-        if ticket.assignee_id not in (None, user.pk):
-            raise NotPermitted(f"{ticket.assignee.get_username()} already has this ticket.")
-        return self.assign(user, ticket_id, user.pk)
+        with transaction.atomic():
+            # Re-read under a row lock: two agents who both saw it unassigned
+            # would otherwise both pass the check, and the later write would win.
+            holder = Ticket.objects.select_for_update().get(pk=ticket.pk).assignee
+            if holder is not None and holder.pk != user.pk:
+                raise NotPermitted(f"{holder.get_username()} already has this ticket.")
+            return self.assign(user, ticket_id, user.pk)
 
     def priority(self, user: Any, ticket_id: UUID, priority: str) -> dict[str, Any]:
         """Move a thread up or down the queue. Staff only, and recorded internally."""
@@ -708,10 +738,15 @@ class SupportService:
         """
         _staff_only(user, "add somebody to a ticket")
         role = _choice(role, Role, "role")
-        ticket = self._ticket(user, ticket_id)
+        # A desk verb, like assigning: rooms are joined by their own commands.
+        ticket = self._desk_ticket(user, ticket_id)
         account = type(user).objects.filter(pk=account_id, is_active=True).first()
         if account is None:
             raise InvalidRequest("No such active account.")
+        if role not in (Role.OBSERVER, Role.AGENT):
+            raise InvalidRequest("Somebody is invited to a ticket as an agent or an observer.")
+        if role == Role.AGENT and not _is_staff(account):
+            raise InvalidRequest("Only somebody on the support desk can be an agent.")
         participant = join(ticket, account, role=role)
         # The thread they have just been added to, on their own channel: they are
         # not subscribed to its channel yet and would otherwise not learn of it
@@ -763,11 +798,14 @@ class SupportService:
         )
         return [
             {
-                **events.ticket_payload(channel),
+                **events.ticket_payload(channel, staff=_is_staff(user)),
                 "joined": channel.pk in mine,
-                "members": channel.participants.count(),
+                "members": channel.members,
             }
-            for channel in found.order_by("subject")
+            for channel in found.annotate(members=Count("participants", distinct=True))
+            .select_related("client", "assignee", "category")
+            .prefetch_related("tags")
+            .order_by("subject")[:MAX_PAGE]
         ]
 
     def create_channel(
@@ -787,9 +825,13 @@ class SupportService:
             raise InvalidRequest("That name does not make a usable address.")
         if Ticket.objects.filter(slug=address).exists():
             raise InvalidRequest(f"There is already a channel at {address!r}.")
-        ticket = create_ticket(
-            user, kind=str(Kind.CHANNEL), subject=name, slug=address, role=str(Role.OWNER)
-        )
+        try:
+            ticket = create_ticket(
+                user, kind=str(Kind.CHANNEL), subject=name, slug=address, role=str(Role.OWNER)
+            )
+        except IntegrityError:
+            # Somebody took the address between the check above and the insert.
+            raise InvalidRequest(f"There is already a channel at {address!r}.") from None
         if body.strip():
             post_message(ticket, user, body.strip())
             ticket.refresh_from_db()
@@ -833,7 +875,13 @@ class SupportService:
         existing = Ticket.objects.filter(direct_key=key).first()
         if existing is not None:
             return self.ticket(user, existing.pk)
-        ticket = create_ticket(user, kind=str(Kind.DIRECT), direct_key=key, role=str(Role.MEMBER))
+        try:
+            ticket = create_ticket(
+                user, kind=str(Kind.DIRECT), direct_key=key, role=str(Role.MEMBER)
+            )
+        except IntegrityError:
+            # The other person opened it at the same moment: theirs is the chat.
+            return self.ticket(user, Ticket.objects.get(direct_key=key).pk)
         join(ticket, other, role=str(Role.MEMBER))
         events.publish_ticket(ticket, reason="invited", to_members=True)
         return self.ticket(user, ticket.pk)

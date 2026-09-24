@@ -261,3 +261,46 @@ def test_an_agent_cannot_claim_a_channel(client_user: Any, agent: Any) -> None:
 
     with pytest.raises((NotPermitted, InvalidRequest, TicketNotFound)):
         support_service.claim(agent, channel["id"])
+
+
+def test_a_private_room_is_never_announced_to_the_desk(
+    client_user: Any, other_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Staff may not see groups or direct chats, so neither may their sockets."""
+    from apps.support import events
+    from apps.support.broadcast import staff_channel
+
+    channels: list[str] = []
+    monkeypatch.setattr(events, "_after_commit", lambda channel, frame: channels.append(channel))
+
+    support_service.direct(client_user, other_client.pk)
+    support_service.create_group(client_user, "Friends", [other_client.pk])
+    assert staff_channel() not in channels
+
+    support_service.open(client_user, subject="Charged twice", body="Two charges.")
+    assert staff_channel() in channels
+
+
+def test_reading_a_channel_you_never_joined_does_not_join_it(
+    client_user: Any, other_client: Any
+) -> None:
+    """Only `join_room` makes a member; a scroll handler must not."""
+    channel = support_service.create_channel(client_user, "General", body="Hello.")
+
+    support_service.read(other_client, channel["id"])
+
+    assert support_service.channels(other_client)[0]["joined"] is False
+
+
+def test_a_channel_counts_its_members(client_user: Any, other_client: Any) -> None:
+    channel = support_service.create_channel(client_user, "General")
+    support_service.join_room(other_client, channel["id"])
+
+    assert support_service.channels(client_user)[0]["members"] == 2
+
+
+def test_the_desk_statistics_leave_rooms_out(client_user: Any, agent: Any) -> None:
+    support_service.create_channel(client_user, "General")
+    support_service.open(client_user, subject="Charged twice", body="Two charges.")
+
+    assert support_service.stats(agent)["total"] == 1
