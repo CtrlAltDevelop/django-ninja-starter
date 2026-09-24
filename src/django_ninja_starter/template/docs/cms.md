@@ -112,9 +112,12 @@ GET /api/v1/cms/pages/about-us?preview=ImFib3V0LXVzIg:1x1P3Q:5fKeYc…
 
 The admin shows the link on the page it belongs to. A link in a URL ends up in
 proxy logs and `Referer` headers, so a client that fetches the page itself can
-send the same token as an `X-Preview-Token` header instead. Either way it opens
-only the page it was made for, and not a different page that later takes the
-same address.
+send the same token as an `X-Preview-Token` header instead (REST only; GraphQL
+and gRPC take it as the `preview` argument, which travels in the request body
+rather than the URL). Either way it opens only the page it was made for, and not
+a different page that later takes the same address. A token names the page's id
+as well as its slug, so links made before that change stopped working and have
+to be copied again from the admin.
 
 ## Shared sections
 

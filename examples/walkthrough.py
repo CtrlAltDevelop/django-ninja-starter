@@ -857,6 +857,17 @@ def section_cms(api: Api) -> None:
         show=False,
     )
 
+    note(
+        "A URL ends up in proxy logs and Referer headers, so a client that fetches "
+        "the draft itself can carry the same token in `X-Preview-Token` instead."
+    )
+    api.get(
+        "/api/v1/cms/pages/about-us",
+        token="",
+        headers={"X-Preview-Token": make_token("about-us", about.pk)},
+        show=False,
+    )
+
     note("Accept-Language decides for a client that asks for nothing in particular.")
     api.request(
         "GET",

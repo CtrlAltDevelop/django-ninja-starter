@@ -82,7 +82,10 @@ def check(upload: Any, field_type: Any) -> None:
     size = getattr(upload, "size", 0) or 0
     if limit and size > limit:
         raise ValidationError(f"That file is {size // 1024} KB. The limit is {limit // 1024} KB.")
-    extension = extension_of(getattr(upload, "name", ""))
+    # The extension of the name it will be *stored* under: `safe_name` folds and
+    # trims, so `x.svg.` or `x.ſvg` would pass a check on the raw name and
+    # still land in storage as `.svg`.
+    extension = extension_of(safe_name(getattr(upload, "name", "")))
     if extension in REFUSED_EXTENSIONS:
         raise ValidationError(f"{extension} files are not accepted: a browser would run them.")
     allowed = UPLOAD_EXTENSIONS.get(field_type)

@@ -96,7 +96,10 @@ class TestPreviewLinks:
         assert data(response)["id"] == "launch"
 
 
-@pytest.mark.parametrize("name", ["x.html", "logo.svg", "feed.xml", "app.js"])
+@pytest.mark.parametrize(
+    "name",
+    ["x.html", "logo.svg", "feed.xml", "app.js", "x.svg.", "x.svg ", "x.\u017fvg", "x.html\u200b"],
+)
 def test_nothing_a_browser_would_run_is_stored(name: str) -> None:
     """Served from this origin it would run as whichever editor opened it."""
     from django.core.exceptions import ValidationError
