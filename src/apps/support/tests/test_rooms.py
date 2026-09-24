@@ -304,3 +304,32 @@ def test_the_desk_statistics_leave_rooms_out(client_user: Any, agent: Any) -> No
     support_service.open(client_user, subject="Charged twice", body="Two charges.")
 
     assert support_service.stats(agent)["total"] == 1
+
+
+def test_the_creator_of_a_group_who_left_it_is_out_of_it(
+    client_user: Any, other_client: Any
+) -> None:
+    """Leaving is leaving: the others carry on believing you are gone."""
+    group = support_service.create_group(client_user, "Friends", [other_client.pk])
+    support_service.leave_room(client_user, group["id"])
+
+    with pytest.raises(TicketNotFound):
+        support_service.ticket(client_user, group["id"])
+    with pytest.raises(TicketNotFound):
+        support_service.send(client_user, group["id"], "I am back.")
+
+
+def test_posting_in_a_channel_is_not_a_way_in(client_user: Any, other_client: Any) -> None:
+    channel = support_service.create_channel(client_user, "General")
+
+    with pytest.raises(NotPermitted, match="Join"):
+        support_service.send(other_client, channel["id"], "Hello.")
+    assert support_service.channels(other_client)[0]["joined"] is False
+
+
+def test_an_internal_note_does_not_belong_in_a_room(agent: Any, other_client: Any) -> None:
+    """The room's non-staff members would be the ones it was hidden from."""
+    group = support_service.create_group(agent, "Team", [other_client.pk])
+
+    with pytest.raises(NotPermitted, match="Internal notes"):
+        support_service.send(agent, group["id"], "Just between us.", internal=True)

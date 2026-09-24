@@ -1577,6 +1577,15 @@ def section_support(api: Api) -> None:
     api.post(f"/api/v1/support/{ticket_id}/tags", {"tags": ["escalated"]}, token=desk, show=False)
 
     note(
+        "A tag is the desk's note about a client, so the client reading the same "
+        "thread is sent none -- `escalated` is not theirs to see."
+    )
+    seen = api.get(f"/api/v1/support/{ticket_id}", show=False)
+    print(f"  {DIM}│ tags the client sees: {seen['tags']}{OFF}")
+    if seen["tags"]:
+        raise WalkthroughError("the client was shown the desk's tags")
+
+    note(
         "Billing is somebody else's, so it is handed on. Who a complaint has "
         "been passed between is recorded as an internal event: telling the "
         "client answers a question they did not ask with something that reads "
@@ -1723,6 +1732,14 @@ def section_support(api: Api) -> None:
         f"/api/v1/support/{channel['id']}/join", token=desk_token(dara), expect=201, show=False
     )
     api.post(f"/api/v1/support/{channel['id']}/leave", token=desk_token(dara), show=False)
+
+    note("Posting is not a way back in: a channel is joined with `join`, not by talking.")
+    api.post(
+        f"/api/v1/support/{channel['id']}/messages",
+        {"body": "Still here?"},
+        token=desk_token(dara),
+        expect=403,
+    )
 
     note(
         "A group is the opposite: invisible to everybody but its members, and "

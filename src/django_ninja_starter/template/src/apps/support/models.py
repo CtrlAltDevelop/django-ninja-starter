@@ -266,7 +266,9 @@ class TicketQuerySet(models.QuerySet["Ticket"]):
         This is the only place the distinction is made, so no endpoint can widen
         it by accident.
         """
-        mine = Q(client=user) | Q(participants__user=user)
+        # Opening a desk thread keeps it yours; opening a room does not -- once
+        # you leave a group, its creator is no more entitled to it than anybody.
+        mine = Q(client=user, kind__in=DESK_KINDS) | Q(participants__user=user)
         findable = Q(kind__in=PUBLIC_KINDS)
         if getattr(user, "is_staff", False):
             return self.filter(mine | findable | Q(kind__in=DESK_KINDS)).distinct()
@@ -281,7 +283,9 @@ class TicketQuerySet(models.QuerySet["Ticket"]):
         the building arriving in one pile. Channels are listed by their own
         command, which is the one that knows how to say "joined" or not.
         """
-        mine = Q(client=user) | Q(participants__user=user)
+        # Opening a desk thread keeps it yours; opening a room does not -- once
+        # you leave a group, its creator is no more entitled to it than anybody.
+        mine = Q(client=user, kind__in=DESK_KINDS) | Q(participants__user=user)
         if getattr(user, "is_staff", False):
             return self.filter(mine | Q(kind__in=DESK_KINDS)).distinct()
         return self.filter(mine).distinct()
@@ -653,7 +657,7 @@ class Ticket(models.Model):
         group they were not added to, or to a private chat between two
         customers, here than they are there.
         """
-        if self.client_id == getattr(user, "pk", None):
+        if self.client_id == getattr(user, "pk", None) and self.kind in DESK_KINDS:
             return True
         if getattr(user, "is_staff", False) and self.kind in DESK_KINDS:
             return True

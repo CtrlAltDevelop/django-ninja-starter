@@ -146,7 +146,8 @@ def check(user: Any, upload: Any) -> None:
         raise ValidationError(f"That file is {size // 1024} KB. The limit is {limit // 1024} KB.")
     allowed = allowed_extensions()
     if allowed:
-        extension = extension_of(getattr(upload, "name", ""))
+        # The name it will be stored under, which `safe_name` folds and trims.
+        extension = extension_of(safe_name(getattr(upload, "name", "")))
         if extension not in allowed:
             raise ValidationError(
                 f"{extension or 'That file'} is not a kind the desk accepts. "

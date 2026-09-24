@@ -518,10 +518,18 @@ class SupportService:
             raise NotPermitted("This ticket is closed. Reopen it before adding to it.")
         if internal:
             _staff_only(user, "leave an internal note")
+            if ticket.kind not in DESK_KINDS:
+                # A note hidden from the non-staff members of their own room.
+                raise NotPermitted("Internal notes belong on the desk's threads, not in rooms.")
+        if ticket.kind in ROOM_KINDS and ticket.participant_for(user) is None:
+            # Posting is not a way into a room: a channel is joined with `join`,
+            # a group or a chat by invitation, and somebody who left stays out.
+            raise NotPermitted("Join this room before posting in it.")
         uploads = self._claim(user, upload_ids or [])
         text = _body(body, uploads=len(uploads))
         staff = getattr(user, "is_staff", False)
-        join(ticket, user, role=str(Role.AGENT) if staff else str(Role.CLIENT))
+        if ticket.kind in DESK_KINDS:
+            join(ticket, user, role=str(Role.AGENT) if staff else str(Role.CLIENT))
         try:
             with transaction.atomic():
                 message = post_message(
@@ -880,8 +888,11 @@ class SupportService:
                 user, kind=str(Kind.DIRECT), direct_key=key, role=str(Role.MEMBER)
             )
         except IntegrityError:
-            # The other person opened it at the same moment: theirs is the chat.
-            return self.ticket(user, Ticket.objects.get(direct_key=key).pk)
+            # The other person opened it at the same moment: theirs is the chat,
+            # and they may not have added this account to it yet.
+            existing = Ticket.objects.get(direct_key=key)
+            join(existing, user, role=str(Role.MEMBER))
+            return self.ticket(user, existing.pk)
         join(ticket, other, role=str(Role.MEMBER))
         events.publish_ticket(ticket, reason="invited", to_members=True)
         return self.ticket(user, ticket.pk)
