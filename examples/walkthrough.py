@@ -1472,6 +1472,25 @@ def section_shop(api: Api) -> None:
     note("An order that has been paid for can no longer be cancelled.")
     api.post(f"/api/v1/shop/orders/{order['number']}/cancel", expect=400, show=False)
 
+    note(
+        "An unpaid one can, and cancelling hands back what it took: the stock, the "
+        "payment it was waiting on, and the coupon use -- or placing and "
+        "cancelling orders over and over would drain a limited code."
+    )
+    welcome = Coupon.objects.get(code="WELCOME")
+    uses = welcome.used_count
+    api.post("/api/v1/shop/cart/items", {"product": "featherbook-14"}, show=False)
+    second = api.post(
+        "/api/v1/shop/checkout",
+        {"address": address["id"], "shipping_method": str(shipping.pk), "coupon": "WELCOME"},
+        show=False,
+    )
+    api.post(f"/api/v1/shop/orders/{second['number']}/cancel", show=False)
+    welcome.refresh_from_db()
+    print(f"  {DIM}│ WELCOME uses: {uses} before, {welcome.used_count} after{OFF}")
+    if welcome.used_count != uses:
+        raise WalkthroughError("cancelling an order kept its coupon use")
+
     note("And somebody else's order number is a 404, not a 403.")
     api.get("/api/v1/shop/orders/S00000000XXXX0000", expect=404, show=False)
 

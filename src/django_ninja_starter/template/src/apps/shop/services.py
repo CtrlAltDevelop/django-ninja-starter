@@ -722,7 +722,9 @@ class ShopService:
         offer = self._offer_row(product, variant, offer_id)
         self._check_stock(product, variant, quantity, offer)
         with transaction.atomic():
-            cart = Cart.for_user(user)
+            # The basket row, locked: there is no line to lock yet when the item
+            # is new, and two adds racing past the lookup would both insert.
+            cart = Cart.objects.select_for_update().get(pk=Cart.for_user(user).pk)
             line = (
                 CartItem.objects.select_for_update()
                 .filter(cart=cart, product=product, variant=variant, offer=offer)
