@@ -190,7 +190,7 @@ class ClubService:
                 earned=Coalesce(Sum("awards__xp", filter=Q(awards__club_id=membership.club_id)), 0)
             )
             # Sorted and cut in the database: a big club is not loaded to show ten rows.
-            .order_by("-earned", "joined_at")[:page]
+            .order_by("-earned", "joined_at", "pk")[:page]
         )
         ranked = []
         for member in members:
@@ -545,7 +545,8 @@ class ClubService:
         signals.announce(
             signals.xp_awarded,
             membership=membership_payload(membership, standing_of(membership, levels=rungs)),
-            award=payload,
+            # The full record for a receiver, operator included.
+            award=award_payload(award, staff=True),
         )
         if getattr(before, "pk", None) != getattr(after, "pk", None):
             signals.announce(
@@ -578,7 +579,17 @@ class ClubService:
         if getattr(by, "pk", None):
             metadata["granted_by"] = str(by.pk)
         with transaction.atomic():
-            locked = Membership.objects.select_for_update().get(pk=membership.pk)
+            locked = (
+                Membership.objects.select_for_update(of=("self",))
+                .select_related("club")
+                .get(pk=membership.pk)
+            )
+            # Re-checked under the lock, as the engine does: a member who left or
+            # moved club while this was on its way is not paid into the old one.
+            if locked.status == str(MembershipStatus.LEFT) or locked.club_id != membership.club_id:
+                raise NotAMember("This account is no longer in that club.")
+            if locked.club.status == str(ClubStatus.ARCHIVED):
+                raise ClubClosed(f"{locked.club.name} is archived, so nothing in it earns XP.")
             paid = self._pay(locked, xp=xp, reference=reference, reason=reason, metadata=metadata)
             if paid is None:
                 existing = XpAward.objects.get(membership=locked, reference=reference)
@@ -743,7 +754,7 @@ def mission_payload(
     }
 
 
-def award_payload(award: XpAward) -> dict[str, Any]:
+def award_payload(award: XpAward, *, staff: bool = False) -> dict[str, Any]:
     return {
         "id": award.pk,
         "xp": award.xp,
@@ -752,7 +763,9 @@ def award_payload(award: XpAward) -> dict[str, Any]:
         "mission_id": award.mission_id,
         # `granted_by` is the operator's account id: kept on the row for the
         # admin, never handed to the member reading their own awards.
-        "metadata": {k: v for k, v in award.metadata.items() if k != "granted_by"},
+        "metadata": award.metadata
+        if staff
+        else {k: v for k, v in award.metadata.items() if k != "granted_by"},
         "created_at": award.created_at.isoformat(),
     }
 

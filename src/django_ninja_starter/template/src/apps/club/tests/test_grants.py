@@ -54,3 +54,13 @@ def test_zero_or_less_is_not_a_grant(member: Any) -> None:
 def test_granting_to_somebody_in_no_club_is_refused(alice: Any) -> None:
     with pytest.raises(NotAMember):
         club_service.grant(alice, xp=10, reason="Why", reference="nope")
+
+
+def test_nothing_is_granted_into_an_archived_club(member: Any, club: Any) -> None:
+    from apps.club.errors import ClubClosed
+
+    club.status = "archived"
+    club.save()
+
+    with pytest.raises(ClubClosed):
+        club_service.grant(member, xp=10, reason="r", reference="late")
