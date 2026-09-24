@@ -159,3 +159,22 @@ def test_one_half_of_a_transfer_cannot_be_reversed(
 
 def _seed(user: Any) -> Any:
     return next(row["id"] for row in wallet_service.entries(user) if row["reference"] == "seed")
+
+
+def test_a_signal_still_says_which_operator_acted(
+    alice: Any, card: PaymentMethod, django_capture_on_commit_callbacks: Any
+) -> None:
+    """Customers are not shown it, but an audit receiver needs it."""
+    from django.contrib.auth import get_user_model
+
+    staff = get_user_model().objects.create_superuser(
+        username="ops", email="ops@example.test", password="x"
+    )
+    entry = wallet_service.deposit(alice, amount=Decimal("100"), method="card", reference="d")
+    with (
+        Heard(signals.entry_failed) as failed,
+        django_capture_on_commit_callbacks(execute=True),
+    ):
+        wallet_service.fail(alice, entry["id"], by=staff)
+
+    assert failed.payloads[-1]["entry"]["metadata"]["failed_by_operator"] == str(staff.pk)

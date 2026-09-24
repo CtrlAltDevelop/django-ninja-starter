@@ -182,6 +182,11 @@ def _check_metadata(metadata: Any) -> None:
         return
     if not isinstance(metadata, dict):
         raise WalletError("metadata has to be an object.")
+    forged = sorted(_STAFF_ONLY_KEYS & set(metadata))
+    if forged:
+        # These say which operator acted; a client writing one would put a
+        # staff member's name on a movement they never touched.
+        raise WalletError(f"metadata may not set {', '.join(forged)}; the wallet records those.")
     cap = metadata_limit()
     if not cap:
         return
@@ -214,7 +219,7 @@ def _entry_id(value: Any) -> UUID:
         raise WalletNotFound("No such entry.") from None
 
 
-_STAFF_ONLY_KEYS = frozenset({*OPERATOR_KEYS.values(), "reversed_by_operator"})
+_STAFF_ONLY_KEYS = frozenset({*OPERATOR_KEYS.values(), "reversed_by_operator", "adjusted_by"})
 
 
 def _operator_note(status: str, by: Any) -> dict[str, str]:
@@ -623,6 +628,40 @@ class WalletService:
             raise WalletNotFound("No such account.")
         return user
 
+    def transfer_to(
+        self,
+        user: Any,
+        account_id: Any,
+        *,
+        amount: Decimal,
+        reference: str,
+        description: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """A transfer addressed by account id, which is what every transport has.
+
+        A retry is answered from the first call before the recipient is looked
+        up again: if that account has closed since, the money still moved, and
+        a 404 would tell the client it had not.
+        """
+        done = self._existing(self.wallet_for(user), reference) if reference else None
+        if (
+            done is not None
+            and done.kind == str(EntryKind.TRANSFER_OUT)
+            and done.counterparty is not None
+            and str(done.counterparty.wallet.user_id) == str(account_id)
+            and money(done.amount) == money(amount)
+        ):
+            return entry_payload(done)
+        return self.transfer(
+            user,
+            to_user=self.recipient(account_id),
+            amount=amount,
+            reference=reference,
+            description=description,
+            metadata=metadata,
+        )
+
     def transfer(
         self,
         user: Any,
@@ -797,7 +836,7 @@ class WalletService:
                 entry.metadata = {**entry.metadata, **note}
                 fields.append("metadata")
             entry.save(update_fields=fields)
-            signals.announce(signals.entry_expired, entry=entry_payload(entry))
+            signals.announce(signals.entry_expired, entry=entry_payload(entry, staff=True))
             return entry_payload(entry)
 
     def expire_stale(self, *, older_than: timedelta | None = None, now: Any = None) -> ExpiryResult:
@@ -1024,7 +1063,7 @@ class WalletService:
             entry.reviewed_at = timezone.now()
             entry.review_note = note
             entry.save(update_fields=["approval", "reviewed_by", "reviewed_at", "review_note"])
-            signals.announce(signals.entry_approved, entry=entry_payload(entry))
+            signals.announce(signals.entry_approved, entry=entry_payload(entry, staff=True))
 
             rail = entry.payment_method.spec if entry.payment_method_id else None
             if (
@@ -1034,7 +1073,7 @@ class WalletService:
             ):
                 return self._settle_locked(entry)
             if _payout_ready(entry):
-                signals.announce(signals.payout_ready, entry=entry_payload(entry))
+                signals.announce(signals.payout_ready, entry=entry_payload(entry, staff=True))
             return entry_payload(entry)
 
     def confirm_from_rail(
@@ -1132,7 +1171,7 @@ class WalletService:
                 entry.metadata = {**entry.metadata, "reason": reason}
                 fields.append("metadata")
             entry.save(update_fields=fields)
-            signals.announce(signals.entry_failed, entry=entry_payload(entry))
+            signals.announce(signals.entry_failed, entry=entry_payload(entry, staff=True))
             return entry_payload(entry)
 
     def reject(self, entry_id: UUID, *, by: Any = None, note: str = "") -> dict[str, Any]:
@@ -1162,9 +1201,9 @@ class WalletService:
                 entry.status = str(EntryStatus.CANCELLED)
                 fields.append("status")
             entry.save(update_fields=fields)
-            signals.announce(signals.entry_rejected, entry=entry_payload(entry))
+            signals.announce(signals.entry_rejected, entry=entry_payload(entry, staff=True))
             if cancelled:
-                signals.announce(signals.entry_cancelled, entry=entry_payload(entry))
+                signals.announce(signals.entry_cancelled, entry=entry_payload(entry, staff=True))
             return entry_payload(entry)
 
     def reverse(
@@ -1283,8 +1322,8 @@ class WalletService:
         original.save(update_fields=["status", "metadata"])
         signals.announce(
             signals.entry_reversed,
-            entry=entry_payload(original),
-            correction=entry_payload(correction),
+            entry=entry_payload(original, staff=True),
+            correction=entry_payload(correction, staff=True),
         )
         return entry_payload(correction)
 
@@ -1363,7 +1402,9 @@ class WalletService:
             raise MethodNotAllowed(f"{configured.name} does not {way}.")
         return configured
 
-    def _check_amount(self, amount: Decimal, direction: str) -> None:
+    def _check_amount(
+        self, amount: Decimal, direction: str, *, ceiling_on: Decimal | None = None
+    ) -> None:
         """The deployment-wide limits, checked in the wallet's own currency.
 
         The outer bound, and a different question from the method's own limits:
@@ -1383,7 +1424,7 @@ class WalletService:
             raise InvalidAmount(f"The smallest allowed here is {smallest}.")
         # Zero means no ceiling, which is what a deployment that has not thought
         # about one should get -- rather than a limit this app invented.
-        if largest and amount > largest:
+        if largest and (amount if ceiling_on is None else ceiling_on) > largest:
             raise InvalidAmount(f"The largest allowed here is {largest}.")
 
     def _check_destination(self, priced: Quote, direction: str, destination: str) -> None:
@@ -1484,15 +1525,17 @@ class WalletService:
             network_code=network,
         )
         self._check_destination(priced, direction, destination)
-        # The figure the customer named, in the wallet's currency: for a deposit
-        # that is before the charges come off, or a gross just over the ceiling
-        # would pass because the fees brought the net under it.
+        # The ceiling is on the figure the customer named, in the wallet's
+        # currency: for a deposit that is before the charges come off, or a gross
+        # just over it would pass because the fees brought the net under it. The
+        # floor stays on what actually lands, so fees cannot carry a deposit
+        # below the minimum.
         named = (
             money(priced.gross * priced.conversion.effective_rate)
             if direction == str(Direction.CREDIT)
             else priced.wallet_amount
         )
-        self._check_amount(named, direction)
+        self._check_amount(priced.wallet_amount, direction, ceiling_on=named)
 
         with transaction.atomic():
             locked = Wallet.objects.select_for_update().get(pk=wallet.pk)
@@ -1678,12 +1721,12 @@ class WalletService:
             entry.external_reference = external_reference
             fields.append("external_reference")
         entry.save(update_fields=fields)
-        signals.announce(signals.entry_settled, entry=entry_payload(entry))
+        signals.announce(signals.entry_settled, entry=entry_payload(entry, staff=True))
         return entry_payload(entry)
 
     def _announce_recorded(self, entry: WalletEntry) -> None:
         """Tell the project a movement exists, and whatever that already means."""
-        payload = entry_payload(entry)
+        payload = entry_payload(entry, staff=True)
         signals.announce(signals.entry_recorded, entry=payload)
         if entry.status == str(EntryStatus.DONE):
             signals.announce(signals.entry_settled, entry=payload)
@@ -1751,7 +1794,7 @@ class WalletService:
                 entry.metadata = {**entry.metadata, **note}
                 fields.append("metadata")
             entry.save(update_fields=fields)
-            signals.announce(signals.STATUS_SIGNALS[status], entry=entry_payload(entry))
+            signals.announce(signals.STATUS_SIGNALS[status], entry=entry_payload(entry, staff=True))
             return entry_payload(entry)
 
 
@@ -1787,7 +1830,7 @@ def charge_payload(charge: Any) -> dict[str, Any]:
     }
 
 
-def entry_payload(entry: WalletEntry) -> dict[str, Any]:
+def entry_payload(entry: WalletEntry, *, staff: bool = False) -> dict[str, Any]:
     """One entry, in the shape every transport answers with.
 
     Rendered once, here, rather than by each door: three renderings of the same
@@ -1837,7 +1880,11 @@ def entry_payload(entry: WalletEntry) -> dict[str, Any]:
         "description": entry.description,
         # Who in the back office acted stays on the row for the admin and audit;
         # a customer reading their own movement is not told staff account ids.
-        "metadata": {k: v for k, v in entry.metadata.items() if k not in _STAFF_ONLY_KEYS},
+        # Signals pass `staff=True`, so a project's audit receiver still learns
+        # who acted.
+        "metadata": entry.metadata
+        if staff
+        else {k: v for k, v in entry.metadata.items() if k not in _STAFF_ONLY_KEYS},
         "counterparty_id": entry.counterparty_id,
         "archived": entry.checkpoint_id is not None,
         "created_at": entry.created_at.isoformat(),

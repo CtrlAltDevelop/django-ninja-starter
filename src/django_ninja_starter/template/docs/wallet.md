@@ -479,9 +479,11 @@ itself rather than in a server log that rotates. `approve` and `reject` fill in
 entry's metadata; a reversal writes `reversed_by_operator`, and an adjustment
 `adjusted_by`.
 
-Those `*_by_operator` keys are for the back office: they stay on the row and in
-the admin, but the entry an account reads over HTTP, GraphQL or gRPC leaves them
-out, so customers are never handed staff account ids.
+Those keys — the `*_by_operator` ones and `adjusted_by` — are for the back
+office: they stay on the row, in the admin and in the payloads the wallet's
+signals carry, but the entry an account reads over HTTP, GraphQL or gRPC leaves
+them out, so customers are never handed staff account ids. A client cannot set
+them either: metadata that names one of them is refused.
 
 Settling is the one that matters most, because it is where a row becomes money.
 An operator who can settle can turn a deposit nobody ever made into a real

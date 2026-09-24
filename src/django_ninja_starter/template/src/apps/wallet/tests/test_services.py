@@ -558,3 +558,37 @@ def test_a_malformed_entry_id_is_not_found_rather_than_an_error(alice: Any) -> N
         wallet_service.entry(alice, "nope")  # type: ignore[arg-type]
     with pytest.raises(WalletNotFound):
         wallet_service.cancel(alice, "nope")  # type: ignore[arg-type]
+
+
+def test_a_deposit_floor_is_on_what_lands(alice: Any, card: PaymentMethod) -> None:
+    """Card fees take 10 below a floor of 10, so it is refused."""
+    from apps.wallet.errors import InvalidAmount
+
+    with override_settings(WALLET_MIN_DEPOSIT="10"), pytest.raises(InvalidAmount):
+        wallet_service.deposit(alice, amount=Decimal("10"), method="card", reference="d")
+
+
+def test_metadata_cannot_name_an_operator(alice: Any, card: PaymentMethod) -> None:
+    """Otherwise a customer could put a staff member's name on their own deposit."""
+    from apps.wallet.errors import WalletError
+
+    with pytest.raises(WalletError, match="settled_by_operator"):
+        wallet_service.deposit(
+            alice,
+            amount=Decimal("50"),
+            method="card",
+            reference="d",
+            metadata={"settled_by_operator": "someone"},
+        )
+
+
+def test_a_retried_transfer_is_answered_after_the_recipient_closed(
+    funded: Any, bob: Any, cash: PaymentMethod
+) -> None:
+    """The money moved; a 404 on the retry would say it had not."""
+    first = wallet_service.transfer_to(funded, str(bob.pk), amount=Decimal("10"), reference="t")
+    type(bob).objects.filter(pk=bob.pk).update(is_active=False)
+
+    again = wallet_service.transfer_to(funded, str(bob.pk), amount=Decimal("10"), reference="t")
+
+    assert again["id"] == first["id"]

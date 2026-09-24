@@ -307,11 +307,10 @@ def transfer(request: HttpRequest, payload: TransferIn) -> dict[str, Any]:
     transfer, because a conversion nobody chose a rate for is a loss somebody
     discovers later.
     """
-    recipient = _run(wallet_service.recipient, payload.to_user_id)
     return _run(
-        wallet_service.transfer,
+        wallet_service.transfer_to,
         request.user,
-        to_user=recipient,
+        payload.to_user_id,
         amount=payload.amount,
         reference=payload.reference,
         description=payload.description,

@@ -13,7 +13,7 @@ import pytest
 
 from apps.wallet.catalog import PaymentMethod
 from apps.wallet.errors import InvalidTransition, WalletError
-from apps.wallet.models import EntryKind, Wallet, WalletStatus
+from apps.wallet.models import EntryKind, Wallet, WalletEntry, WalletStatus
 from apps.wallet.services import wallet_service
 
 pytestmark = pytest.mark.django_db
@@ -50,7 +50,10 @@ def test_an_adjustment_records_who_made_it_and_why(funded: Any, operator: Any) -
 
     entry = wallet_service.entry(funded, written["id"])
     assert entry["metadata"]["reason"] == "Goodwill for a late payout"
-    assert entry["metadata"]["adjusted_by"] == str(operator.pk)
+    # Who made it is on the row for the back office, not in what the customer reads.
+    assert "adjusted_by" not in entry["metadata"]
+    row = WalletEntry.objects.get(pk=written["id"])
+    assert row.metadata["adjusted_by"] == str(operator.pk)
 
 
 def test_an_unexplained_adjustment_is_refused(funded: Any) -> None:

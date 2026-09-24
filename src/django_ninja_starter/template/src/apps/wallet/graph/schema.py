@@ -293,12 +293,11 @@ class Mutation:
         description: str = "",
         metadata: JSON | None = None,
     ) -> EntryType:
-        recipient = _run(wallet_service.recipient, to_user_id)
         return entry_type(
             _run(
-                wallet_service.transfer,
+                wallet_service.transfer_to,
                 _caller(info),
-                to_user=recipient,
+                to_user_id,
                 amount=amount,
                 reference=reference,
                 description=description,

@@ -614,10 +614,9 @@ class WalletService(generics.GenericService):
         """Move money to another wallet here. Free: nothing leaves, so nothing is charged."""
         user = require_caller(await grpc_caller(context))
         try:
-            recipient = await sync_to_async(wallet_service.recipient)(request.to_user_id)
-            row = await sync_to_async(wallet_service.transfer)(
+            row = await sync_to_async(wallet_service.transfer_to)(
                 user,
-                to_user=recipient,
+                request.to_user_id,
                 amount=_amount(request.amount, "amount"),
                 reference=request.reference,
                 description=request.description,

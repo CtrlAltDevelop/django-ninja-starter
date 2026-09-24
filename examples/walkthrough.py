@@ -2374,6 +2374,22 @@ def section_wallet(api: Api) -> None:
     print(f"  {DIM}│ same entry returned: {again['id']}{OFF}")
 
     note(
+        "`metadata` is the client's, except for the keys that say which operator "
+        "acted: a client writing one would put a staff member's name on money "
+        "they never touched, so it is refused."
+    )
+    api.post(
+        "/api/v1/wallet/deposits",
+        {
+            "method": "card",
+            "amount": "10.00",
+            "reference": "tour-card-forged",
+            "metadata": {"settled_by_operator": "someone-on-staff"},
+        },
+        expect=400,
+    )
+
+    note(
         "A rail knows one other thing: the money did not move. A declined card is "
         "reported through the same signed door, and the movement ends `failed` -- "
         "kept in the history, never part of any balance."
