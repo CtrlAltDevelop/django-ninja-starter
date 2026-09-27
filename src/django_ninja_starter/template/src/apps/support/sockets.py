@@ -206,9 +206,13 @@ def _live_ticket_ids(user: Any) -> list[Any]:
     somebody is actually having. A settled thread is still reachable -- the
     client subscribes to it when the person opens it -- and does not deserve a
     subscription held all day on the chance that they might.
+
+    ``listed_for``, not ``visible_to``: an unjoined public channel is not a
+    conversation this person is having, and fifty busy ones would otherwise
+    fill every slot and push their own ticket out of the window.
     """
     return list(
-        Ticket.objects.visible_to(user)
+        Ticket.objects.listed_for(user)
         .filter(status__in=LIVE_STATUSES)
         .ordered_for_queue()
         .values_list("id", flat=True)[:AUTO_SUBSCRIBE]

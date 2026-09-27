@@ -557,6 +557,22 @@ is rarely what anybody meant and is not undoable from that screen. The two that
 settle tickets **save each row** rather than calling `update`, because `update`
 skips `post_save` and every client watching one of those threads would be left
 showing it as open forever.
+They act on chats and tickets only -- a channel, group or private chat in the
+selection is skipped -- and each move goes through the same service call the
+transports use, so it stamps `closed_at`/`resolved_at` and writes the status
+event into the thread.
+
+A ticket's **status and kind are read-only once saved**. A status typed into the
+change form would skip the timestamps (a closed ticket with no `closed_at` is
+one `support_prune` never removes), and an editable kind would let an
+administrator turn a private chat into a public channel. A ticket added in the
+admin is saved open and then moved to the status chosen, through the same path.
+
+**Private rooms are not in the admin.** Groups and direct messages are left out
+of the ticket list, the message inline and search, attachments and
+participants. Staff are not entitled to people's private conversations -- the
+same rule the API applies, see `TicketQuerySet.visible_to` -- and admin access is
+a staff account with more buttons. The desk and public channels stay.
 
 ## Setup
 

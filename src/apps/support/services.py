@@ -120,6 +120,35 @@ def _choice(value: str, choices: Any, what: str) -> str:
     return value
 
 
+SUBJECT_LIMIT = Ticket._meta.get_field("subject").max_length or 200
+ADDRESS_LIMIT = Ticket._meta.get_field("slug").max_length or 140
+
+
+def _subject(subject: str, what: str) -> str:
+    """Refuse a subject or a name longer than its column.
+
+    PostgreSQL answers an over-long value with ``DataError`` -- a 500 on every
+    transport and a dropped socket -- and SQLite stores it silently, so the
+    limit is checked here where all four meet.
+    """
+    if len(subject) > SUBJECT_LIMIT:
+        raise InvalidRequest(f"{what} can be at most {SUBJECT_LIMIT} characters.")
+    return subject
+
+
+def _locked(ticket: Ticket) -> Ticket:
+    """The same thread re-read under a row lock. Call inside ``transaction.atomic()``.
+
+    Every write that decides on the thread's status -- a reply that must not
+    land on a closed thread, a status change, a rating that needs a settled
+    one -- takes this first and re-checks what it read. Otherwise two of them
+    at once each decide on a stale copy, and ``_advance_ticket`` writes
+    ``status=open`` over a close that committed a moment earlier, leaving an
+    open thread with a ``closed_at`` or a rating.
+    """
+    return Ticket.objects.select_for_update().get(pk=ticket.pk)
+
+
 def _body(body: str, *, uploads: int = 0) -> str:
     """A message has to say or carry something.
 
@@ -225,7 +254,13 @@ class SupportService:
             tickets = tickets.unassigned()
         if assignee:
             _staff_only(user, "filter by agent")
-            tickets = tickets.filter(assignee_id=assignee)
+            try:
+                # Parsed here: Django's own refusal is a ValidationError, which
+                # no transport but REST (which types it as a uuid) translates.
+                agent = UUID(str(assignee))
+            except ValueError:
+                raise InvalidRequest(f"{assignee!r} is not an account id.") from None
+            tickets = tickets.filter(assignee_id=agent)
         if search:
             tickets = tickets.for_search_by(user, search)
         return tickets
@@ -331,7 +366,9 @@ class SupportService:
         """The badge: how many messages are waiting, and in how many threads."""
         threads = 0
         total = 0
-        for ticket in self._visible(user).with_unread(user):
+        # Your own list, not everything you may see: an unjoined public channel
+        # has no watermark to count from and cannot be read clear.
+        for ticket in Ticket.objects.listed_for(user).with_unread(user):
             count = getattr(ticket, "unread", 0)
             if count:
                 threads += 1
@@ -479,6 +516,7 @@ class SupportService:
             body = _body(body, uploads=len(uploads))
             if not subject.strip():
                 raise InvalidRequest("A ticket needs a subject.")
+        _subject(subject, "A subject")
         ticket = create_ticket(
             user,
             kind=kind,
@@ -514,8 +552,7 @@ class SupportService:
         an agent is doing both in the same conversation, has one command.
         """
         ticket = self._ticket(user, ticket_id)
-        if ticket.status == Status.CLOSED:
-            raise NotPermitted("This ticket is closed. Reopen it before adding to it.")
+        self._refuse_closed(ticket)
         if internal:
             _staff_only(user, "leave an internal note")
             if ticket.kind not in DESK_KINDS:
@@ -529,6 +566,8 @@ class SupportService:
             join(ticket, user, role=str(Role.AGENT) if staff else str(Role.CLIENT))
         try:
             with transaction.atomic():
+                ticket = _locked(ticket)
+                self._refuse_closed(ticket)
                 message = post_message(
                     ticket,
                     user,
@@ -548,6 +587,11 @@ class SupportService:
         # a second command is what stops a badge surviving a conversation.
         mark_read(ticket, user, at=message.created_at)
         return events.message_payload(message)
+
+    @staticmethod
+    def _refuse_closed(ticket: Ticket) -> None:
+        if ticket.status == Status.CLOSED:
+            raise NotPermitted("This ticket is closed. Reopen it before adding to it.")
 
     def edit(self, user: Any, message_id: UUID, body: str) -> dict[str, Any]:
         """Rewrite your own message. Never anybody else's -- see the model."""
@@ -619,16 +663,29 @@ class SupportService:
                 raise NotPermitted("Only the client who opened a ticket can settle it.")
             if status in (Status.PENDING, Status.ON_HOLD):
                 raise NotPermitted("Only the support desk can set that status.")
-        was = ticket.status
-        changed = set_status(ticket, status, by=user)
-        if changed:
-            self._event(
-                ticket,
-                user,
-                f"changed the status from {was} to {status}",
-                {"field": "status", "from": was, "to": status},
-            )
+        ticket, changed = self.move(ticket, user, status)
         return {"ticket": str(ticket.pk), "status": ticket.status, "changed": changed}
+
+    def move(self, ticket: Ticket, actor: Any, status: str) -> tuple[Ticket, bool]:
+        """Move a desk thread under its row lock and record the move as an event.
+
+        No permission check: :meth:`status` has made it by now, and the admin's
+        bulk actions and add form -- the only other callers -- are staff by
+        construction. One path, so a status set anywhere stamps its timestamps
+        and leaves the same line in the thread.
+        """
+        with transaction.atomic():
+            ticket = _locked(ticket)
+            was = ticket.status
+            changed = set_status(ticket, status, by=actor)
+            if changed:
+                self._event(
+                    ticket,
+                    actor,
+                    f"changed the status from {was} to {status}",
+                    {"field": "status", "from": was, "to": status},
+                )
+        return ticket, changed
 
     def close(self, user: Any, ticket_id: UUID) -> dict[str, Any]:
         """Settle a thread for good. Both sides may; only :meth:`reopen` undoes it."""
@@ -822,12 +879,14 @@ class SupportService:
         uniqueness: somebody who asked for `#general` and silently got
         `#general-2` has been given a different channel from the one they meant.
         """
-        name = name.strip()
+        name = _subject(name.strip(), "A channel name")
         if not name:
             raise InvalidRequest("A channel needs a name.")
         address = slugify(slug or name)
         if not address:
             raise InvalidRequest("That name does not make a usable address.")
+        if len(address) > ADDRESS_LIMIT:
+            raise InvalidRequest(f"A channel address can be at most {ADDRESS_LIMIT} characters.")
         if Ticket.objects.filter(slug=address).exists():
             raise InvalidRequest(f"There is already a channel at {address!r}.")
         try:
@@ -852,7 +911,7 @@ class SupportService:
         Nobody else can find it: a group is invisible to everyone but its
         members, staff included.
         """
-        name = name.strip()
+        name = _subject(name.strip(), "A group name")
         if not name:
             raise InvalidRequest("A group needs a name.")
         members = self._accounts(user, member_ids)
@@ -879,6 +938,9 @@ class SupportService:
         key = direct_key_for(user.pk, other.pk)
         existing = Ticket.objects.filter(direct_key=key).first()
         if existing is not None:
+            # Joined here too: the other person's creation may not have added
+            # this account yet, and the key naming it is the warrant to be in it.
+            join(existing, user, role=str(Role.MEMBER))
             return self.ticket(user, existing.pk)
         try:
             ticket = create_ticket(
@@ -941,18 +1003,22 @@ class SupportService:
         ticket = self._desk_ticket(user, ticket_id)
         if ticket.client_id != getattr(user, "pk", None):
             raise NotPermitted("Only the client who opened a ticket can rate it.")
-        if not ticket.is_settled:
-            raise NotPermitted("Rate a ticket once it has been resolved or closed.")
         if not isinstance(score, int) or isinstance(score, bool) or not 1 <= score <= 5:
             raise InvalidRequest("A rating is a whole number of stars, one to five.")
-        rate(ticket, score, comment.strip())
-        self._event(
-            ticket,
-            user,
-            f"rated this {score} out of 5",
-            {"field": "rating", "to": score},
-            internal=True,
-        )
+        with transaction.atomic():
+            # Settled is checked under the lock, or a reopen racing this leaves
+            # an open ticket carrying a rating.
+            ticket = _locked(ticket)
+            if not ticket.is_settled:
+                raise NotPermitted("Rate a ticket once it has been resolved or closed.")
+            rate(ticket, score, comment.strip())
+            self._event(
+                ticket,
+                user,
+                f"rated this {score} out of 5",
+                {"field": "rating", "to": score},
+                internal=True,
+            )
         return {"ticket": str(ticket.pk), "rating": score, "comment": comment.strip()}
 
     # -- attachments ------------------------------------------------------

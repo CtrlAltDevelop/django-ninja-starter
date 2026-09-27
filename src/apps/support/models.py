@@ -833,10 +833,16 @@ class Message(models.Model):
         return self.author_id is not None and self.author_id == getattr(user, "pk", None)
 
     def deletable_by(self, user: Any) -> bool:
-        """The author, or staff. Staff may retract what a client posted by mistake."""
+        """The author, or staff on a desk thread.
+
+        Staff may retract what a client posted by mistake on the desk's own
+        threads. In a room they are a member like anybody else -- see
+        :meth:`TicketQuerySet.visible_to`, where ``is_staff`` is not a warrant --
+        so there they may delete only what they wrote.
+        """
         if self.is_deleted or self.kind == MessageKind.EVENT:
             return False
-        if getattr(user, "is_staff", False):
+        if getattr(user, "is_staff", False) and self.ticket.kind in DESK_KINDS:
             return True
         return self.author_id is not None and self.author_id == getattr(user, "pk", None)
 
@@ -1083,11 +1089,24 @@ def _advance_ticket(ticket: Ticket, message: Message, author: Any | None) -> Non
     not reopened that way -- closing is final, and reopening it is a request the
     client makes explicitly.
     """
+    if message.visibility == Visibility.INTERNAL:
+        # A note, or an internal event, is not activity the client can see:
+        # moving ``last_message_at`` or ``updated_at`` for one would re-sort the
+        # client's list and send them a thread frame saying the desk had just
+        # written something they are not allowed to read. It moves no status.
+        return
     fields = ["last_message_at", "updated_at"]
     ticket.last_message_at = message.created_at
 
     from_staff = author is not None and getattr(author, "is_staff", False)
-    substantive = message.kind == MessageKind.REPLY and message.visibility == Visibility.PUBLIC
+    # Only the desk has a queue. A staff member talking in a channel or a group
+    # is a member talking, not the desk answering, and a room has no status to
+    # move and no first-response promise to keep.
+    substantive = (
+        ticket.kind in DESK_KINDS
+        and message.kind == MessageKind.REPLY
+        and message.visibility == Visibility.PUBLIC
+    )
 
     if from_staff and substantive and ticket.first_response_at is None:
         ticket.first_response_at = message.created_at
@@ -1176,7 +1195,11 @@ def unread_count(ticket: Ticket, user: Any) -> int:
 
 
 def total_unread(user: Any) -> int:
-    """The badge number across every thread this account can see.
+    """The badge number across every thread in this account's own list.
+
+    :meth:`TicketQuerySet.listed_for`, not ``visible_to``: a public channel you
+    never joined has no watermark, so every message in it would count, and
+    reading it cannot clear the count because reading does not join.
 
     A loop rather than one aggregate, because the watermark comparison is per
     thread and expressing it as a single query means a correlated subquery whose
@@ -1185,7 +1208,7 @@ def total_unread(user: Any) -> int:
     true, this is the function to rewrite and the only one.
     """
     total = 0
-    tickets = Ticket.objects.visible_to(user).prefetch_related("participants")
+    tickets = Ticket.objects.listed_for(user).prefetch_related("participants")
     for ticket in tickets:
         total += unread_count(ticket, user)
     return total

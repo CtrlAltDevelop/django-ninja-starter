@@ -33,6 +33,7 @@ from django.apps import apps
 from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils.text import Truncator
 
 from apps.support.broadcast import get_broker, staff_channel, ticket_channel, user_channel
 from apps.support.models import (
@@ -227,10 +228,14 @@ def publish_message(message: Message) -> None:
         "message": message_payload(message),
     }
     _after_commit(ticket_channel(message.ticket_id), frame)
-    _publish_badges(message.ticket, exclude=message.author_id)
+    _publish_badges(
+        message.ticket,
+        exclude=message.author_id,
+        staff_only=message.visibility == Visibility.INTERNAL,
+    )
 
 
-def _publish_badges(ticket: Ticket, *, exclude: Any = None) -> None:
+def _publish_badges(ticket: Ticket, *, exclude: Any = None, staff_only: bool = False) -> None:
     """Tell each participant their unread count for this thread moved.
 
     Counted per person, because it is a different number for each of them: the
@@ -238,9 +243,15 @@ def _publish_badges(ticket: Ticket, *, exclude: Any = None) -> None:
     unread. Whoever caused the change is skipped -- they have the message
     already, and telling them they have not read what they just wrote is the one
     badge update that is always wrong.
+
+    ``staff_only`` is for an internal message: the client's count did not move,
+    and a frame saying their thread changed would tell them the desk had just
+    written something about them.
     """
     for participant in ticket.participants.select_related("user"):
         if exclude is not None and participant.user_id == exclude:
+            continue
+        if staff_only and not getattr(participant.user, "is_staff", False):
             continue
         if not participant.notify:
             continue
@@ -323,6 +334,11 @@ def publish_read(ticket: Ticket, user: Any, at: Any) -> None:
     The thread frame is what draws the other side's read ticks. The account
     frame is what clears the badge on this person's *other* devices, so a
     conversation opened on a phone stops being bold on the laptop.
+
+    On a desk thread, an agent who is neither its assignee nor its client reads
+    silently: the thread channel reaches the client, and a tick naming every
+    agent who looked would undo the roster trimming in
+    :meth:`apps.support.services.SupportService._participants`.
     """
     frame = {
         "type": READ_FRAME,
@@ -330,7 +346,13 @@ def publish_read(ticket: Ticket, user: Any, at: Any) -> None:
         "user": author_payload(user),
         "last_read_at": at.isoformat() if at else None,
     }
-    _after_commit(ticket_channel(ticket.pk), frame)
+    onlooker = (
+        ticket.kind in DESK_KINDS
+        and getattr(user, "is_staff", False)
+        and user.pk not in (ticket.assignee_id, ticket.client_id)
+    )
+    if not onlooker:
+        _after_commit(ticket_channel(ticket.pk), frame)
     _after_commit(
         user_channel(user.pk),
         {
@@ -416,12 +438,22 @@ def _notify_counterparts(message: Message) -> None:
         return
     ticket = message.ticket
     label = ticket.subject or ticket.reference
-    notify_users(
-        recipients,
-        f"New message on {label}",
-        body=message.body[:280],
-        link=f"/support/tickets/{ticket.pk}",
-        data={"ticket": str(ticket.pk), "message": str(message.pk), "reference": ticket.reference},
+    subject = f"New message on {label}"
+    limit = apps.get_model("notifications", "Notification")._meta.get_field("subject").max_length
+    body = message.body[:280]
+    data = {"ticket": str(ticket.pk), "message": str(message.pk), "reference": ticket.reference}
+    # After the commit, and robustly: a notification that fails is a missed
+    # nudge, and inside the message's own transaction it would roll back the
+    # message -- every reply on the thread failing for the sake of a bell.
+    transaction.on_commit(
+        lambda: notify_users(
+            recipients,
+            Truncator(subject).chars(limit or 200),
+            body=body,
+            link=f"/support/tickets/{ticket.pk}",
+            data=data,
+        ),
+        robust=True,
     )
 
 

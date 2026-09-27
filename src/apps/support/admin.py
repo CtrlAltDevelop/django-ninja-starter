@@ -25,6 +25,20 @@ a support ticket, and that is a real job. It leaves an ``edited_at``, exactly as
 an edit over the API does, so the thread never silently changes underneath the
 people reading it.
 
+**Private rooms are not in the admin at all.** Groups and direct messages
+are left out of the ticket list, the message inline, the message search, the
+attachments and the participants, for the reason
+:meth:`apps.support.models.TicketQuerySet.visible_to` gives: staff are not
+entitled to people's private conversations, and admin access is a staff
+account with more buttons. The desk and public channels stay.
+
+A ticket's **status and kind** are read-only once it is saved. A status typed
+into the form would skip :func:`apps.support.models.set_status` -- a ticket
+closed with no ``closed_at`` that the prune never removes, a reopen that keeps
+the SLA frozen -- and a kind typed into it would turn a private chat into a
+public channel. Status moves through the bulk actions, which go through the
+service like every transport does.
+
 The theme is resolved the way the CMS and the notifications app resolve theirs:
 Unfold where the project installs it, Django's own admin where it does not, so
 this app can be lifted into a project that has never heard of either.
@@ -45,6 +59,7 @@ from apps.support.models import (
     Attachment,
     CannedReply,
     Category,
+    Kind,
     Message,
     Participant,
     Priority,
@@ -77,6 +92,10 @@ PRIORITY_COLOURS = {
     Priority.HIGH: "#d97706",
     Priority.URGENT: "#dc2626",
 }
+
+
+# Groups and direct messages: nobody's business but their members'.
+PRIVATE_KINDS = (Kind.GROUP, Kind.DIRECT)
 
 
 def _badge(colour: str, label: str) -> Any:
@@ -139,7 +158,11 @@ class MessageInline(StackedInline):
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Message]:
         return (
-            super().get_queryset(request).select_related("author").prefetch_related("attachments")
+            super()
+            .get_queryset(request)
+            .exclude(ticket__kind__in=PRIVATE_KINDS)
+            .select_related("author")
+            .prefetch_related("attachments")
         )
 
     def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
@@ -161,7 +184,12 @@ class ParticipantInline(TabularInline):
     readonly_fields = ("user", "role", "joined_at", "last_read_at")
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Participant]:
-        return super().get_queryset(request).select_related("user")
+        return (
+            super()
+            .get_queryset(request)
+            .exclude(ticket__kind__in=PRIVATE_KINDS)
+            .select_related("user")
+        )
 
     def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
@@ -262,13 +290,31 @@ class TicketAdmin(LiveChatAdminMixin, ModelAdmin):
     )
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Ticket]:
-        """Count the messages in the list query rather than once per row."""
+        """Count the messages in the list query rather than once per row. No private rooms."""
         return (
             super()
             .get_queryset(request)
+            .exclude(kind__in=PRIVATE_KINDS)
             .select_related("client", "assignee", "category")
             .annotate(message_count=Count("messages", filter=Q(messages__deleted_at__isnull=True)))
         )
+
+    def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> Any:
+        """Status and kind are chosen once, on add. See the module docstring."""
+        fields = tuple(super().get_readonly_fields(request, obj))
+        return (*fields, "status", "kind") if obj is not None else fields
+
+    def save_model(self, request: HttpRequest, obj: Ticket, form: Any, change: bool) -> None:
+        """Add a ticket open, then move it: a status is only ever set by ``set_status``."""
+        wanted = obj.status
+        if not change:
+            obj.status = str(Status.OPEN)
+        super().save_model(request, obj, form, change)
+        if not change and wanted != Status.OPEN and obj.kind in DESK_KINDS:
+            from apps.support.services import support_service
+
+            support_service.move(obj, getattr(request, "user", None), wanted)
+            obj.refresh_from_db()
 
     @admin.display(description="Subject", ordering="subject")
     def subject_or_kind(self, ticket: Ticket) -> str:
@@ -339,19 +385,25 @@ class TicketAdmin(LiveChatAdminMixin, ModelAdmin):
         threads would be left showing it as open forever. A loop is the price of
         the broadcast, and a bulk action over enough rows for it to hurt is one
         somebody should be doing with a management command.
-        """
-        from apps.support.models import set_status
 
+        Desk threads only, and through the service: closing a channel would
+        lock out everyone in it, and a move made here writes the same event
+        into the thread as one made over the API.
+        """
+        from apps.support.services import support_service
+
+        actor = getattr(request, "user", None)
         changed = 0
-        for ticket in queryset:
-            changed += bool(set_status(ticket, status))
+        for ticket in queryset.filter(kind__in=DESK_KINDS):
+            changed += support_service.move(ticket, actor, status)[1]
         self.message_user(request, f"{changed} ticket{'' if changed == 1 else 's'} updated.")
 
     @admin.action(description="Return selected to the unassigned queue")
     def unassign(self, request: HttpRequest, queryset: QuerySet[Ticket]) -> None:
         from apps.support.models import assign
 
-        changed = sum(bool(assign(ticket, None)) for ticket in queryset)
+        # A room has no queue to be returned to.
+        changed = sum(bool(assign(ticket, None)) for ticket in queryset.filter(kind__in=DESK_KINDS))
         self.message_user(request, f"{changed} ticket{'' if changed == 1 else 's'} unassigned.")
 
 
@@ -508,7 +560,12 @@ class AttachmentAdmin(ModelAdmin):
     date_hierarchy = "created_at"
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Attachment]:
-        return super().get_queryset(request).select_related("message__ticket")
+        return (
+            super()
+            .get_queryset(request)
+            .exclude(message__ticket__kind__in=PRIVATE_KINDS)
+            .select_related("message__ticket")
+        )
 
     @admin.display(description="Ticket", ordering="message__ticket__reference")
     def ticket(self, attachment: Attachment) -> str:
@@ -538,7 +595,12 @@ class ParticipantAdmin(ModelAdmin):
     date_hierarchy = "joined_at"
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Participant]:
-        return super().get_queryset(request).select_related("user", "ticket")
+        return (
+            super()
+            .get_queryset(request)
+            .exclude(ticket__kind__in=PRIVATE_KINDS)
+            .select_related("user", "ticket")
+        )
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
@@ -575,7 +637,12 @@ class MessageAdmin(ModelAdmin):
     )
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Message]:
-        return super().get_queryset(request).select_related("ticket", "author")
+        return (
+            super()
+            .get_queryset(request)
+            .exclude(ticket__kind__in=PRIVATE_KINDS)
+            .select_related("ticket", "author")
+        )
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         """No -- see :meth:`MessageInline.has_add_permission`."""

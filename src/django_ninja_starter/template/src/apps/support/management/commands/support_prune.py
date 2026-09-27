@@ -53,7 +53,7 @@ class Command(BaseCommand):
             "--upload-days",
             type=int,
             default=UPLOAD_DAYS,
-            help=f"How long an unattached upload is kept. Default {UPLOAD_DAYS}.",
+            help=f"How long an unattached upload is kept, at least one day. Default {UPLOAD_DAYS}.",
         )
         parser.add_argument(
             "--dry-run",
@@ -74,6 +74,10 @@ class Command(BaseCommand):
             )
         if days < 0:
             raise CommandError("A retention window cannot be negative.")
+        if options["upload_days"] < 1:
+            # Zero or less puts the cutoff at now, which would delete the file
+            # somebody is attaching at this moment along with the abandoned ones.
+            raise CommandError("--upload-days must be at least one day.")
 
         cutoff = timezone.now() - timezone.timedelta(days=days)
         upload_cutoff = timezone.now() - timezone.timedelta(days=options["upload_days"])
