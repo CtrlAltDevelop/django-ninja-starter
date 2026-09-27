@@ -418,3 +418,13 @@ def test_a_broker_outage_neither_fails_the_request_nor_drops_notifications(
     assert callbacks  # the failing publishes really ran
     assert Notification.objects.filter(subject="Both of you").count() == 2
     assert response.status_code == 200
+
+
+def test_count_takes_the_lists_filters(client: Client, alice: Any) -> None:
+    """The number `/count` answers is the length the same filtered list pages through."""
+    notify_user(alice, "Quiet", level="info")
+    notify_user(alice, "Loud", level="warning")
+
+    counted = client.get(f"{LIST}/count?level=warning", **_bearer(alice)).json()["data"]["count"]
+
+    assert counted == len(_rows(client, alice, "?level=warning")) == 1

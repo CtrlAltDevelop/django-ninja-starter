@@ -442,3 +442,14 @@ class TestOverGrpc:
 
         assert preview.is_valid
         assert Decimal(preview.discount) == Decimal("60.00")
+
+
+def test_somebody_elses_address_is_not_found_over_graphql(
+    alice: Any, bob: Any, address: Address
+) -> None:
+    query = "query($addressId: String!) { shopAddress(addressId: $addressId) { city } }"
+
+    body = graphql(query, bob, addressId=str(address.pk))
+
+    assert body["data"] is None
+    assert body["errors"][0]["extensions"]["title"] == "NOT_FOUND"

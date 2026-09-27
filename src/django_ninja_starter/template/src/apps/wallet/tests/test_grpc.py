@@ -171,3 +171,42 @@ def test_the_balance_and_one_method_are_readable_on_their_own(
 
     assert Decimal(balance.available) == Decimal("0")
     assert method.code == "card"
+
+
+def test_a_transfer_moves_money_and_an_unknown_recipient_is_not_found(
+    paying: Any, cash: PaymentMethod, grpc_call: Callable[..., Any]
+) -> None:
+    """The one gRPC write that names somebody else, resolved the same way REST does."""
+    from django.contrib.auth import get_user_model
+
+    wallet_service.deposit(paying, amount=Decimal("100"), method="cash", reference="d")
+    ines = get_user_model().objects.create_user(username="ines", email="ines@example.test")
+    token = access_token(paying)
+
+    reply = grpc_call(
+        Stub,
+        "Transfer",
+        wallet_pb2.TransferRequest(to_user_id=str(ines.pk), amount="10", reference="t"),
+        token=token,
+    )
+    assert Decimal(reply.entry.amount) == Decimal("10")
+
+    with pytest.raises(grpc.aio.AioRpcError) as refusal:
+        grpc_call(
+            Stub,
+            "Transfer",
+            wallet_pb2.TransferRequest(to_user_id="nope", amount="10", reference="t2"),
+            token=token,
+        )
+    assert refusal.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_an_unknown_method_is_refused_as_rest_refuses_it(
+    paying: Any, grpc_call: Callable[..., Any]
+) -> None:
+    with pytest.raises(grpc.aio.AioRpcError) as refusal:
+        grpc_call(
+            Stub, "GetMethod", wallet_pb2.MethodRequest(code="nope"), token=access_token(paying)
+        )
+
+    assert refusal.value.code() == grpc.StatusCode.INVALID_ARGUMENT

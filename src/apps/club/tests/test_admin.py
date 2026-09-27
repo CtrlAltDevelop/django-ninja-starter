@@ -342,3 +342,30 @@ def test_the_ladder_inline_accepts_a_whole_ladder_edit(club: Club) -> None:
     formset.save()
     assert [level.xp_required for level in ladder(club.pk)] == [0, 350, 400, 600]
     assert [level.pk for level in ladder(club.pk)] == [row.pk for row in rows]
+
+
+def test_the_add_form_refuses_somebody_already_in_another_club(
+    member: Any, other_club: Any
+) -> None:
+    from apps.club.admin import MembershipForm
+
+    form = MembershipForm(data={"user": member.pk, "club": other_club.pk})
+
+    assert not form.is_valid()
+    assert "leave it first" in str(form.errors)
+
+
+def test_the_form_refuses_activating_a_member_of_an_archived_club(member: Any, club: Any) -> None:
+    from apps.club.admin import MembershipForm
+    from apps.club.models import Membership
+
+    row = Membership.objects.get(user=member)
+    row.status = "suspended"
+    row.save()
+    club.status = "archived"
+    club.save()
+    form = MembershipForm(data={"status": "active"}, instance=row)
+    form.fields = {"status": form.fields["status"]}
+
+    assert not form.is_valid()
+    assert "archived" in str(form.errors)

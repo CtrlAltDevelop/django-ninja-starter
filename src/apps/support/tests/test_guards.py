@@ -326,3 +326,50 @@ def test_private_rooms_are_not_in_the_admin(
     assert str(ticket.pk) in listed
     assert listed.isdisjoint({dm["id"], group["id"]})
     assert not inline.filter(ticket_id=group["id"]).exists()
+
+
+def test_the_queue_filters_by_a_well_formed_assignee(agent: Any, ticket: Any) -> None:
+    support_service.claim(agent, ticket.pk)
+
+    assert [row["id"] for row in support_service.tickets(agent, assignee=str(agent.pk))] == [
+        str(ticket.pk)
+    ]
+
+
+def test_a_channel_address_taken_mid_request_is_refused(
+    client_user: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The existence check passed; the insert lost the race to somebody else's."""
+    from django.db import IntegrityError
+
+    from apps.support import services
+
+    def taken(*args: Any, **kwargs: Any) -> Any:
+        raise IntegrityError("duplicate slug")
+
+    monkeypatch.setattr(services, "create_ticket", taken)
+
+    with pytest.raises(services.InvalidRequest, match="already a channel"):
+        support_service.create_channel(client_user, "General")
+
+
+def test_a_private_chat_opened_by_both_at_once_ends_in_one_chat(
+    client_user: Any, other_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other person's insert wins; this caller is put in their chat."""
+    from django.db import IntegrityError
+
+    from apps.support import services
+
+    real = services.create_ticket
+
+    def lost_the_race(user: Any, **kwargs: Any) -> Any:
+        real(other_client, **kwargs)
+        raise IntegrityError("duplicate direct_key")
+
+    monkeypatch.setattr(services, "create_ticket", lost_the_race)
+
+    chat = support_service.direct(client_user, other_client.pk)
+
+    monkeypatch.setattr(services, "create_ticket", real)
+    assert support_service.direct(other_client, client_user.pk)["id"] == chat["id"]
