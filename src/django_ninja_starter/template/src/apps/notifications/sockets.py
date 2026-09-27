@@ -317,7 +317,7 @@ class NotificationSocket:
         if text is None:
             await self._send_error(BAD_REQUEST, "Send text frames, not binary ones.")
             return
-        if len(text) > MAX_FRAME_BYTES:
+        if len(text.encode()) > MAX_FRAME_BYTES:
             await self._send_error(BAD_REQUEST, "That frame is too large to be a command.")
             return
         if self._over_limit():

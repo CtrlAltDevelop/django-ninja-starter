@@ -1266,3 +1266,22 @@ def test_dismissing_everything_keeps_when_each_was_first_read(alice: Any) -> Non
     receipt = NotificationReceipt.objects.get(notification=earlier, user=alice)
     assert receipt.read_at == first_read
     assert receipt.dismissed_at is not None
+
+
+def test_the_frame_cap_counts_bytes_not_characters(alice: Any) -> None:
+    """Four-byte characters would otherwise carry four times the cap."""
+    from apps.notifications import sockets
+
+    token = access_token(alice)
+    text = "😀" * (sockets.MAX_FRAME_BYTES // 4 + 1)
+
+    async def scenario() -> dict[str, Any]:
+        client = socket(query=f"token={token}")
+        await client.open()
+        await client.next_frame()
+        await client.send_text(text)
+        answer = await client.next_frame()
+        await client.close()
+        return answer
+
+    assert "too large" in run(scenario())["description"]
