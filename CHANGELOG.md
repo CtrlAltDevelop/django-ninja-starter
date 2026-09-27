@@ -312,6 +312,41 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **View-only staff could move money and publish content.** No admin action
+  declared a permission, and Django then offers an action to anybody who can
+  open the list -- so an account with only `view_walletentry` could approve and
+  settle a deposit nobody made, and a content editor with only `view_page` could
+  put an unreviewed draft live. Every wallet, cms and site-event action now needs
+  `change`.
+- **GraphQL and REST disagreed about CSRF, and both were wrong.** GraphQL was
+  not CSRF-exempt, so every bearer client -- a mobile app, a SPA, `curl` -- got a
+  `403`; REST was exempt, so in the `none` token mode a write carried only by the
+  session cookie needed no CSRF token at all. One helper now decides for both: a
+  bearer request passes, a session-authenticated write must carry a CSRF token.
+- **A review showed its author's phone number.** The author was
+  `get_username()`, which for a phone sign-up is built from the number, and the
+  review list is public. The club leaderboard showed every member the same login
+  identifier. Both now publish a display name -- first word and last initial --
+  or a neutral fallback.
+- **A signed-out socket handed one account's feed to the next.** A connection
+  cannot leave a channel it has joined, so signing a second account in on it
+  delivered the first account's notifications. It now refuses any other account,
+  and re-checks its credential about once a minute so a revoked token or a
+  deactivated account stops receiving.
+- **Private rooms leaked to the desk and to people who had left them.** New
+  groups and direct chats were announced on the staff channel; a group's creator
+  could read it after leaving; posting, typing and presence silently rejoined a
+  room; and the admin listed every group and DM. Rooms are now their members'
+  alone, and the admin shows desk threads and public channels only.
+- **Upload filters checked the name the file was not stored under.** `x.svg.`
+  or `x.ſvg` passed the check and were saved as `.svg`. Both the cms and support
+  now check the cleaned name, and neither accepts anything a browser would run
+  (`.svg`, `.html`, `.xml`, `.js`).
+- **A customer could forge who settled their money.** `metadata` accepted
+  `settled_by_operator` and its siblings, so a deposit could name a staff member
+  as the person who made it real. Those keys are refused from clients, and are
+  left out of what a customer reads while signals still carry them.
+
 - **Settling a movement from the admin recorded nobody.** `approve` and `reject`
   filled in `reviewed_by` and a reversal recorded `reversed_by_operator`, but
   `settle` and `fail` -- the action that turns a row into real money -- took no
@@ -396,6 +431,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **An account cannot cancel a payout its rail may already be paying.** Once
+  `payout_ready` has fired, cancelling would release the hold while the money
+  went out -- paid twice. It is now a `409`; the rail or an operator ends it.
+- **A shopper no longer names the payment provider.** `provider` is gone from
+  REST checkout; every order records `manual` until a gateway says otherwise.
+- **Internal notes no longer move `last_message_at`**, so a note neither
+  re-sorts the client's list nor the desk queue.
+- **Preview links name the page's id as well as its slug**, so a link does not
+  open a different draft that later takes the same address. Links made before
+  this change stopped working.
+
 - **An app now carries its own admin, and the project carries none of it.** The
   sidebar and the dashboard used to be a list in
   `infrastructure/common/adminui.py` -- a function per app building its group,
@@ -465,6 +511,31 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the one listing that shows you a room you have not joined.
 
 ### Fixed
+
+- **Races that lost updates or answered 500.** Two agents claiming one ticket,
+  two first reviews, two adds of a new basket item, rejoining a club, leaving a
+  club under suspension, replying while a ticket closes, and two editors saving
+  one field in different languages are all locked now. Checkout locks its rows in
+  primary-key order, so two baskets can no longer deadlock.
+- **Cancelling an order left its payment pending and kept its coupon use**, so a
+  cancelled order could still be marked paid and a limited coupon could be
+  drained by placing and cancelling.
+- **A frozen wallet still paid out**, through approval and operator settlement.
+- **Values the database could not hold answered 500**: malformed UUIDs on every
+  transport, `NaN`, `Infinity` and oversized amounts, and text longer than its
+  column on PostgreSQL. They are all refused with a `4xx` now.
+- **Transport gaps.** gRPC gained the wallet's `GetBalance` and `GetMethod`, the
+  cms page's JSON-LD, menu children and section parents; GraphQL gained
+  `shopAddress`, `notificationCount` and `clubAwardCount`; REST gained
+  `GET /notifications/count`. Every paged response echoes the page it served.
+- **A Redis outage failed the request that caused a notification** and dropped
+  the rest of its fan-out. Publishing is robust now, and a support message is no
+  longer rolled back by a notification that fails.
+- **Counts and badges.** Unjoined channels no longer count towards the support
+  badge; the desk statistics leave rooms out; `prune` counts notifications only;
+  the club award `count` is the total rather than the page.
+- **The generated project's `make check` now covers the club**, and its `.env`
+  header counts six feature apps rather than four.
 
 - **`DJANGO_WALLET_TRANSPORTS` was accepted and then ignored.** The wallet was
   never keyed in `APP_TRANSPORTS`, so `config.transports.serves` took it for an
