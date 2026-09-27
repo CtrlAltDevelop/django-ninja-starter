@@ -286,7 +286,9 @@ one side of it leaves the shop unable to answer what happened. `GET
 /api/v1/shop/reviews/mine` includes what is still in the queue: you are the one
 person entitled to know your own review exists.
 
-A review never publishes an address. The author is a display name, because
+A review never publishes an address, nor the username, which is built from the
+phone number or email the account signed up with. The author is a first name and
+a last initial, or "Verified buyer" when the account has no first name, because
 reviews are the most-read and most-scraped page a shop has.
 
 ## What it announces

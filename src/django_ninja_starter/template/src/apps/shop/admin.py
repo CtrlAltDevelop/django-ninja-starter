@@ -1059,6 +1059,27 @@ class ReviewAdmin(ModelAdmin):
         """Reviews are written by shoppers. One typed in here would be a fake one."""
         return False
 
+    def save_model(self, request: HttpRequest, obj: Review, form: Any, change: bool) -> None:
+        """Save a verdict set on the form, and announce it as the bulk action does.
+
+        The change form reaches the database through ``Review.save``, which
+        announces nothing, so a review approved here is announced here.
+        """
+        was_approved = (
+            change and Review.objects.filter(pk=obj.pk, status=ReviewStatus.APPROVED).exists()
+        )
+        super().save_model(request, obj, form, change)
+        if obj.status == ReviewStatus.APPROVED and not was_approved:
+            signals.announce(
+                signals.review_published,
+                review={
+                    "id": obj.pk,
+                    "user_id": obj.user_id,
+                    "product_id": obj.product_id,
+                    "rating": obj.rating,
+                },
+            )
+
     @admin.display(description="Author", ordering="user")
     def author(self, review: Review) -> str:
         return review.user.get_username()
@@ -1811,12 +1832,24 @@ class PaymentAdmin(ReadOnlyAdmin):
         moves the order and the products' sales counts, and it is idempotent, so
         a row somebody selected twice costs nothing.
         """
-        self._apply(request, queryset, shop_service.settle_order, "taken", messages.SUCCESS)
+        self._apply(
+            request,
+            queryset,
+            lambda order: shop_service.settle_order(order, actor=request.user),
+            "taken",
+            messages.SUCCESS,
+        )
 
     @admin.action(description="Mark as rejected")
     def mark_rejected(self, request: HttpRequest, queryset: QuerySet[Payment]) -> None:
         """Record that the money did not arrive, and open a fresh attempt."""
-        self._apply(request, queryset, shop_service.reject_payment, "refused", messages.WARNING)
+        self._apply(
+            request,
+            queryset,
+            lambda order: shop_service.reject_payment(order, actor=request.user),
+            "refused",
+            messages.WARNING,
+        )
 
     def _apply(
         self,
@@ -1831,9 +1864,18 @@ class PaymentAdmin(ReadOnlyAdmin):
         A refusal from the service -- an order already paid, a payment already
         settled -- is reported rather than raised: an admin who selected fifteen
         rows wants the twelve that worked to have worked.
+
+        A verdict is about the order's *pending* attempt, so a row that is not
+        the pending one is refused: rejecting an old failed attempt would
+        otherwise fail whichever attempt the order happens to be waiting on.
         """
         done, refused = 0, []
         for payment in queryset.select_related("order"):
+            if payment.status != PaymentStatus.PENDING:
+                refused.append(
+                    f"{payment.order.number}: This payment is not waiting to be settled."
+                )
+                continue
             try:
                 verdict(payment.order)
             except ShopRefused as refusal:

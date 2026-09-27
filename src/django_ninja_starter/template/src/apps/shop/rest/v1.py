@@ -526,7 +526,6 @@ def checkout(request: HttpRequest, payload: CheckoutIn) -> dict:
                 shipping_method_id=payload.shipping_method,
                 coupon_code=payload.coupon,
                 note=payload.note,
-                provider=payload.provider,
             )
         )
 

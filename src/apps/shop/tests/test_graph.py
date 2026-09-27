@@ -297,7 +297,7 @@ class TestReviewsAndLikes:
         ]
 
         assert review["rating"] == 4
-        assert review["author"] == "alice"
+        assert review["author"] == "Verified buyer"
 
     def test_a_rating_off_the_scale_is_refused(self, laptop: Product, alice: Any) -> None:
         body = graphql(REVIEW, alice, slug="featherbook-14", rating=0)
@@ -376,7 +376,7 @@ class TestTheRestOfTheCatalogue:
         page = graphql(REVIEWS, slug="featherbook-14")["data"]["shopReviews"]
 
         assert page["total"] == 1
-        assert page["items"][0]["author"] == "alice"
+        assert page["items"][0]["author"] == "Verified buyer"
 
     def test_reviews_of_an_unknown_product_is_a_refusal(self, db: None) -> None:
         assert refusal(graphql(REVIEWS, slug="nonesuch"))["status"] == 404

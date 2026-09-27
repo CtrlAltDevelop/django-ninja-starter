@@ -445,7 +445,7 @@ class TestReviews:
         )
         [review] = data(client.get(f"{SHOP}/products/featherbook-14/reviews"))["items"]
 
-        assert review["author"] == "alice"
+        assert review["author"] == "Verified buyer"
         assert "alice@example.test" not in str(review)
 
     def test_my_reviews_are_only_mine(

@@ -568,7 +568,9 @@ class ShopService:
         """The published reviews of one product, newest first, with the total."""
         product = self._product_row(slug)
         published = (
-            Review.objects.filter(product=product).published().select_related("user", "product")
+            Review.objects.filter(product=product)
+            .published()
+            .select_related("user__profile", "product")
         )
         size, start = options.bounded_page(limit, offset)
         return {
@@ -645,7 +647,7 @@ class ShopService:
         The one place a pending review is visible, because its author is the one
         person entitled to know it exists.
         """
-        mine = Review.objects.filter(user=user).select_related("product", "user")
+        mine = Review.objects.filter(user=user).select_related("product", "user__profile")
         size, start = options.bounded_page(limit, offset)
         return {
             "items": [review_payload(review) for review in mine[start : start + size]],
@@ -881,38 +883,65 @@ class ShopService:
         shipping_method_id: UUID | str,
         coupon_code: str = "",
         note: str = "",
-        provider: str = "manual",
     ) -> Order:
-        """Atomically turn the caller's cart into an immutable order and payment intent."""
+        """Atomically turn the caller's cart into an immutable order and payment intent.
+
+        The payment is opened against the ``manual`` provider. Which gateway took
+        the money is the server's to record when it settles, never the shopper's
+        to claim at checkout.
+        """
+        # Trimmed exactly as the preview trims it, so a code that previewed as
+        # valid is not refused here for a pasted trailing space.
+        coupon_code = (coupon_code or "").strip()
         with transaction.atomic():
             cart = Cart.objects.select_for_update().filter(user=user).first()
             if cart is None or not cart.items.exists():
                 raise ShopRefused("Your cart is empty.")
-            address = Address.objects.filter(pk=address_id, user=user).first()
-            shipping = ShippingMethod.objects.filter(pk=shipping_method_id, is_active=True).first()
+            # A malformed id is a missing row, exactly as it is everywhere else
+            # in this service, rather than a ValidationError escaping as a 500.
+            try:
+                address = Address.objects.filter(pk=address_id, user=user).first()
+                shipping = ShippingMethod.objects.filter(
+                    pk=shipping_method_id, is_active=True
+                ).first()
+            except (ValueError, ValidationError):
+                address, shipping = None, None
             if address is None or shipping is None:
                 raise ShopNotFound("No such delivery address or shipping method.")
             lines = list(
                 cart.items.select_related("product", "variant", "offer__seller").select_for_update()
             )
+            # Every row this checkout will lock, locked up front, one query per
+            # table and in primary-key order. Locking them line by line follows
+            # the order the basket was filled, so two shoppers holding the same
+            # two products in opposite orders would each wait on the other.
+            products = {
+                row.pk: row
+                for row in Product.objects.select_for_update()
+                .filter(pk__in={line.product_id for line in lines})
+                .order_by("pk")
+            }
+            variants = {
+                row.pk: row
+                for row in ProductVariant.objects.select_for_update()
+                .filter(pk__in={line.variant_id for line in lines if line.variant_id})
+                .order_by("pk")
+            }
+            offers = {
+                row.pk: row
+                for row in ProductOffer.objects.select_for_update()
+                .select_related("seller")
+                .filter(pk__in={line.offer_id for line in lines if line.offer_id})
+                .order_by("pk")
+            }
             discounts, branches = running_discounts(), None
             rows: list[tuple[CartItem, Any, Any]] = []
             subtotal = Decimal("0.00")
             tax_total = Decimal("0.00")
             for line in lines:
-                product = Product.objects.select_for_update().get(pk=line.product_id)
-                variant = (
-                    ProductVariant.objects.select_for_update().get(pk=line.variant_id)
-                    if line.variant_id
-                    else None
-                )
-                offer = (
-                    ProductOffer.objects.select_for_update()
-                    .select_related("seller")
-                    .get(pk=line.offer_id)
-                    if line.offer_id
-                    else None
-                )
+                product = products[line.product_id]
+                variant = variants[line.variant_id] if line.variant_id else None
+                offer = offers[line.offer_id] if line.offer_id else None
                 self._check_still_sold(product, variant, offer, line.quantity)
                 price = price_of(product, variant, discounts, branches, offer)
                 line_total = to_cents(price.amount * line.quantity)
@@ -974,7 +1003,7 @@ class ShopService:
             if coupon:
                 Coupon.objects.filter(pk=coupon.pk).update(used_count=F("used_count") + 1)
             Payment.objects.create(
-                order=order, provider=provider, amount=total, currency=options.currency()
+                order=order, provider="manual", amount=total, currency=options.currency()
             )
             # Issued here rather than on payment, because it is the demand for
             # payment: a shopper who has to pay by transfer needs the document
@@ -1070,7 +1099,7 @@ class ShopService:
             )
         return locked
 
-    def reject_payment(self, order: Order, *, reason: str = "") -> Order:
+    def reject_payment(self, order: Order, *, reason: str = "", actor: Any = None) -> Order:
         """Record that a payment attempt did not happen, and open another.
 
         The order stays pending and its stock stays reserved, because a declined
@@ -1100,6 +1129,13 @@ class ShopService:
                 provider=attempt.provider,
                 amount=locked.total,
                 currency=locked.currency,
+            )
+            # On the order's own trail, with who said so, as settling is.
+            OrderEvent.objects.create(
+                order=locked,
+                status=OrderStatus.PENDING,
+                note=f"Payment attempt refused{f': {reason}' if reason else ''}."[:300],
+                actor=actor,
             )
         return locked
 

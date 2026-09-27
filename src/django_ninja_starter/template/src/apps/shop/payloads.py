@@ -399,6 +399,26 @@ def collection_payload(
     }
 
 
+def review_author(review: Review) -> str:
+    """The name a review is signed with: a first name and a last initial.
+
+    Never the username, which is built from the phone number or email address
+    the account signed up with. The name is the one the shopper chose for their
+    profile (or ``first_name``/``last_name`` on a user model that has them), and
+    an account with neither is a "Verified buyer" rather than an identifier.
+    """
+    user = review.user if review.user_id else None
+    first = (getattr(user, "first_name", "") or "").strip()
+    last = (getattr(user, "last_name", "") or "").strip()
+    if not first:
+        profile = getattr(user, "profile", None)
+        first, _, last = (getattr(profile, "display_name", "") or "").strip().partition(" ")
+        last = last.strip()
+    if not first:
+        return "Verified buyer"
+    return f"{first} {last[0]}." if last else first
+
+
 def review_payload(review: Review) -> dict[str, Any]:
     """One review. The author is a display name, never an address.
 
@@ -409,7 +429,7 @@ def review_payload(review: Review) -> dict[str, Any]:
     return {
         "id": str(review.pk),
         "product": review.product.slug if review.product_id else None,
-        "author": review.user.get_username() if review.user_id else "",
+        "author": review_author(review),
         "rating": review.rating,
         "title": review.title,
         "body": review.body,
