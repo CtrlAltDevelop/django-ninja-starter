@@ -521,10 +521,7 @@ class SupportService:
             if ticket.kind not in DESK_KINDS:
                 # A note hidden from the non-staff members of their own room.
                 raise NotPermitted("Internal notes belong on the desk's threads, not in rooms.")
-        if ticket.kind in ROOM_KINDS and ticket.participant_for(user) is None:
-            # Posting is not a way into a room: a channel is joined with `join`,
-            # a group or a chat by invitation, and somebody who left stays out.
-            raise NotPermitted("Join this room before posting in it.")
+        self._require_member(ticket, user)
         uploads = self._claim(user, upload_ids or [])
         text = _body(body, uploads=len(uploads))
         staff = getattr(user, "is_staff", False)
@@ -994,17 +991,32 @@ class SupportService:
             raise InvalidRequest("One of those uploads does not exist, or is already attached.")
         return found
 
+    def _require_member(self, ticket: Ticket, user: Any) -> None:
+        """Refuse acting in a room you are not in.
+
+        Posting, typing and being present are not ways into a room: a channel is
+        joined with `join`, a group or a chat by invitation, and somebody who
+        left stays out.
+        """
+        if ticket.kind in ROOM_KINDS and ticket.participant_for(user) is None:
+            raise NotPermitted("Join this room before posting in it.")
+
     # -- ephemeral --------------------------------------------------------
 
     def typing(self, user: Any, ticket_id: UUID, typing: bool = True) -> dict[str, Any]:
         """Tell the thread somebody is typing. Never stored -- see :mod:`apps.support.events`."""
         ticket = self._ticket(user, ticket_id)
+        self._require_member(ticket, user)
         events.publish_typing(ticket.pk, user, typing=typing)
         return {"ticket": str(ticket.pk), "typing": typing}
 
     def presence(self, user: Any, ticket_id: UUID, present: bool = True) -> dict[str, Any]:
         """Tell the thread somebody has it open, or has left it."""
         ticket = self._ticket(user, ticket_id)
+        if present:
+            # Saying you have gone is always allowed; saying you are there is not
+            # a way to show yourself in a room you are not in.
+            self._require_member(ticket, user)
         events.publish_presence(ticket.pk, user, present=present)
         return {"ticket": str(ticket.pk), "present": present}
 

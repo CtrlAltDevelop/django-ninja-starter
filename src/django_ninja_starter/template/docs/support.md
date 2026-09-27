@@ -46,10 +46,10 @@ could do that would be a surveillance tool with a help widget attached. So:
   staff included, and an id somebody guessed is answered with a 404;
 - a channel is visible to anybody signed in, because a room nobody can find is
   a room nobody can join;
-- a room is yours only while you are in it: posting does not join one (use
-  `join` for a channel; groups and chats are by invitation), someone who left a
-  group — its creator included — can no longer read it, and internal notes are
-  for desk threads only;
+- a room is yours only while you are in it: posting, typing and presence do
+  not join one (use `join` for a channel; groups and chats are by invitation),
+  someone who left a group — its creator included — can no longer read it, and
+  internal notes are for desk threads only;
 - the desk's own verbs — claim, assign, prioritise, tag, rate, invite and the
   status changes — refuse a room outright, so a channel can never land in an
   agent's queue or be closed on its members;

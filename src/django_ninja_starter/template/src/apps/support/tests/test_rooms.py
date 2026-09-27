@@ -333,3 +333,15 @@ def test_an_internal_note_does_not_belong_in_a_room(agent: Any, other_client: An
 
     with pytest.raises(NotPermitted, match="Internal notes"):
         support_service.send(agent, group["id"], "Just between us.", internal=True)
+
+
+def test_typing_is_not_a_way_to_show_yourself_in_a_room(
+    client_user: Any, other_client: Any
+) -> None:
+    channel = support_service.create_channel(client_user, "General")
+
+    with pytest.raises(NotPermitted):
+        support_service.typing(other_client, channel["id"])
+    with pytest.raises(NotPermitted):
+        support_service.presence(other_client, channel["id"])
+    support_service.presence(other_client, channel["id"], present=False)
