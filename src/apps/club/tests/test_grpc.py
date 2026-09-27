@@ -143,3 +143,13 @@ def test_the_service_publishes_no_call_that_completes_a_mission() -> None:
 
     assert not {name for name in published if "complete" in name.lower()}
     assert not {name for name in published if "claim" in name.lower()}
+
+
+def test_the_award_list_says_how_many_there_are(joined: Any, grpc_call: Callable[..., Any]) -> None:
+    for number in range(3):
+        club_service.grant(joined, xp=1, reason="r", reference=f"g{number}")
+
+    reply = grpc_call(Stub, "Awards", club_pb2.AwardsRequest(limit=1), token=access_token(joined))
+
+    assert len(reply.awards) == 1
+    assert reply.count == 3

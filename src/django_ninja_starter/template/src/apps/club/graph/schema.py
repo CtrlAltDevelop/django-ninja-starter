@@ -117,6 +117,11 @@ class Query:
         rows = _run(club_service.awards, _caller(info), limit=limit, offset=offset)
         return [award_type(row) for row in rows]
 
+    @strawberry.field(description="How many awards `clubAwards` pages through, in total.")
+    @resolver
+    def club_award_count(self, info: Info[Any, Any]) -> int:
+        return int(_run(club_service.award_count, _caller(info)))
+
     @strawberry.field(description="This account's own club, by XP. No other club's.")
     @resolver
     def club_leaderboard(self, info: Info[Any, Any], limit: int | None = None) -> list[RankType]:

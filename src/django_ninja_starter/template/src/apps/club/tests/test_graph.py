@@ -157,3 +157,12 @@ def test_there_is_no_mutation_that_completes_a_mission(member: Any, mission: Mis
     )
 
     assert body.get("errors"), "a mission-completing mutation should not exist"
+
+
+def test_the_award_count_is_the_total(member: Any) -> None:
+    from apps.club.services import club_service
+
+    for number in range(2):
+        club_service.grant(member, xp=1, reason="r", reference=f"g{number}")
+
+    assert graphql("{ clubAwardCount }", member)["data"]["clubAwardCount"] == 2

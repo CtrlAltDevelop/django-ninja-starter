@@ -30,6 +30,7 @@ message Award {
 
 message AwardList {
     repeated Award awards = 1;
+    int32 count = 2;
 }
 
 message AwardsRequest {

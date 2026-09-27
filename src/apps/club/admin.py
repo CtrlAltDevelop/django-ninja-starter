@@ -33,6 +33,7 @@ from apps.club.events import choices as event_choices
 from apps.club.models import (
     Club,
     ClubLevel,
+    ClubStatus,
     Membership,
     MembershipStatus,
     Mission,
@@ -216,7 +217,12 @@ class XpAwardInline(TabularInline):
 
 
 class MembershipForm(forms.ModelForm):
-    """Refuses, on add, the club the service would refuse: one taking nobody."""
+    """Refuses what the service would: a club taking nobody, and rejoining by hand.
+
+    Status stays editable -- suspending and lifting a suspension happen here --
+    but coming back from `left` is joining, which resets `joined_at` and
+    announces the join, so it goes through the service rather than this form.
+    """
 
     class Meta:
         model = Membership
@@ -225,8 +231,23 @@ class MembershipForm(forms.ModelForm):
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
         club = cleaned.get("club")
-        if self.instance._state.adding and club is not None and not club.accepts_members:
+        status = cleaned.get("status")
+        adding = self.instance._state.adding
+        if not adding:
+            # Read-only once saved, so not in the form's data.
+            club = self.instance.club
+        if adding and club is not None and not club.accepts_members:
             raise ValidationError(f"{club.name} is not taking members.")
+        was = self.initial.get("status")
+        if not adding and was == str(MembershipStatus.LEFT) and status != was:
+            raise ValidationError("A member who left rejoins through the club, not this form.")
+        if (
+            not adding
+            and status == str(MembershipStatus.ACTIVE)
+            and club is not None
+            and club.status == str(ClubStatus.ARCHIVED)
+        ):
+            raise ValidationError(f"{club.name} is archived, so nobody in it can be active.")
         return cleaned
 
 

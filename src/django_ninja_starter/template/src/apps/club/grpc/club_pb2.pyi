@@ -62,16 +62,19 @@ class AwardList(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     AWARDS_FIELD_NUMBER: _builtins.int
+    COUNT_FIELD_NUMBER: _builtins.int
+    count: _builtins.int
     @_builtins.property
     def awards(self) -> _containers.RepeatedCompositeFieldContainer[Global___Award]: ...
     def __init__(
         self,
         *,
         awards: _abc.Iterable[Global___Award] | None = ...,
+        count: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["awards", b"awards"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["awards", b"awards", "count", b"count"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

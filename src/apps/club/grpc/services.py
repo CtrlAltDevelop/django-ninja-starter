@@ -278,7 +278,10 @@ class ClubService(generics.GenericService):
             {"name": "offset", "type": "int32"},
         ],
         request_name="AwardsRequest",
-        response=[{"name": "awards", "cardinality": "repeated", "type": Award}],
+        response=[
+            {"name": "awards", "cardinality": "repeated", "type": Award},
+            {"name": "count", "type": "int32"},
+        ],
         response_name="AwardList",
     )
     @action
@@ -293,9 +296,10 @@ class ClubService(generics.GenericService):
             rows = await sync_to_async(club_service.awards)(
                 user, limit=request.limit or None, offset=request.offset or 0
             )
+            count = await sync_to_async(club_service.award_count)(user)
         except ClubError as refusal:
             raise _refuse(refusal) from None
-        return _pb2().AwardList(awards=[_award(row) for row in rows])
+        return _pb2().AwardList(awards=[_award(row) for row in rows], count=count)
 
     @grpc_action(
         request=[{"name": "limit", "type": "int32"}],

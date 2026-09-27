@@ -222,3 +222,29 @@ def test_a_membership_cannot_be_added_to_an_archived_club(alice: Any, club: Any)
 
     assert not form.is_valid()
     assert "not taking members" in str(form.errors)
+
+
+def test_a_member_who_left_is_not_brought_back_by_the_form(member: Any, club: Any) -> None:
+    """Rejoining resets `joined_at` and announces the join; the form does neither."""
+    from apps.club.admin import MembershipForm
+    from apps.club.models import Membership
+    from apps.club.services import club_service
+
+    club_service.leave(member)
+    row = Membership.objects.get(user=member)
+    form = MembershipForm(data={"status": "active"}, instance=row)
+    form.fields = {"status": form.fields["status"]}
+
+    assert not form.is_valid()
+
+
+def test_a_suspension_can_still_be_set_from_the_form(member: Any) -> None:
+    from apps.club.admin import MembershipForm
+    from apps.club.models import Membership
+
+    form = MembershipForm(
+        data={"status": "suspended"}, instance=Membership.objects.get(user=member)
+    )
+    form.fields = {"status": form.fields["status"]}
+
+    assert form.is_valid(), form.errors
