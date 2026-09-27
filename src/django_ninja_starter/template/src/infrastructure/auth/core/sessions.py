@@ -21,9 +21,11 @@ from django.contrib.auth import logout as django_logout
 from django.db import transaction
 from django.http import HttpRequest
 from django.utils import timezone
+from ninja.errors import HttpError
 from ninja.security import HttpBearer
 
 from infrastructure.common.app_labels import app_installed
+from infrastructure.common.identity import session_csrf_failure
 from infrastructure.oauth.core import jwt_tokens
 from infrastructure.oauth.core.credentials import (
     BEARER,
@@ -401,6 +403,8 @@ class JwtBearer(HttpBearer):
 
     def __call__(self, request: HttpRequest) -> Any | None:
         if settings.AUTH_TOKEN_MODE == "none":
+            if session_csrf_failure(request) is not None:
+                raise HttpError(403, "CSRF check failed.")
             return self._adopt(request, resolve_request_user(request))
         return super().__call__(request)
 

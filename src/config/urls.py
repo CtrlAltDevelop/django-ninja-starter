@@ -1,14 +1,17 @@
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import Http404, HttpRequest, HttpResponse
 from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
 from ninja.openapi.docs import Redoc
 from strawberry.django.views import AsyncGraphQLView
 
 from config.api import apis
 from config.graph import schema as graph_schema
 from infrastructure.common.adminlive import anything_live, live_script
+from infrastructure.common.identity import session_csrf_failure
 
 
 def api_docs(request: HttpRequest) -> HttpResponse:
@@ -65,16 +68,25 @@ urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 # Asynchronous, because the content app reads asynchronously and one schema
 # cannot be half of each. Every synchronous service reaches it through
 # `infrastructure.common.graph.errors.resolver`, which crosses over for them.
+#
+# Exempt from the blanket CSRF middleware, which would refuse every bearer
+# client for want of a cookie it has no reason to hold, and checked instead
+# only when the session cookie is the credential -- the same rule REST applies.
 if settings.GRAPHQL_ENABLED:
-    urlpatterns.append(
-        path(
-            "graphql",
-            AsyncGraphQLView.as_view(
-                schema=graph_schema,
-                # The in-browser editor, or nothing: a production deployment
-                # that leaves it on is publishing a schema browser.
-                graphql_ide="graphiql" if settings.GRAPHQL_GRAPHIQL else None,
-            ),
-            name="graphql",
-        )
+    _graphql_view = AsyncGraphQLView.as_view(
+        schema=graph_schema,
+        # The in-browser editor, or nothing: a production deployment
+        # that leaves it on is publishing a schema browser.
+        graphql_ide="graphiql" if settings.GRAPHQL_GRAPHIQL else None,
     )
+
+    @csrf_exempt
+    async def graphql_view(request: HttpRequest) -> HttpResponse:
+        # Reading the session user touches the database, which the event loop
+        # may not do directly.
+        refusal = await sync_to_async(session_csrf_failure)(request)
+        if refusal is not None:
+            return refusal
+        return await _graphql_view(request)
+
+    urlpatterns.append(path("graphql", graphql_view, name="graphql"))

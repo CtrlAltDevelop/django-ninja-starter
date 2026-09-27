@@ -91,3 +91,12 @@ def test_a_refused_origin_closes_the_handshake(settings: Any) -> None:
     asyncio.run(websocket_application(_scope("https://evil.test"), receive, send))
 
     assert sent == [{"type": "websocket.close", "code": BAD_ORIGIN}]
+
+
+def test_a_leading_dot_host_admits_its_subdomains(settings: Any) -> None:
+    """`.example.test` in ALLOWED_HOSTS means every subdomain, here as for HTTP."""
+    settings.ALLOWED_HOSTS = [".example.test"]
+
+    assert origin_allowed(_scope("https://app.example.test"))
+    assert origin_allowed(_scope("https://example.test"))
+    assert not origin_allowed(_scope("https://evilexample.test"))

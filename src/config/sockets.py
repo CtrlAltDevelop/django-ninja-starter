@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from django.conf import settings
+from django.utils.http import is_same_domain
 from django.utils.module_loading import import_string
 
 type AsgiApplication = Any
@@ -121,4 +122,6 @@ def origin_allowed(scope: dict[str, Any]) -> bool:
     if "*" in allowed:
         return True
     host = urlparse(origin).hostname or ""
-    return any(host == entry or entry == "*" for entry in allowed)
+    # The same matcher ALLOWED_HOSTS uses, so a `.example.com` entry admits
+    # `app.example.com` here exactly as it does for plain HTTP.
+    return any(is_same_domain(host, entry) for entry in allowed)
