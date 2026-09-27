@@ -754,8 +754,10 @@ def test_the_list_command_pages(alice: Any) -> None:
         {"command": "list", "offset": 1.5},
         {"command": "list", "unread": "yes"},
         {"command": "count", "unread": 1},
+        {"command": "list", "include_dismissed": "false"},
+        {"command": "count", "include_dismissed": 0},
     ],
-    ids=["limit", "offset", "unread flag", "count flag"],
+    ids=["limit", "offset", "unread flag", "count flag", "list dismissed", "count dismissed"],
 )
 def test_an_argument_of_the_wrong_type_is_refused_rather_than_coerced(
     frame: dict[str, Any], alice: Any

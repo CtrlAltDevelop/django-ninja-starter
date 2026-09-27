@@ -61,6 +61,7 @@ def test_receipts_are_a_log_and_cannot_be_written_by_hand() -> None:
 
     assert receipts.has_add_permission(request) is False
     assert receipts.has_change_permission(request) is False
+    assert receipts.has_delete_permission(request) is False
 
 
 def test_what_the_receipt_log_declares_is_what_it_enforces() -> None:
@@ -72,6 +73,7 @@ def test_what_the_receipt_log_declares_is_what_it_enforces() -> None:
     assert receipts.read_only_admin is True
     assert not receipts.has_add_permission(request)
     assert not receipts.has_change_permission(request)
+    assert not receipts.has_delete_permission(request)
 
 
 def test_the_receipt_list_query_carries_its_relations(for_alice: Notification, alice: Any) -> None:
@@ -144,3 +146,11 @@ def test_the_receipt_list_shows_both_timestamps() -> None:
     from apps.notifications.admin import NotificationReceiptAdmin
 
     assert "dismissed_at" in NotificationReceiptAdmin.list_display
+
+
+def test_a_saved_notification_cannot_be_re_addressed(for_alice: Notification) -> None:
+    """It was broadcast to its audience on creation; a new audience would never be told."""
+    request = RequestFactory().get("/")
+
+    assert {"audience", "recipient"}.isdisjoint(_admin().get_readonly_fields(request))
+    assert {"audience", "recipient"} <= set(_admin().get_readonly_fields(request, for_alice))

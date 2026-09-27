@@ -86,8 +86,14 @@ def publish_state(user: Any, action: str, *, unread: int, ids: Iterable[Any] = (
 
 
 def _after_commit(channel: str, frame: dict[str, Any]) -> None:
+    """Publish once the transaction commits, and never let the broker fail the caller.
+
+    ``robust`` because the row is already saved: a Redis outage turning into a
+    500 for a committed change, or stopping :func:`notify_users` halfway down
+    its list, loses more than a missed live push does. Django logs the failure.
+    """
     broker = get_broker()
-    transaction.on_commit(lambda: broker.publish(channel, frame))
+    transaction.on_commit(lambda: broker.publish(channel, frame), robust=True)
 
 
 @receiver(post_save, sender=Notification, dispatch_uid="notifications.broadcast")

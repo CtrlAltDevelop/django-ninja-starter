@@ -446,6 +446,10 @@ broadcasts being the case every caller forgets.
 | `NotificationReceipt` | No — read-only | — | `notification`, `user`, `read_at`, `dismissed_at` |
 <!-- /generated:admin -->
 
+Once a notification is saved its `audience` and `recipient` are read-only: it
+was broadcast on creation, so re-addressing it would expose it to people who
+were never told. Receipts cannot be added, edited or deleted.
+
 ## Setup
 
 <!-- generated:settings -->
@@ -526,6 +530,9 @@ rather than off those helpers.
 Note that `on_commit` is what publishes, so a notification created inside a
 transaction that later rolls back is never pushed — a client told about a
 notification it can never fetch is worse than one told a moment later.
+A broker that fails to publish (Redis down) is logged and skipped: the row is
+already saved, so the request still succeeds and `notify_users` still reaches
+everyone on its list; only the live push is lost.
 
 On the other side, the whole client is this:
 

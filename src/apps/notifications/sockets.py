@@ -141,6 +141,11 @@ def _tristate(frame: dict[str, Any], name: str) -> bool | None:
     return value
 
 
+def _flag(frame: dict[str, Any], name: str) -> bool:
+    """A two-valued flag: absent means false, anything but a boolean is refused."""
+    return bool(_tristate(frame, name))
+
+
 def _one(user: Any, frame: dict[str, Any], method: str) -> dict[str, Any]:
     """Run one of the service's single-notification changes, translating its refusal."""
     identifier = _identifier(frame.get("id"))
@@ -512,7 +517,7 @@ class NotificationSocket:
             "unread": _tristate(frame, "unread"),
             "level": str(frame["level"]) if frame.get("level") else None,
             "audience": str(frame["audience"]) if frame.get("audience") else None,
-            "include_dismissed": bool(frame.get("include_dismissed")),
+            "include_dismissed": _flag(frame, "include_dismissed"),
         }
         limit = _int(frame, "limit", DEFAULT_PAGE)
         offset = _int(frame, "offset", 0)
@@ -548,7 +553,7 @@ class NotificationSocket:
             unread=_tristate(frame, "unread"),
             level=str(frame["level"]) if frame.get("level") else None,
             audience=str(frame["audience"]) if frame.get("audience") else None,
-            include_dismissed=bool(frame.get("include_dismissed")),
+            include_dismissed=_flag(frame, "include_dismissed"),
         )
         await self._send_json({"type": "count", "count": total})
 
