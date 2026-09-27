@@ -332,7 +332,7 @@ class PaymentMethodAdmin(ModelAdmin):
     def approval_display(self, instance: PaymentMethod) -> bool:
         return instance.requires_approval
 
-    @admin.action(description="Enable the selected methods")
+    @admin.action(description="Enable the selected methods", permissions=["change"])
     def enable_methods(self, request: HttpRequest, queryset: QuerySet) -> None:
         """Switch methods on, skipping the ones that are not finished.
 
@@ -357,7 +357,7 @@ class PaymentMethodAdmin(ModelAdmin):
                 f"anything: {', '.join(method.name for method in unfinished)}.",
             )
 
-    @admin.action(description="Disable the selected methods")
+    @admin.action(description="Disable the selected methods", permissions=["change"])
     def disable_methods(self, request: HttpRequest, queryset: QuerySet) -> None:
         messages.success(request, f"Disabled {queryset.update(is_enabled=False)}.")
 
@@ -514,20 +514,20 @@ class WalletAdmin(ModelAdmin):
             )
         )
 
-    @admin.action(description="Freeze the selected wallets")
+    @admin.action(description="Freeze the selected wallets", permissions=["change"])
     def freeze_wallets(self, request: HttpRequest, queryset: QuerySet) -> None:
         """A compliance hold: payouts are refused, and money already on its way still lands."""
         changed = self._set_status(request, queryset, str(WalletStatus.FROZEN))
         messages.success(request, f"Froze {changed}.")
 
-    @admin.action(description="Unfreeze the selected wallets")
+    @admin.action(description="Unfreeze the selected wallets", permissions=["change"])
     def unfreeze_wallets(self, request: HttpRequest, queryset: QuerySet) -> None:
         changed = self._set_status(
             request, queryset.filter(status=str(WalletStatus.FROZEN)), str(WalletStatus.ACTIVE)
         )
         messages.success(request, f"Unfroze {changed}.")
 
-    @admin.action(description="Close the selected wallets")
+    @admin.action(description="Close the selected wallets", permissions=["change"])
     def close_wallets(self, request: HttpRequest, queryset: QuerySet) -> None:
         """Refused for a wallet that still holds money or has anything pending."""
         changed = self._set_status(request, queryset, str(WalletStatus.CLOSED))
@@ -689,7 +689,7 @@ class WalletEntryAdmin(ModelAdmin):
             return _badge(AMBER, "waiting")
         return instance.get_approval_display()
 
-    @admin.action(description="Apply the selected requests")
+    @admin.action(description="Apply the selected requests", permissions=["change"])
     def approve_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
         """Approve each request, settling the ones whose rail needs no confirmation.
 
@@ -704,7 +704,7 @@ class WalletEntryAdmin(ModelAdmin):
         )
         messages.success(request, f"Applied {applied}.")
 
-    @admin.action(description="Refuse the selected requests")
+    @admin.action(description="Refuse the selected requests", permissions=["change"])
     def reject_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
         refused = sum(
             1
@@ -713,7 +713,7 @@ class WalletEntryAdmin(ModelAdmin):
         )
         messages.success(request, f"Refused {refused}.")
 
-    @admin.action(description="Settle the selected movements")
+    @admin.action(description="Settle the selected movements", permissions=["change"])
     def settle_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
         """Confirm that the money really moved. This is where a balance changes.
 
@@ -734,7 +734,7 @@ class WalletEntryAdmin(ModelAdmin):
         )
         messages.success(request, f"Settled {settled}.")
 
-    @admin.action(description="Mark the selected movements failed")
+    @admin.action(description="Mark the selected movements failed", permissions=["change"])
     def fail_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
         failed = sum(
             1
@@ -750,7 +750,7 @@ class WalletEntryAdmin(ModelAdmin):
         )
         messages.success(request, f"Failed {failed}.")
 
-    @admin.action(description="Expire the selected pending movements")
+    @admin.action(description="Expire the selected pending movements", permissions=["change"])
     def expire_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
         """Give up on movements nothing is going to confirm, releasing what they held.
 
@@ -771,7 +771,7 @@ class WalletEntryAdmin(ModelAdmin):
         )
         messages.success(request, f"Expired {expired}.")
 
-    @admin.action(description="Reverse the selected settled movements")
+    @admin.action(description="Reverse the selected settled movements", permissions=["change"])
     def reverse_entries(self, request: HttpRequest, queryset: QuerySet) -> None:
         """Undo settled movements: a returned bank transfer, a dispute that was lost.
 

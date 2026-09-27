@@ -58,6 +58,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from apps.wallet import signals
@@ -90,7 +91,7 @@ from apps.wallet.models import (
     WalletStatus,
     direction_of,
 )
-from apps.wallet.money import ZERO, money
+from apps.wallet.money import MONEY, ZERO, money
 
 #: What a deployment gets when it has said nothing. Both are overridable, and
 #: the settings that override them are read per call rather than captured here:
@@ -158,6 +159,10 @@ __all__ = [
 ]
 
 
+#: The longest reason a cancellation or failure may record, like ``review_note``.
+REASON_LENGTH = 255
+
+
 def metadata_limit() -> int:
     """How many bytes of client metadata one movement may carry. Zero means no cap."""
     return int(getattr(settings, "WALLET_MAX_METADATA_BYTES", 4096))
@@ -196,6 +201,37 @@ def _check_metadata(metadata: Any) -> None:
         raise WalletError("metadata has to be JSON-serialisable.") from None
     if size > cap:
         raise WalletError(f"metadata is {size} bytes; the most one movement may carry is {cap}.")
+
+
+def _amount(value: Any) -> Decimal:
+    """An amount a column can hold, or :class:`InvalidAmount` -- never a 500.
+
+    ``NaN`` and ``Infinity`` are valid ``Decimal`` values that gRPC's strings and
+    GraphQL's ``Decimal`` scalar both let through, and every comparison against
+    them raises ``InvalidOperation``. A finite amount with more whole digits than
+    the column has fails later still, when rounding or when the database adapts
+    it. Both are refused here, at the entry points, before anything compares.
+    """
+    if value is None:
+        raise InvalidAmount("An amount has to be more than zero.")
+    amount = Decimal(value)
+    whole_digits = MONEY["max_digits"] - MONEY["decimal_places"]
+    if not amount.is_finite() or (amount and amount.adjusted() >= whole_digits):
+        raise InvalidAmount("That is not an amount this wallet can hold.")
+    return amount
+
+
+def _check_text(**fields: str) -> None:
+    """Refuse text longer than its column, instead of a database error.
+
+    SQLite stores an over-long string without complaint; Postgres and MySQL
+    raise ``DataError``, which would reach the caller as a 500. The limits are
+    read off the model so they cannot drift from it.
+    """
+    for name, value in fields.items():
+        limit = WalletEntry._meta.get_field(name).max_length
+        if value and limit and len(value) > limit:
+            raise WalletError(f"{name} is {len(value)} characters; the most allowed is {limit}.")
 
 
 #: Which metadata key records the operator behind each hand-made transition.
@@ -476,14 +512,16 @@ class WalletService:
         """
         wallet = self.wallet_for(user)
         configured = self._method(method, direction)
-        return quote_movement(
+        priced = quote_movement(
             configured,
             direction=direction,
-            amount=Decimal(amount),
+            amount=_amount(amount),
             currency=(currency or wallet.currency),
             wallet_currency=wallet.currency,
             network_code=network,
-        ).payload()
+        )
+        self._check_limits(priced, direction)
+        return priced.payload()
 
     def rates(self, *, base: str | None = None, quote: str | None = None) -> list[dict[str, Any]]:
         """The conversion rates in force, as a customer would be given them.
@@ -493,7 +531,14 @@ class WalletService:
         it is keeping one is a different thing, and this app does not help with
         that.
         """
-        live = ExchangeRate.objects.live()
+        # Only the newest row of each pair, chosen in the database: rates are
+        # appended and never edited, so loading them all would load every rate
+        # this deployment has ever had, on every call.
+        moment = timezone.now()
+        newest = ExchangeRate.objects.live(now=moment).filter(
+            base=OuterRef("base"), quote=OuterRef("quote")
+        )
+        live = ExchangeRate.objects.live(now=moment).filter(pk=Subquery(newest.values("pk")[:1]))
         if base:
             live = live.filter(base=base.upper())
         if quote:
@@ -524,7 +569,7 @@ class WalletService:
         ``direction`` says which side of the spread to quote -- what a customer
         would receive, or what they would have to pay.
         """
-        return convert(Decimal(amount), base, quote, direction=direction).payload()
+        return convert(_amount(amount), base, quote, direction=direction).payload()
 
     # -- moving money -----------------------------------------------------
 
@@ -644,6 +689,7 @@ class WalletService:
         up again: if that account has closed since, the money still moved, and
         a 404 would tell the client it had not.
         """
+        amount = _amount(amount)
         done = self._existing(self.wallet_for(user), reference) if reference else None
         if (
             done is not None
@@ -698,6 +744,8 @@ class WalletService:
         if not getattr(to_user, "is_active", True):
             raise WalletError("That account is closed, so money sent to it could never leave.")
         _check_metadata(metadata)
+        _check_text(reference=reference, description=description)
+        amount = _amount(amount)
 
         sender = self.wallet_for(user)
         recipient = self.wallet_for(to_user)
@@ -1058,6 +1106,10 @@ class WalletService:
                     "nothing to apply."
                 )
             self._still_open(entry, "apply")
+            # A payout approved on a frozen wallet would be handed over at the
+            # counter, or announced as `payout_ready` to a rail that sends it --
+            # money leaving during the hold the freeze exists to impose.
+            self._check_wallet(entry.wallet, entry.direction)
             entry.approval = str(Approval.APPROVED)
             entry.reviewed_by = by if getattr(by, "pk", None) else None
             entry.reviewed_at = timezone.now()
@@ -1427,6 +1479,25 @@ class WalletService:
         if largest and (amount if ceiling_on is None else ceiling_on) > largest:
             raise InvalidAmount(f"The largest allowed here is {largest}.")
 
+    def _check_limits(self, priced: Quote, direction: str) -> None:
+        """The deployment-wide limits against a priced movement, as recording checks them.
+
+        Shared by :meth:`_record` and :meth:`quote`, so an amount quoted is an
+        amount that will be accepted.
+
+        The ceiling is on the figure the customer named, in the wallet's
+        currency: for a deposit that is before the charges come off, or a gross
+        just over it would pass because the fees brought the net under it. The
+        floor stays on what actually lands, so fees cannot carry a deposit
+        below the minimum.
+        """
+        named = (
+            money(priced.gross * priced.conversion.effective_rate)
+            if direction == str(Direction.CREDIT)
+            else priced.wallet_amount
+        )
+        self._check_amount(priced.wallet_amount, direction, ceiling_on=named)
+
     def _check_destination(self, priced: Quote, direction: str, destination: str) -> None:
         """Where a payout is going, checked before it is promised rather than after.
 
@@ -1512,6 +1583,12 @@ class WalletService:
         if not reference:
             raise WalletError("A reference is required; it is what makes a retry safe.")
         _check_metadata(metadata)
+        _check_text(
+            reference=reference,
+            external_reference=external_reference,
+            description=description,
+            destination=destination,
+        )
         direction = direction_of(kind)
         configured = self._method(method, direction)
         wallet = self.wallet_for(user)
@@ -1519,23 +1596,13 @@ class WalletService:
         priced = quote_movement(
             configured,
             direction=direction,
-            amount=Decimal(amount),
+            amount=_amount(amount),
             currency=(currency or wallet.currency),
             wallet_currency=wallet.currency,
             network_code=network,
         )
         self._check_destination(priced, direction, destination)
-        # The ceiling is on the figure the customer named, in the wallet's
-        # currency: for a deposit that is before the charges come off, or a gross
-        # just over it would pass because the fees brought the net under it. The
-        # floor stays on what actually lands, so fees cannot carry a deposit
-        # below the minimum.
-        named = (
-            money(priced.gross * priced.conversion.effective_rate)
-            if direction == str(Direction.CREDIT)
-            else priced.wallet_amount
-        )
-        self._check_amount(priced.wallet_amount, direction, ceiling_on=named)
+        self._check_limits(priced, direction)
 
         with transaction.atomic():
             locked = Wallet.objects.select_for_update().get(pk=wallet.pk)
@@ -1605,10 +1672,12 @@ class WalletService:
         """
         if not reference:
             raise WalletError("A reference is required; it is what makes a retry safe.")
-        if amount is None or Decimal(amount) <= ZERO:
+        _check_text(reference=reference, description=description)
+        amount = _amount(amount)
+        if amount <= ZERO:
             raise InvalidAmount("An amount has to be more than zero.")
         direction = direction_of(kind)
-        moving = money(Decimal(amount))
+        moving = money(amount)
         wallet = self.wallet_for(user)
         with transaction.atomic():
             locked = Wallet.objects.select_for_update().get(pk=wallet.pk)
@@ -1749,6 +1818,10 @@ class WalletService:
         already in is success rather than an error, because the webhook that
         delivers a confirmation will deliver it twice.
         """
+        # The reason lands in metadata, which the recording path caps; a cancel
+        # with a multi-megabyte reason would otherwise go around that cap.
+        if len(reason) > REASON_LENGTH:
+            raise WalletError(f"A reason may be at most {REASON_LENGTH} characters.")
         wallet = self.wallet_for(user)
         with transaction.atomic():
             locked = Wallet.objects.select_for_update().get(pk=wallet.pk)
@@ -1782,6 +1855,10 @@ class WalletService:
                 # Re-checked at settlement, not only at recording: money can have
                 # gone between the two, and a payout is not recallable. Its own
                 # hold is handed back first -- it is already inside `outgoing`.
+                # Only operators settle through here -- a rail's `done` goes
+                # through `confirm_from_rail`, and is believed on a frozen wallet
+                # because that money has already left -- so a freeze stops it.
+                self._check_wallet(locked, entry.direction)
                 self._check_funds(locked, entry.amount, already_held=entry.amount)
 
             entry.status = status

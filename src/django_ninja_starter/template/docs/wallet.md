@@ -490,6 +490,10 @@ An operator who can settle can turn a deposit nobody ever made into a real
 balance, and the defence against that is not a permission — somebody has to have
 it — but a record of who used it.
 
+Every admin action that moves money or changes a wallet's status needs the
+`change` permission on its model; a staff account that can only view movements
+sees the list without the actions, and a hand-crafted action POST does nothing.
+
 A transition with **no** operator on it is not an omission: it came from a rail's
 signed confirmation, which carries its own `external_reference` instead, or from
 the account itself cancelling its own movement, or from the expiry job. The

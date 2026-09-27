@@ -17,7 +17,7 @@ See :mod:`infrastructure.common.adminui` for the protocol.
 from typing import Any
 
 from django.conf import settings
-from django.db.models import Count, Q, Sum
+from django.db.models import Sum
 from django.http import HttpRequest
 
 from infrastructure.common.adminui import Section, card, changelist, item, may
@@ -82,24 +82,30 @@ def navigation(request: HttpRequest) -> dict[str, Any]:
 
 
 def wallet_numbers() -> dict[str, Any]:
-    """The three figures the dashboard asks for, in as few queries as they take."""
+    """The three figures the dashboard asks for, in as few queries as they take.
+
+    Money is summed per wallet currency: wallets can be opened in more than one,
+    and 100 USD plus 100 EUR is not 200 of either.
+    """
     from apps.wallet.catalog import PaymentMethod
     from apps.wallet.models import EntryStatus, WalletEntry
     from apps.wallet.money import written
 
+    def per_currency(rows: Any) -> str:
+        totals = rows.values("wallet__currency").annotate(total=Sum("amount"))
+        return " + ".join(
+            written(row["total"], row["wallet__currency"])
+            for row in totals.order_by("wallet__currency")
+        ) or written(None, settings.WALLET_CURRENCY)
+
     waiting = WalletEntry.objects.awaiting_approval()
-    payouts = Q(direction="debit")
-    outstanding = WalletEntry.objects.filter(status=str(EntryStatus.PENDING)).aggregate(
-        owed=Sum("amount", filter=payouts),
-        count=Count("id", filter=payouts),
-    )
+    payouts = WalletEntry.objects.filter(status=str(EntryStatus.PENDING), direction="debit")
     live = PaymentMethod.objects.usable().filter(currencies__is_enabled=True).distinct()
-    currency = settings.WALLET_CURRENCY
     return {
         "waiting": waiting.count(),
-        "waiting_value": written(waiting.aggregate(total=Sum("amount"))["total"], currency),
-        "payouts": outstanding["count"],
-        "payouts_value": written(outstanding["owed"], currency),
+        "waiting_value": per_currency(waiting),
+        "payouts": payouts.count(),
+        "payouts_value": per_currency(payouts),
         "methods": live.count(),
     }
 
