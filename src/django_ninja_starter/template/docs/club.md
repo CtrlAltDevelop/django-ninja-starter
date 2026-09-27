@@ -108,7 +108,14 @@ mistake is a thing people warn each other about.
 
 **A suspension is not left behind.** A suspended member's `leave` is a `409`: a
 suspension that leaving and joining again could lift is one that lasts two
-requests. Only an operator lifts it.
+requests. Only an operator lifts it. `leave` re-reads the membership under its
+row lock, so a suspension saved while a leave is in flight still stands.
+
+**The back office adds members through the service.** The admin's *add
+membership* form calls `ClubService.add_member`, whatever the join policy, so an
+invite-only club has a way in, a member who left one can be put back, and the join
+is announced and tracked like any other. The form refuses setting a membership to
+`left`: leaving goes through the service, which stamps `left_at` and announces it.
 
 **XP belongs to the club that paid it.** Every award records the club it was
 earned in, and a member's XP is the sum of their current club's awards. Moving to
@@ -150,7 +157,11 @@ an award and updating the total.
 XP granted by hand is written from the grant screen linked on a member's page in
 the admin, through the same service, with a reason and the operator's name on the
 award. The screen issues the reference when it is drawn, so a form submitted twice
-grants once.
+grants once. Reusing a reference for a different grant -- another amount, or a
+member who has since moved club -- is refused rather than reported as paid.
+
+A caller's `reference` longer than 150 characters is hashed before it is stored,
+since it becomes part of a 200-character award key.
 
 Awards are immutable and idempotent — `reference` is unique per member — so a
 mission completion replayed by a retried request, a redelivered webhook or a job
@@ -205,7 +216,10 @@ report is a mission a client can invent.
 Everything is scoped to the caller. No endpoint takes a membership id, and the
 leaderboard is your own club's or nothing — a club is a social object, and an API
 that let any account list any club's members would be a directory of everybody
-who uses the deployment.
+who uses the deployment. For the same reason a leaderboard row's `username` is
+not the login username: it is the first word and last initial of the profile's
+display name ("Ada L."), or `Member` when there is none, so the leaderboard is not a
+list of sign-in identifiers to try passwords against.
 
 <!-- generated:routes -->
 | Method | Path | Auth | Purpose |
@@ -357,6 +371,6 @@ One payment of XP, kept forever. The sum of these is a member's XP.
 | `Club` | Yes | — | `name`, `slug`, `status`, `join_policy`, `levels_display`, `members_display` |
 | `Membership` | Yes | `grant_ten_xp` | `user`, `club`, `status`, `xp_display`, `level_display`, `joined_at` |
 | `Mission` | Yes | `enable_missions`, `disable_missions` | `title`, `club`, `event`, `xp`, `repeat`, `target_count`, `is_enabled` |
-| `MissionProgress` | Yes | — | `membership`, `mission`, `count`, `completions`, `last_completed_at` |
-| `XpAward` | Yes | — | `created_at`, `membership`, `club`, `xp`, `reason`, `mission` |
+| `MissionProgress` | No — read-only | — | `membership`, `mission`, `count`, `completions`, `last_completed_at` |
+| `XpAward` | No — read-only | — | `created_at`, `membership`, `club`, `xp`, `reason`, `mission` |
 <!-- /generated:admin -->

@@ -118,7 +118,7 @@ def test_the_leaderboard_is_the_callers_own_club(
         token=access_token(joined),
     )
 
-    assert [row.username for row in reply.ranks] == ["alice"]
+    assert [row.username for row in reply.ranks] == ["Member"]
     assert reply.ranks[0].is_you is True
 
 

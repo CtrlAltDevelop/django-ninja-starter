@@ -210,7 +210,7 @@ def test_the_leaderboard_is_ranked_and_cut_by_the_database(
 
     board = club_service.leaderboard(member, limit=1)
 
-    assert [row["username"] for row in board] == [bob.username]
+    assert [row["username"] for row in board] == ["Member"]
 
 
 def test_rejoining_starts_the_membership_again(member: Any, club: Club, other_club: Club) -> None:
@@ -229,3 +229,13 @@ def test_the_award_count_is_every_award_not_the_page(member: Any) -> None:
 
     assert len(club_service.awards(member, limit=1)) == 1
     assert club_service.award_count(member) == 3
+
+
+def test_a_long_reference_is_hashed_rather_than_overflowing(
+    member: Any, mission: Mission, test_event: str
+) -> None:
+    long = "x" * 300
+
+    assert len(track(member, test_event, reference=long)) == 1
+    assert track(member, test_event, reference=long) == []
+    assert all(len(award.reference) <= 200 for award in XpAward.objects.all())

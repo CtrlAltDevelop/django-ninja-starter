@@ -133,7 +133,7 @@ def test_the_leaderboard_is_the_callers_own_club(
     club_service.add_member(bob, other_club.slug)
 
     rows = graphql(LEADERBOARD, member)["data"]["clubLeaderboard"]
-    assert [row["username"] for row in rows] == ["alice"]
+    assert [row["username"] for row in rows] == ["Member"]
     assert rows[0]["isYou"] is True
 
 

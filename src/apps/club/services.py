@@ -20,13 +20,15 @@ lock, which makes a replayed event, a retried request and two racing workers all
 land on one row instead of three.
 """
 
+import hashlib
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -94,6 +96,37 @@ WINDOWS: dict[str, timedelta | None] = {
 #: :mod:`apps.club.bridges.accounts`.
 JOINED = "club.member.joined"
 
+#: The longest caller reference kept as given. ``mission:{uuid}:`` takes 45 of
+#: the award reference's 200 characters; anything longer is hashed.
+REFERENCE_KEEP = 150
+
+
+def public_name(user: Any) -> str:
+    """How a member appears to the rest of their club: never their login.
+
+    The username signs in, so a leaderboard showing it hands every member a list
+    of accounts to try passwords against. A first name and an initial is enough
+    to recognise somebody by.
+    """
+    profile = getattr(user, "profile", None)
+    shown = str(getattr(profile, "display_name", "") or "").split()
+    if not shown:
+        # A swapped user model may carry the stock name fields instead.
+        shown = " ".join(
+            str(getattr(user, name, "") or "") for name in ("first_name", "last_name")
+        ).split()
+    if not shown:
+        return "Member"
+    return f"{shown[0]} {shown[-1][0]}." if len(shown) > 1 else shown[0]
+
+
+def _user_relations() -> list[str]:
+    """What a leaderboard joins, so naming each row is not a query per row."""
+    from django.contrib.auth import get_user_model
+
+    has_profile = any(rel.name == "profile" for rel in get_user_model()._meta.related_objects)
+    return ["user", "user__profile"] if has_profile else ["user"]
+
 
 class ClubService:
     """The whole of what a club can do. One instance, held at the bottom of this module."""
@@ -103,7 +136,15 @@ class ClubService:
     def clubs(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
         """Every club somebody could be in, newest ladder counts included."""
         page = page_size(limit)
-        rows = Club.objects.exclude(status=str(ClubStatus.ARCHIVED)).order_by("name")
+        rows = (
+            Club.objects.exclude(status=str(ClubStatus.ARCHIVED))
+            .annotate(
+                active_members=Count(
+                    "memberships", filter=Q(memberships__status=str(MembershipStatus.ACTIVE))
+                )
+            )
+            .order_by("name")
+        )
         return [club_payload(club) for club in rows[max(0, offset) : max(0, offset) + page]]
 
     def club(self, slug: str) -> dict[str, Any]:
@@ -185,7 +226,7 @@ class ClubService:
             Membership.objects.filter(
                 club_id=membership.club_id, status=str(MembershipStatus.ACTIVE)
             )
-            .select_related("user")
+            .select_related(*_user_relations())
             .annotate(
                 earned=Coalesce(Sum("awards__xp", filter=Q(awards__club_id=membership.club_id)), 0)
             )
@@ -201,7 +242,7 @@ class ClubService:
             {
                 "position": index + 1,
                 "membership_id": member.pk,
-                "username": getattr(member.user, "username", ""),
+                "username": public_name(member.user),
                 "xp": xp,
                 "level": level_payload(reached) if reached is not None else None,
                 "is_you": member.pk == membership.pk,
@@ -291,11 +332,22 @@ class ClubService:
         """
         membership = self.membership_for(user)
         assert membership is not None
-        if membership.status == str(MembershipStatus.SUSPENDED):
-            raise MembershipSuspended(
-                "This membership is suspended. An operator lifts a suspension; leaving does not."
-            )
         with transaction.atomic():
+            # Re-read under the lock: a suspension saved while this was on its
+            # way would otherwise be overwritten with `left`, and two leaves at
+            # once would both announce it.
+            membership = (
+                Membership.objects.select_for_update(of=("self",))
+                .select_related("club")
+                .get(pk=membership.pk)
+            )
+            if membership.status == str(MembershipStatus.LEFT):
+                raise NotAMember("This account is not in a club.")
+            if membership.status == str(MembershipStatus.SUSPENDED):
+                raise MembershipSuspended(
+                    "This membership is suspended. An operator lifts a suspension; "
+                    "leaving does not."
+                )
             membership.status = str(MembershipStatus.LEFT)
             membership.left_at = timezone.now()
             membership.save(update_fields=["status", "left_at", "updated_at"])
@@ -332,19 +384,6 @@ class ClubService:
                 for rung in prepared
             ]
         return [level_payload(level) for level in created]
-
-    def check_ladder(self, slug: str) -> None:
-        """Refuse a club whose ladder has drifted out of shape. What `check` calls."""
-        _validated_ladder(
-            [
-                {
-                    "position": level.position,
-                    "name": level.name,
-                    "xp_required": level.xp_required,
-                }
-                for level in ladder(self._club(slug).pk)
-            ]
-        )
 
     # -- missions ----------------------------------------------------------
 
@@ -426,6 +465,11 @@ class ClubService:
                 f"{occurrence.key!r} is not a registered event. Register it with "
                 "apps.club.events.register before tracking it."
             )
+        if len(occurrence.reference) > REFERENCE_KEEP:
+            # Stored inside a 200-character key with a mission prefix, so a long
+            # one is hashed rather than overflowing the column mid-transaction.
+            digest = hashlib.sha256(occurrence.reference.encode()).hexdigest()
+            occurrence = replace(occurrence, reference=f"sha256:{digest}")
         membership = self.membership_for(occurrence.user, required=False)
         if membership is None or not membership.is_active:
             return []
@@ -593,6 +637,10 @@ class ClubService:
             paid = self._pay(locked, xp=xp, reference=reference, reason=reason, metadata=metadata)
             if paid is None:
                 existing = XpAward.objects.get(membership=locked, reference=reference)
+                if existing.club_id != locked.club_id or existing.xp != xp:
+                    # A replay is the same grant again; anything else is a reused
+                    # reference, and reporting it as paid would be a lie.
+                    raise ClubError("That reference was already used for a different grant.")
                 return award_payload(existing)
             return paid
 
@@ -682,7 +730,11 @@ def club_payload(club: Club, *, levels: list[ClubLevel] | None = None) -> dict[s
         "status": club.status,
         "join_policy": club.join_policy,
         "is_open": club.is_open,
-        "member_count": club.memberships.filter(status=str(MembershipStatus.ACTIVE)).count(),
+        "member_count": (
+            club.active_members
+            if hasattr(club, "active_members")
+            else club.memberships.filter(status=str(MembershipStatus.ACTIVE)).count()
+        ),
         "metadata": club.metadata,
         "created_at": club.created_at.isoformat(),
     }

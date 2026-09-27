@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -67,6 +68,30 @@ def _run(request: HttpRequest, call: Any, *args: Any, **kwargs: Any) -> bool:
 
 class LevelInlineFormSet(forms.BaseInlineFormSet):
     """Checks the ladder as a whole, which is the only way these rules can be checked."""
+
+    def _construct_form(self, i: int, **kwargs: Any) -> Any:
+        form = super()._construct_form(i, **kwargs)
+        # Tells ClubLevel.clean the set is checked here, against the new rows.
+        form.instance._checked_as_ladder = True
+        return form
+
+    def save(self, commit: bool = True) -> Any:
+        """Write the new ladder in one go, as `set_levels` does.
+
+        Saved row by row, swapping two thresholds collides with the unique
+        constraint halfway through. So the stored rungs go first and every kept
+        one is written back -- Django inserts a row whose update matched nothing,
+        keeping its id and `created_at`.
+        """
+        if not commit:
+            return super().save(commit)
+        with transaction.atomic():
+            ClubLevel.objects.filter(club=self.instance).delete()
+            saved = super().save(commit)
+            for form in self.initial_forms:
+                if not self._should_delete_form(form) and not form.has_changed():
+                    form.instance.save()
+        return saved
 
     def clean(self) -> None:
         super().clean()
@@ -217,16 +242,30 @@ class XpAwardInline(TabularInline):
 
 
 class MembershipForm(forms.ModelForm):
-    """Refuses what the service would: a club taking nobody, and rejoining by hand.
+    """Refuses what the service would: a club taking nobody, and joining or leaving by hand.
 
-    Status stays editable -- suspending and lifting a suspension happen here --
-    but coming back from `left` is joining, which resets `joined_at` and
-    announces the join, so it goes through the service rather than this form.
+    Adding a member is :meth:`ClubService.add_member` -- the admin's save calls
+    it -- so the join is announced and the welcome mission pays, and a member who
+    left an invite-only club can be put back. Status stays editable --
+    suspending and lifting a suspension happen here -- but leaving and coming
+    back from `left` are the service's, which stamp the dates and announce them.
     """
 
     class Meta:
         model = Membership
         fields = ("user", "club", "status", "left_at")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if self.instance._state.adding:
+            # A new member starts active; the service decides that, not the form.
+            for name in ("status", "left_at"):
+                self.fields.pop(name, None)
+
+    def validate_unique(self) -> None:
+        """On add, the service reuses a `left` row, so the one-to-one is its to check."""
+        if not self.instance._state.adding:
+            super().validate_unique()
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
@@ -238,9 +277,22 @@ class MembershipForm(forms.ModelForm):
             club = self.instance.club
         if adding and club is not None and not club.accepts_members:
             raise ValidationError(f"{club.name} is not taking members.")
+        user = cleaned.get("user")
+        if adding and user is not None:
+            current = (
+                Membership.objects.filter(user=user)
+                .exclude(status=str(MembershipStatus.LEFT))
+                .first()
+            )
+            if current is not None:
+                raise ValidationError(f"{user} is already in {current.club}. They leave it first.")
         was = self.initial.get("status")
         if not adding and was == str(MembershipStatus.LEFT) and status != was:
             raise ValidationError("A member who left rejoins through the club, not this form.")
+        if not adding and status == str(MembershipStatus.LEFT) and was != status:
+            raise ValidationError(
+                "Leaving goes through the club service, which records when and announces it."
+            )
         if (
             not adding
             and status == str(MembershipStatus.ACTIVE)
@@ -265,6 +317,20 @@ class MembershipAdmin(ModelAdmin):
 
     def get_queryset(self, request: HttpRequest) -> QuerySet:
         return super().get_queryset(request).select_related("user", "club")
+
+    def save_model(self, request: HttpRequest, obj: Membership, form: Any, change: bool) -> None:
+        """A new member is added by the service, so the join is announced and tracked."""
+        if change:
+            super().save_model(request, obj, form, change)
+            return
+        try:
+            added = club_service.add_member(obj.user, obj.club.slug, by=request.user)
+        except ClubError as refusal:
+            # The form checked these; only a race gets here.
+            raise ValidationError(str(refusal)) from None
+        obj.pk = added["id"]
+        obj.refresh_from_db()
+        obj._state.adding = False
 
     def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> Any:
         """The XP is derived, so the screen shows it and cannot be used to set it.
@@ -371,6 +437,9 @@ class MembershipAdmin(ModelAdmin):
 class XpAwardAdmin(ModelAdmin):
     """The ledger a level is derived from. Read-only, in both directions."""
 
+    # Enforced by the three methods below; declared so `authdocs` can say so.
+    read_only_admin = True
+
     list_display = ("created_at", "membership", "club", "xp", "reason", "mission")
     list_filter = ("club",)
     search_fields = ("reason", "reference", "membership__user__username")
@@ -393,6 +462,9 @@ class XpAwardAdmin(ModelAdmin):
 @admin.register(MissionProgress)
 class MissionProgressAdmin(ModelAdmin):
     """How far each member has got. Read-only: progress is a consequence, not an input."""
+
+    # Enforced by the three methods below; declared so `authdocs` can say so.
+    read_only_admin = True
 
     list_display = ("membership", "mission", "count", "completions", "last_completed_at")
     list_filter = ("mission__club",)

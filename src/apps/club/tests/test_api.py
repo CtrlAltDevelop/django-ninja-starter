@@ -123,13 +123,16 @@ def test_the_award_ledger_adds_up_to_the_reported_xp(
 def test_the_leaderboard_is_your_own_club_and_flags_you(
     member: Any, bob: Any, club: Club, test_event: str
 ) -> None:
+    bob.profile.display_name = "Bob the Builder"
+    bob.profile.save()
     club_service.add_member(bob, club.slug)
     club_service.grant(bob, xp=200, reason="Ahead", reference="b")
     club_service.grant(member, xp=50, reason="Behind", reference="a")
 
     rows = data(Client().get(f"{BASE}/leaderboard", **bearer(member)))
 
-    assert [row["username"] for row in rows] == ["bob", "alice"]
+    # A name to recognise somebody by, never the login: alice has none set.
+    assert [row["username"] for row in rows] == ["Bob B.", "Member"]
     assert [row["position"] for row in rows] == [1, 2]
     assert [row["is_you"] for row in rows] == [False, True]
 
@@ -141,7 +144,7 @@ def test_the_leaderboard_does_not_list_another_club(
 
     rows = data(Client().get(f"{BASE}/leaderboard", **bearer(member)))
 
-    assert [row["username"] for row in rows] == ["alice"]
+    assert [row["username"] for row in rows] == ["Member"]
 
 
 def test_the_event_list_is_generated_from_what_is_registered(alice: Any, test_event: str) -> None:

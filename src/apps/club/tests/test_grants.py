@@ -64,3 +64,12 @@ def test_nothing_is_granted_into_an_archived_club(member: Any, club: Any) -> Non
 
     with pytest.raises(ClubClosed):
         club_service.grant(member, xp=10, reason="r", reference="late")
+
+
+def test_a_reused_reference_for_a_different_grant_is_refused(member: Any) -> None:
+    """Replaying a reference is one grant; reusing it for another amount is not a success."""
+    club_service.grant(member, xp=300, reason="Beta", reference="beta")
+
+    with pytest.raises(ClubError, match="already used"):
+        club_service.grant(member, xp=50, reason="Beta again", reference="beta")
+    assert XpAward.objects.filter(reference="beta").count() == 1

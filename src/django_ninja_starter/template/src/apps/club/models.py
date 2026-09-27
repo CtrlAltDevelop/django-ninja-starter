@@ -163,7 +163,9 @@ class ClubLevel(models.Model):
             raise ValidationError(
                 {"xp_required": "The first level is where everybody starts, so it needs 0 XP."}
             )
-        if self.club_id is None:
+        if self.club_id is None or getattr(self, "_checked_as_ladder", False):
+            # The admin's ladder formset checks the new set as a whole; comparing
+            # one rung with the rows it is about to replace would refuse valid edits.
             return
         neighbours = ClubLevel.objects.filter(club_id=self.club_id).exclude(pk=self.pk)
         below = neighbours.filter(position__lt=self.position).order_by("-position").first()

@@ -109,3 +109,28 @@ def test_a_member_who_left_is_not_a_member(member: Any) -> None:
     row = Membership.objects.get(user=member)
     assert row.status == str(MembershipStatus.LEFT)
     assert row.left_at is not None
+
+
+def test_leave_rechecks_the_status_under_the_lock(member: Any) -> None:
+    """A suspension saved after the leave read the row is not overwritten with `left`."""
+    from unittest import mock
+
+    from apps.club.errors import MembershipSuspended
+
+    stale = club_service.membership_for(member)
+    Membership.objects.filter(user=member).update(status=str(MembershipStatus.SUSPENDED))
+
+    with (
+        mock.patch.object(club_service, "membership_for", return_value=stale),
+        pytest.raises(MembershipSuspended),
+    ):
+        club_service.leave(member)
+    assert Membership.objects.get(user=member).status == str(MembershipStatus.SUSPENDED)
+
+
+def test_a_leaderboard_name_is_never_the_login(alice: Any) -> None:
+    from apps.club.services import public_name
+
+    assert public_name(alice) == "Member"
+    alice.profile.display_name = "Ada Lovelace"
+    assert public_name(alice) == "Ada L."

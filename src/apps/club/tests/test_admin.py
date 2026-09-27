@@ -248,3 +248,97 @@ def test_a_suspension_can_still_be_set_from_the_form(member: Any) -> None:
     form.fields = {"status": form.fields["status"]}
 
     assert form.is_valid(), form.errors
+
+
+def _add_member(client: Client, user: Any, club: Club) -> Any:
+    return client.post(
+        reverse("admin:club_membership_add"),
+        {
+            "user": user.pk,
+            "club": club.pk,
+            "awards-TOTAL_FORMS": 0,
+            "awards-INITIAL_FORMS": 0,
+            "_save": "Save",
+        },
+    )
+
+
+def test_the_add_form_goes_through_the_service_and_puts_back_a_member_who_left(
+    alice: Any, club: Club, superuser: Any, django_capture_on_commit_callbacks: Any
+) -> None:
+    """Invite-only is joined from the back office, including by somebody who left it."""
+    from apps.club import signals
+    from apps.club.models import JoinPolicy, Membership, MembershipStatus
+
+    club.join_policy = str(JoinPolicy.INVITE)
+    club.save()
+    heard: list[Any] = []
+
+    def receiver(**kwargs: Any) -> None:
+        heard.append(kwargs)
+
+    signals.member_joined.connect(receiver)
+    client = Client()
+    client.force_login(superuser)
+    try:
+        with django_capture_on_commit_callbacks(execute=True):
+            assert _add_member(client, alice, club).status_code == 302
+            club_service.leave(alice)
+            assert _add_member(client, alice, club).status_code == 302
+    finally:
+        signals.member_joined.disconnect(receiver)
+
+    row = Membership.objects.get(user=alice)
+    assert row.status == str(MembershipStatus.ACTIVE)
+    assert row.left_at is None
+    assert len(heard) == 2
+
+
+def test_the_form_refuses_marking_a_member_left(member: Any) -> None:
+    """Leaving stamps `left_at` and announces it; a status dropdown does neither."""
+    from apps.club.admin import MembershipForm
+    from apps.club.models import Membership
+
+    form = MembershipForm(data={"status": "left"}, instance=Membership.objects.get(user=member))
+    form.fields = {"status": form.fields["status"]}
+
+    assert not form.is_valid()
+    assert "club service" in str(form.errors)
+
+
+def test_the_admin_marks_both_ledgers_read_only_for_the_docs() -> None:
+    assert MissionProgressAdmin.read_only_admin is True
+    assert XpAwardAdmin.read_only_admin is True
+
+
+def test_the_ladder_inline_accepts_a_whole_ladder_edit(club: Club) -> None:
+    """0/100/300/600 to 0/350/400/600: each rung checked alone against the old rows fails."""
+    from django.forms import inlineformset_factory
+
+    from apps.club.admin import LevelInlineFormSet
+    from apps.club.models import ClubLevel
+    from apps.club.standing import ladder
+
+    Formset = inlineformset_factory(
+        Club,
+        ClubLevel,
+        formset=LevelInlineFormSet,
+        fields=("position", "name", "xp_required"),
+        extra=0,
+    )
+    rows = list(ladder(club.pk))
+    data: dict[str, Any] = {"levels-TOTAL_FORMS": 4, "levels-INITIAL_FORMS": 4}
+    for index, (row, xp) in enumerate(zip(rows, [0, 350, 400, 600], strict=True)):
+        data |= {
+            f"levels-{index}-id": row.pk,
+            f"levels-{index}-club": club.pk,
+            f"levels-{index}-position": row.position,
+            f"levels-{index}-name": row.name,
+            f"levels-{index}-xp_required": xp,
+        }
+    formset = Formset(data, instance=club)
+
+    assert formset.is_valid(), formset.errors
+    formset.save()
+    assert [level.xp_required for level in ladder(club.pk)] == [0, 350, 400, 600]
+    assert [level.pk for level in ladder(club.pk)] == [row.pk for row in rows]
