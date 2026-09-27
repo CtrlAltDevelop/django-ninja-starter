@@ -551,8 +551,8 @@ The rest of what the admin gives an editor:
 
 | | |
 | --- | --- |
-| **Publish now** / **Move back to draft** | Actions on the page list |
-| **Duplicate as a draft** | Copies structure, content and placements; never the published state |
+| **Publish now** / **Move back to draft** | Actions on the page list, for superusers only; a page already live keeps its publish date |
+| **Duplicate as a draft** | Copies structure, content, placements and sitemap settings; never the published state or the canonical URL |
 | **Preview** | A clickable signed link, on the page and on its content screen |
 | **Filled in: required, still empty** | A field filter, for the list an editor works from |
 | **Edit content** | On pages *and* on sections, since a shared one has no page to be reached from |
@@ -577,7 +577,8 @@ python manage.py cms_import content.json --prune
 The document holds slugs rather than ids, so it travels between databases. The
 import matches on those slugs and **updates** what it finds, so running it twice
 does nothing the second time and running a staging export against production
-edits the pages that exist rather than replacing the database. Every row goes
+edits the pages that exist rather than replacing the database. Sitemap settings,
+the site's and each page's, travel with the content. Every row goes
 through the models on the way in, so a value of the wrong shape is refused —
 whole, inside one transaction — with the message an editor would have seen.
 `--prune` is the exception that deletes what the document omits, and it is a

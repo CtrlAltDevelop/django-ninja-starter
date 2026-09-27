@@ -161,3 +161,32 @@ class TestImport:
 
         with pytest.raises(CommandError, match="ghost"):
             call_command("cms_import", str(document), stdout=StringIO())
+
+
+def test_sitemap_settings_travel_with_the_content(
+    home: Page, site: SiteSettings, tmp_path: Path
+) -> None:
+    """A page kept out of the sitemap on staging must stay out of it in production."""
+    from decimal import Decimal
+
+    Page.objects.filter(pk=home.pk).update(
+        in_sitemap=False, sitemap_changefreq="monthly", sitemap_priority=Decimal("0.3")
+    )
+    SiteSettings.objects.filter(pk=site.pk).update(
+        sitemap_enabled=False, sitemap_base_url="https://x.example", sitemap_priority=Decimal("0.7")
+    )
+    document = tmp_path / "content.json"
+    call_command("cms_export", output=str(document), stdout=StringIO())
+    Page.objects.all().delete()
+    SiteSettings.objects.filter(pk=site.pk).update(
+        sitemap_enabled=True, sitemap_base_url="", sitemap_priority=Decimal("0.5")
+    )
+
+    call_command("cms_import", str(document), stdout=StringIO())
+
+    page = Page.objects.get(slug="home")
+    assert (page.in_sitemap, page.sitemap_changefreq) == (False, "monthly")
+    assert page.sitemap_priority == Decimal("0.3")
+    loaded = SiteSettings.load()
+    assert (loaded.sitemap_enabled, loaded.sitemap_base_url) == (False, "https://x.example")
+    assert loaded.sitemap_priority == Decimal("0.7")

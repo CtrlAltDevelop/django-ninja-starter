@@ -66,7 +66,12 @@ def duplicate_page(page: Page) -> Page:
         og_title=page.og_title,
         og_description=page.og_description,
         og_image=page.og_image,
-        og_url=page.og_url,
+        # The canonical URL is the original's address: a copy claiming it would
+        # be listed twice in the sitemap and pose as the original in its markup.
+        og_url="",
+        in_sitemap=page.in_sitemap,
+        sitemap_changefreq=page.sitemap_changefreq,
+        sitemap_priority=page.sitemap_priority,
     )
     copy.save()
 

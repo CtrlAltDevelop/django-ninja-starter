@@ -496,3 +496,31 @@ class _MultiValueFiles(dict):
 
     def getlist(self, key: str) -> list[Any]:
         return list(self.get(key) or [])
+
+
+class TestSavingSafely:
+    def test_a_failed_form_stores_no_file(self, section: Section, media: Path) -> None:
+        """Every retry after a bad box elsewhere would otherwise orphan one more file."""
+        image = _field(section, field_type=FieldType.IMAGE)
+        number = _field(section, field_type=FieldType.NUMBER)
+        key = field_key(image)
+
+        form = _post(
+            section,
+            {key: "", field_key(number): "not a number"},
+            {f"{key}__upload": SimpleUploadedFile("hero.png", b"x")},
+        )
+
+        assert not form.is_valid()
+        assert not any(path.is_file() for path in media.rglob("*"))
+
+    def test_another_language_saved_meanwhile_survives(self, section: Section) -> None:
+        """Two editors, two languages, one field: the later save keeps both."""
+        field = _field(section, values={"en-us": "Welcome"})
+        form = _post(section, {field_key(field): "Hello"})
+        Field.objects.filter(pk=field.pk).update(values={"en-us": "Welcome", "fa": "سلام"})
+
+        form.save()
+
+        field.refresh_from_db()
+        assert field.values == {"en-us": "Hello", "fa": "سلام"}
