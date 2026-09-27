@@ -675,6 +675,66 @@ class Fee(_message.Message):
 Global___Fee: _TypeAlias = Fee  # noqa: Y015
 
 @_typing.final
+class GatewayDepositRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    METHOD_FIELD_NUMBER: _builtins.int
+    AMOUNT_FIELD_NUMBER: _builtins.int
+    REFERENCE_FIELD_NUMBER: _builtins.int
+    CURRENCY_FIELD_NUMBER: _builtins.int
+    DESCRIPTION_FIELD_NUMBER: _builtins.int
+    method: _builtins.str
+    amount: _builtins.str
+    reference: _builtins.str
+    currency: _builtins.str
+    description: _builtins.str
+    def __init__(
+        self,
+        *,
+        method: _builtins.str = ...,
+        amount: _builtins.str = ...,
+        reference: _builtins.str = ...,
+        currency: _builtins.str = ...,
+        description: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["amount", b"amount", "currency", b"currency", "description", b"description", "method", b"method", "reference", b"reference"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___GatewayDepositRequest: _TypeAlias = GatewayDepositRequest  # noqa: Y015
+
+@_typing.final
+class GatewayDepositResult(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    ENTRY_FIELD_NUMBER: _builtins.int
+    REDIRECT_URL_FIELD_NUMBER: _builtins.int
+    REDIRECT_METHOD_FIELD_NUMBER: _builtins.int
+    REDIRECT_FIELDS_FIELD_NUMBER: _builtins.int
+    redirect_url: _builtins.str
+    redirect_method: _builtins.str
+    redirect_fields: _builtins.str
+    @_builtins.property
+    def entry(self) -> Global___Entry: ...
+    def __init__(
+        self,
+        *,
+        entry: Global___Entry | None = ...,
+        redirect_url: _builtins.str = ...,
+        redirect_method: _builtins.str = ...,
+        redirect_fields: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["entry", b"entry"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["entry", b"entry", "redirect_fields", b"redirect_fields", "redirect_method", b"redirect_method", "redirect_url", b"redirect_url"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___GatewayDepositResult: _TypeAlias = GatewayDepositResult  # noqa: Y015
+
+@_typing.final
 class Method(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 

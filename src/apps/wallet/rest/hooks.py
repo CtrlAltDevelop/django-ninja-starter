@@ -14,12 +14,15 @@ secret.
 """
 
 from typing import Any
+from urllib.parse import urlencode
+from uuid import UUID
 
-from django.http import HttpRequest
+from django.conf import settings
+from django.http import HttpRequest, HttpResponseRedirect
 from ninja import Router
 from ninja.errors import HttpError
 
-from apps.wallet import hooks
+from apps.wallet import gateways, hooks
 from apps.wallet.errors import WalletError
 from apps.wallet.rest.schemas import EntryOut, RailEventIn
 from apps.wallet.services import wallet_service
@@ -73,3 +76,36 @@ def rail_event(request: HttpRequest, method_code: str, payload: RailEventIn) -> 
         )
     except WalletError as refusal:
         raise HttpError(refusal.status, str(refusal)) from None
+
+
+def gateway_return_base(request: HttpRequest, method: str) -> str:
+    """The return address, derived from this request when no setting names one."""
+    return gateways.return_base(
+        method, request.build_absolute_uri(request.path.rsplit("/gateways/", 1)[0])
+    )
+
+
+@router.api_operation(
+    ["GET", "POST"],
+    "/gateways/{method}/{entry_id}",
+    summary="The customer, back from a hosted gateway",
+    auth=None,
+    include_in_schema=False,
+)
+def gateway_return(request: HttpRequest, method: str, entry_id: UUID) -> Any:
+    """Verify the payment with the gateway, then send the customer on.
+
+    Gateways return by GET or by a form POST, so both are read. Nothing sent
+    here is trusted: the service asks the gateway directly.
+    """
+    params = {**request.GET.dict(), **request.POST.dict()}
+    try:
+        entry = wallet_service.complete_gateway_deposit(method, entry_id, params)
+    except WalletError as refusal:
+        raise HttpError(refusal.status, str(refusal)) from None
+    landing = getattr(settings, "WALLET_GATEWAY_RETURN_URL", "")
+    if not landing:
+        return entry
+    joiner = "&" if "?" in landing else "?"
+    query = urlencode({"entry": str(entry["id"]), "status": entry["status"]})
+    return HttpResponseRedirect(f"{landing}{joiner}{query}")

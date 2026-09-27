@@ -37,6 +37,7 @@ class WalletControllerStub:
     Convert: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.ExchangeRequest, _wallet_pb2.ExchangeResult]
     Deposit: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.DepositRequest, _wallet_pb2.DepositResult]
     Entries: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.EntriesRequest, _wallet_pb2.EntryPage]
+    GatewayDeposit: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.GatewayDepositRequest, _wallet_pb2.GatewayDepositResult]
     GetBalance: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _wallet_pb2.BalanceResult]
     GetEntry: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.EntryRequest, _wallet_pb2.EntryResult]
     GetMethod: _grpc.UnaryUnaryMultiCallable[_wallet_pb2.MethodRequest, _wallet_pb2.MethodResult]
@@ -55,6 +56,7 @@ class WalletControllerAsyncStub(WalletControllerStub):
     Convert: _aio.UnaryUnaryMultiCallable[_wallet_pb2.ExchangeRequest, _wallet_pb2.ExchangeResult]  # type: ignore[assignment]
     Deposit: _aio.UnaryUnaryMultiCallable[_wallet_pb2.DepositRequest, _wallet_pb2.DepositResult]  # type: ignore[assignment]
     Entries: _aio.UnaryUnaryMultiCallable[_wallet_pb2.EntriesRequest, _wallet_pb2.EntryPage]  # type: ignore[assignment]
+    GatewayDeposit: _aio.UnaryUnaryMultiCallable[_wallet_pb2.GatewayDepositRequest, _wallet_pb2.GatewayDepositResult]  # type: ignore[assignment]
     GetBalance: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _wallet_pb2.BalanceResult]  # type: ignore[assignment]
     GetEntry: _aio.UnaryUnaryMultiCallable[_wallet_pb2.EntryRequest, _wallet_pb2.EntryResult]  # type: ignore[assignment]
     GetMethod: _aio.UnaryUnaryMultiCallable[_wallet_pb2.MethodRequest, _wallet_pb2.MethodResult]  # type: ignore[assignment]
@@ -100,6 +102,13 @@ class WalletControllerServicer(metaclass=_abc_1.ABCMeta):
         request: _wallet_pb2.EntriesRequest,
         context: _ServicerContext,
     ) -> _typing.Union[_wallet_pb2.EntryPage, _abc.Awaitable[_wallet_pb2.EntryPage]]: ...
+
+    @_abc_1.abstractmethod
+    def GatewayDeposit(
+        self,
+        request: _wallet_pb2.GatewayDepositRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_wallet_pb2.GatewayDepositResult, _abc.Awaitable[_wallet_pb2.GatewayDepositResult]]: ...
 
     @_abc_1.abstractmethod
     def GetBalance(

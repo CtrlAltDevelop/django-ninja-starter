@@ -1085,6 +1085,25 @@ class ShopService(generics.GenericService):
 
     @grpc_action(
         request=[{"name": "number", "type": "string"}],
+        request_name="PayOrderRequest",
+        response=[{"name": "order", "type": Order}],
+        response_name="PayOrderResult",
+    )
+    @action
+    async def PayOrder(self, request: Any, context: Any) -> Any:
+        """Pay a pending order from the caller's wallet balance."""
+        user = require_caller(await grpc_caller(context))
+        try:
+            order = await sync_to_async(shop_service.pay_order)(user, request.number)
+            row = await sync_to_async(shop_service.order)(user, order.number)
+        except ShopNotFound as error:
+            raise _missing(error) from None
+        except ShopRefused as error:
+            raise _refused(error) from None
+        return _pb2().PayOrderResult(order=_order(row))
+
+    @grpc_action(
+        request=[{"name": "number", "type": "string"}],
         request_name="CancelOrderRequest",
         response=[{"name": "order", "type": Order}],
         response_name="CancelOrderResult",

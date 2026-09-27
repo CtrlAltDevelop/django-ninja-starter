@@ -76,7 +76,9 @@ def _published_reviews() -> Iterator[None]:
     """
     from django.test import override_settings
 
-    with override_settings(SHOP_REVIEW_MODERATION=False):
+    # The same for payment: most tests settle an order by hand. Paying from the
+    # wallet has its own tests, which ask for it.
+    with override_settings(SHOP_REVIEW_MODERATION=False, SHOP_PAYMENT_PROVIDER="manual"):
         yield
 
 

@@ -21,6 +21,7 @@ from ninja.errors import HttpError
 
 from apps.wallet.methods import Direction, Method
 from apps.wallet.models import EntryKind, EntryStatus
+from apps.wallet.rest.hooks import gateway_return_base
 from apps.wallet.rest.hooks import router as hooks_router
 from apps.wallet.rest.schemas import (
     BalanceOut,
@@ -28,6 +29,9 @@ from apps.wallet.rest.schemas import (
     EntryOut,
     EntryPage,
     ExchangeOut,
+    GatewayDepositIn,
+    GatewayDepositOut,
+    GatewayOut,
     MethodOut,
     MoveIn,
     QuoteIn,
@@ -256,6 +260,38 @@ def deposit(request: HttpRequest, payload: MoveIn) -> dict[str, Any]:
         external_reference=payload.external_reference,
         description=payload.description,
         metadata=payload.metadata,
+    )
+
+
+@router.get("/gateways", response=list[GatewayOut], summary="The gateways a top-up can go through")
+def list_gateways(request: HttpRequest) -> list[dict[str, str]]:
+    """Every hosted gateway this deployment has credentials for and offers a method for."""
+    return wallet_service.offered_gateways()
+
+
+@router.post(
+    "/gateways/{method}/deposits",
+    response=GatewayDepositOut,
+    summary="Top up through a hosted gateway",
+)
+def gateway_deposit(request: HttpRequest, method: str, payload: GatewayDepositIn) -> dict[str, Any]:
+    """Open a payment at the gateway and answer with where to send the customer.
+
+    The deposit comes back `pending`. Send the customer to `redirect` -- a plain
+    link for `GET`, an auto-submitted form of `fields` for `POST` -- and the
+    gateway sends them back to `/wallet/hooks/gateways/{method}/{entry_id}`,
+    where this server asks the gateway itself whether they paid. Nothing the
+    customer's browser brings back settles anything.
+    """
+    return _run(
+        wallet_service.start_gateway_deposit,
+        request.user,
+        method=method,
+        amount=payload.amount,
+        reference=payload.reference,
+        currency=payload.currency,
+        description=payload.description,
+        callback_base=gateway_return_base(request, method),
     )
 
 

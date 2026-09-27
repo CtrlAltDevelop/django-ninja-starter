@@ -1463,6 +1463,11 @@ def section_shop(api: Api) -> None:
         "signature on. Both land on the same service method the admin action "
         "calls, so an order becomes paid in one place however that was decided."
     )
+    note(
+        "With the wallet in charge of payment, the shopper pays from their balance "
+        "instead. This tour runs the shop in `manual` mode, so that is refused here."
+    )
+    api.post(f"/api/v1/shop/orders/{order['number']}/pay", expect=400, show=False)
     _settle_as_the_desk(order["number"], reference="bank-statement-4417")
     api.get(f"/api/v1/shop/orders/{order['number']}", show=False)
 
@@ -2647,6 +2652,27 @@ def section_wallet(api: Api) -> None:
     )
     still_open = WalletEntry.objects.filter(checkpoint__isnull=True, status="pending").count()
     print(f"  {DIM}│ {still_open} pending movement(s) left unarchived{OFF}")
+
+    note(
+        "Hosted gateways -- Zarinpal, IDPay, Zibal, Saman, Mellat, Stripe, PayPal "
+        "and the rest -- are configured like sign-in providers: a gateway with no "
+        "credentials in the environment does not exist. This tour configures none, "
+        "so the list is empty and a top-up through one is refused."
+    )
+    api.get("/api/v1/wallet/gateways")
+    api.post(
+        "/api/v1/wallet/gateways/zarinpal/deposits",
+        {"amount": "50000", "reference": "tour-gateway"},
+        expect=400,
+    )
+    note(
+        "The customer's return trip from a gateway settles nothing by itself: the "
+        "server asks the gateway. For a gateway that is not configured there is "
+        "nobody to ask."
+    )
+    missing_entry = "00000000-0000-0000-0000-000000000000"
+    api.get(f"/api/v1/wallet/hooks/gateways/zarinpal/{missing_entry}", expect=400, show=False)
+    api.post(f"/api/v1/wallet/hooks/gateways/zarinpal/{missing_entry}", expect=400, show=False)
 
     _wallet_surface_covered(api)
 

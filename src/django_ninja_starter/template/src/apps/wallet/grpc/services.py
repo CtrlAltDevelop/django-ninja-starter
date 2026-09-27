@@ -20,6 +20,7 @@ from asgiref.sync import sync_to_async
 from django_socio_grpc import generics
 from django_socio_grpc.decorators import grpc_action
 
+from apps.wallet import gateways
 from apps.wallet.grpc.serializers import (
     Balance,
     Checkpoint,
@@ -524,6 +525,47 @@ class WalletService(generics.GenericService):
         except WalletError as refusal:
             raise _refuse(refusal) from None
         return _pb2().ExchangeResult(exchange=_exchange(row))
+
+    @grpc_action(
+        request=[
+            {"name": "method", "type": "string"},
+            {"name": "amount", "type": "string"},
+            {"name": "reference", "type": "string"},
+            {"name": "currency", "type": "string"},
+            {"name": "description", "type": "string"},
+        ],
+        request_name="GatewayDepositRequest",
+        response=[
+            {"name": "entry", "type": Entry},
+            {"name": "redirect_url", "type": "string"},
+            {"name": "redirect_method", "type": "string"},
+            {"name": "redirect_fields", "type": "string"},
+        ],
+        response_name="GatewayDepositResult",
+    )
+    @action
+    async def GatewayDeposit(self, request: Any, context: Any) -> Any:
+        """Top up through a hosted gateway; `redirect_fields` is a JSON object."""
+        user = require_caller(await grpc_caller(context))
+        try:
+            row = await sync_to_async(wallet_service.start_gateway_deposit)(
+                user,
+                method=request.method,
+                amount=_amount(request.amount, "amount"),
+                reference=request.reference,
+                currency=request.currency,
+                description=request.description,
+                callback_base=gateways.return_base(request.method),
+            )
+        except WalletError as refusal:
+            raise _refuse(refusal) from None
+        redirect = row.get("redirect") or {}
+        return _pb2().GatewayDepositResult(
+            entry=_entry(row["entry"]),
+            redirect_url=redirect.get("url", ""),
+            redirect_method=redirect.get("method", ""),
+            redirect_fields=json.dumps(redirect.get("fields") or {}),
+        )
 
     @grpc_action(
         request=[

@@ -61,13 +61,14 @@ from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
-from apps.wallet import signals
+from apps.wallet import gateways, signals
 from apps.wallet.balances import Balance, balance_of
 from apps.wallet.catalog import Applies, ExchangeRate, PaymentMethod
 from apps.wallet.charges import Quote, convert, free_quote, quote_movement
 from apps.wallet.errors import (
     ApprovalRequired,
     CurrencyNotAllowed,
+    GatewayUnavailable,
     InsufficientFunds,
     InvalidAmount,
     InvalidDestination,
@@ -995,6 +996,155 @@ class WalletService:
             metadata=metadata or {},
         )
 
+    # -- hosted gateways -------------------------------------------------
+
+    def offered_gateways(self) -> list[dict[str, str]]:
+        """The gateways this deployment holds credentials for *and* offers a method for."""
+        offered = set(self._methods().values_list("code", flat=True))
+        return [
+            {"code": key, "label": gateway.label}
+            for key, gateway in gateways.configured().items()
+            if key in offered
+        ]
+
+    def start_gateway_deposit(
+        self,
+        user: Any,
+        *,
+        method: str,
+        amount: Decimal,
+        reference: str,
+        callback_base: str,
+        currency: str = "",
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Open a top-up at a hosted gateway, and say where to send the customer.
+
+        The deposit is recorded first, ``pending``, priced like any other --
+        fees, limits and approval all apply -- and only then is the gateway
+        asked for a payment of its gross amount. The gateway's token is kept on
+        the entry, because the return trip is only listened to when it names
+        the same one.
+
+        ``callback_base`` is the return address without the entry id; the entry
+        id is appended, so the return trip names the movement it is about.
+
+        Retrying with the same ``reference`` hands back the same redirect rather
+        than opening a second payment.
+        """
+        gateway = self._gateway(method)
+        wallet = self.wallet_for(user)
+        paying_in = (currency or wallet.currency).upper()
+        if gateway.currencies and paying_in not in gateway.currencies:
+            raise CurrencyNotAllowed(
+                f"{gateway.label} takes {', '.join(sorted(gateway.currencies))}, not {paying_in}."
+            )
+        recorded = self.deposit(
+            user,
+            amount=amount,
+            method=method,
+            reference=reference,
+            currency=paying_in,
+            description=description,
+        )
+        entry = WalletEntry.objects.select_related("wallet").get(pk=recorded["id"])
+        opened = entry.metadata.get("gateway")
+        if opened or entry.status != str(EntryStatus.PENDING):
+            return {"entry": entry_payload(entry), "redirect": (opened or {}).get("redirect")}
+        payment = _gateway_payment(entry, order_id=gateways.order_number(), base=callback_base)
+        try:
+            started = gateway.start(payment)
+        except WalletError as refusal:
+            # Nothing was opened, so there is nothing to wait for: a pending
+            # entry here would sit in the queue until it expired.
+            self.confirm_from_rail(
+                entry.pk, method_code=method, event=str(EntryStatus.FAILED), reason=str(refusal)
+            )
+            raise
+        redirect = {
+            "url": started.redirect.url,
+            "method": started.redirect.method,
+            "fields": started.redirect.fields,
+        }
+        with transaction.atomic():
+            locked = WalletEntry.objects.select_for_update().get(pk=entry.pk)
+            locked.metadata = {
+                **locked.metadata,
+                "gateway": {
+                    "authority": started.authority,
+                    "order_id": payment.order_id,
+                    "callback_url": payment.callback_url,
+                    "redirect": redirect,
+                },
+            }
+            locked.external_reference = started.authority[:160]
+            locked.save(update_fields=["metadata", "external_reference"])
+        return {"entry": entry_payload(locked), "redirect": redirect}
+
+    def complete_gateway_deposit(
+        self, method: str, entry_id: UUID, params: dict[str, str]
+    ) -> dict[str, Any]:
+        """The customer is back from the gateway: find out, from the gateway, what happened.
+
+        Nothing the return trip carries is believed. It is used to find the
+        entry and it must name the token the gateway gave us for it -- a return
+        trip that does not is somebody guessing, and changes nothing -- and then
+        this server asks the gateway itself, with the merchant's credential,
+        whether the payment went through for the amount recorded. That answer is
+        the only thing that settles a deposit.
+
+        A gateway that cannot be reached leaves the entry ``pending``: money may
+        well have moved, and failing it would be a lie the customer finds out
+        about from their bank statement. It is retried by the next return trip,
+        or expired, or settled by an operator.
+        """
+        gateway = self._gateway(method, offered_only=False)
+        entry = (
+            WalletEntry.objects.select_related("wallet", "payment_method")
+            .filter(pk=_entry_id(entry_id), payment_method__code=method)
+            .first()
+        )
+        opened = entry.metadata.get("gateway") if entry else None
+        if entry is None or not opened:
+            raise WalletNotFound("No such entry.")
+        if entry.status != str(EntryStatus.PENDING):
+            return entry_payload(entry)
+        authority = str(opened["authority"])
+        if not gateway.same(gateway.authority_from(params), authority):
+            return entry_payload(entry)
+        payment = _gateway_payment(entry, order_id=int(opened["order_id"]))
+        try:
+            verdict = gateway.verify(payment, authority, params)
+        except GatewayUnavailable:
+            return entry_payload(entry)
+        if not verdict.paid:
+            return self.confirm_from_rail(
+                entry.pk, method_code=method, event=str(EntryStatus.FAILED), reason=verdict.reason
+            )
+        try:
+            return self.confirm_from_rail(
+                entry.pk,
+                method_code=method,
+                event=str(EntryStatus.DONE),
+                external_reference=verdict.reference,
+            )
+        except ApprovalRequired:
+            # Paid, and waiting on a person. Kept on the record so the operator
+            # applying it can see the gateway has already confirmed the money.
+            with transaction.atomic():
+                locked = WalletEntry.objects.select_for_update().get(pk=entry.pk)
+                locked.metadata = {**locked.metadata, "gateway_paid": verdict.reference}
+                locked.save(update_fields=["metadata"])
+            return entry_payload(locked)
+
+    def _gateway(self, method: str, *, offered_only: bool = True) -> gateways.Gateway:
+        gateway = gateways.configured().get(method)
+        if gateway is None:
+            raise MethodNotAllowed(f"{method!r} is not a payment gateway configured here.")
+        if offered_only:
+            self._method(method, str(Direction.CREDIT))
+        return gateway
+
     def set_wallet_status(
         self, wallet_id: UUID, status: str, *, by: Any = None, reason: str = ""
     ) -> dict[str, Any]:
@@ -1888,6 +2038,19 @@ def _payout_ready(entry: WalletEntry) -> bool:
         and entry.status == str(EntryStatus.PENDING)
         and entry.is_cleared
         and entry.payment_method_id is not None
+    )
+
+
+def _gateway_payment(entry: WalletEntry, *, order_id: int, base: str = "") -> gateways.Payment:
+    """The deposit as a gateway is told about it: its gross, in the currency paid."""
+    opened = entry.metadata.get("gateway") or {}
+    return gateways.Payment(
+        entry_id=str(entry.pk),
+        order_id=order_id,
+        amount=entry.gross_amount,
+        currency=entry.currency or entry.wallet.currency,
+        callback_url=opened.get("callback_url") or f"{base.rstrip('/')}/{entry.pk}",
+        description=entry.description,
     )
 
 

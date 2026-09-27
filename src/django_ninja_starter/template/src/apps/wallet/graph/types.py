@@ -388,3 +388,31 @@ def quote_type(row: dict[str, Any]) -> QuoteType:
         requires_approval=row["requires_approval"],
         settles_immediately=row["settles_immediately"],
     )
+
+
+@strawberry.type
+class GatewayType:
+    code: str
+    label: str
+
+
+@strawberry.type
+class GatewayDepositType:
+    """A pending top-up, and where to send the customer to pay it."""
+
+    entry: EntryType
+    redirect_url: str | None
+    redirect_method: str | None
+    redirect_fields: JSON | None = strawberry.field(
+        description="Submit these as a form to `redirectUrl` when the method is POST."
+    )
+
+
+def gateway_deposit_type(row: dict[str, Any]) -> GatewayDepositType:
+    redirect = row.get("redirect") or {}
+    return GatewayDepositType(
+        entry=entry_type(row["entry"]),
+        redirect_url=redirect.get("url"),
+        redirect_method=redirect.get("method"),
+        redirect_fields=redirect.get("fields"),
+    )

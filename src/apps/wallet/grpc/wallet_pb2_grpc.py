@@ -60,6 +60,11 @@ class WalletControllerStub:
                 request_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntriesRequest.SerializeToString,
                 response_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryPage.FromString,
                 _registered_method=True)
+        self.GatewayDeposit = channel.unary_unary(
+                '/config.wallet.WalletController/GatewayDeposit',
+                request_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.GatewayDepositRequest.SerializeToString,
+                response_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.GatewayDepositResult.FromString,
+                _registered_method=True)
         self.GetBalance = channel.unary_unary(
                 '/config.wallet.WalletController/GetBalance',
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
@@ -135,6 +140,12 @@ class WalletControllerServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Entries(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GatewayDeposit(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -221,6 +232,11 @@ def add_WalletControllerServicer_to_server(servicer, server):
                     servicer.Entries,
                     request_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntriesRequest.FromString,
                     response_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryPage.SerializeToString,
+            ),
+            'GatewayDeposit': grpc.unary_unary_rpc_method_handler(
+                    servicer.GatewayDeposit,
+                    request_deserializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.GatewayDepositRequest.FromString,
+                    response_serializer=apps_dot_wallet_dot_grpc_dot_wallet__pb2.GatewayDepositResult.SerializeToString,
             ),
             'GetBalance': grpc.unary_unary_rpc_method_handler(
                     servicer.GetBalance,
@@ -403,6 +419,33 @@ class WalletController:
             '/config.wallet.WalletController/Entries',
             apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntriesRequest.SerializeToString,
             apps_dot_wallet_dot_grpc_dot_wallet__pb2.EntryPage.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GatewayDeposit(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.wallet.WalletController/GatewayDeposit',
+            apps_dot_wallet_dot_grpc_dot_wallet__pb2.GatewayDepositRequest.SerializeToString,
+            apps_dot_wallet_dot_grpc_dot_wallet__pb2.GatewayDepositResult.FromString,
             options,
             channel_credentials,
             insecure,

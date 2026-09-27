@@ -525,6 +525,8 @@ the moment there is something to send to a rail.
 | `GET` | `/api/v1/wallet/entries/{entry_id}` | Bearer | Read one movement |
 | `POST` | `/api/v1/wallet/entries/{entry_id}/cancel` | Bearer | Withdraw it before it lands |
 | `GET` | `/api/v1/wallet/exchange` | Bearer | Convert an amount between currencies |
+| `GET` | `/api/v1/wallet/gateways` | Bearer | The gateways a top-up can go through |
+| `POST` | `/api/v1/wallet/gateways/{method}/deposits` | Bearer | Top up through a hosted gateway |
 | `POST` | `/api/v1/wallet/hooks/{method_code}` | None | A payment rail confirming one movement |
 | `GET` | `/api/v1/wallet/methods` | Bearer | The ways to pay this deployment offers |
 | `GET` | `/api/v1/wallet/methods/{code}` | Bearer | One way to pay, in full |

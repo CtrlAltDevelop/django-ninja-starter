@@ -57,6 +57,7 @@ it, and an id belonging to somebody else's basket is a 404 rather than a 403.
 | `GET` | `/api/v1/shop/orders/{number}` | Bearer | Read one of your orders |
 | `POST` | `/api/v1/shop/orders/{number}/cancel` | Bearer | Cancel an unpaid order |
 | `GET` | `/api/v1/shop/orders/{number}/invoice` | Bearer | Read an order's invoice |
+| `POST` | `/api/v1/shop/orders/{number}/pay` | Bearer | Pay an order from your wallet |
 | `GET` | `/api/v1/shop/products` | None | Search and filter the catalogue |
 | `GET` | `/api/v1/shop/products/{slug}` | None | Read one product |
 | `DELETE` | `/api/v1/shop/products/{slug}/like` | Bearer | Unlike a product |

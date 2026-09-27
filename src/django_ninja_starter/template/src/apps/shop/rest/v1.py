@@ -554,6 +554,23 @@ def read_invoice(request: HttpRequest, number: str) -> dict:
 
 
 @router.post(
+    "/orders/{number}/pay",
+    response=OrderOut,
+    auth=api_auth,
+    summary="Pay an order from your wallet",
+)
+def pay_order(request: HttpRequest, number: str) -> dict:
+    """Take the order's total from the caller's wallet balance and mark it paid.
+
+    The amount is the order's, fixed at checkout; there is nothing to send.
+    Refused with a 400 when the balance does not cover it -- top the wallet up
+    through `/wallet/gateways` first.
+    """
+    with _answers():
+        return _order_out(shop_service.pay_order(request.user, number))
+
+
+@router.post(
     "/orders/{number}/cancel", response=OrderOut, auth=api_auth, summary="Cancel an unpaid order"
 )
 def cancel_order(request: HttpRequest, number: str) -> dict:

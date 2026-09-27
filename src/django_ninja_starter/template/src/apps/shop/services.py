@@ -886,9 +886,9 @@ class ShopService:
     ) -> Order:
         """Atomically turn the caller's cart into an immutable order and payment intent.
 
-        The payment is opened against the ``manual`` provider. Which gateway took
-        the money is the server's to record when it settles, never the shopper's
-        to claim at checkout.
+        The payment is opened against :func:`options.payment_provider`: with
+        ``wallet`` the order is paid from the balance, through :meth:`pay_order`,
+        and nothing else; with ``manual`` an operator settles it by hand.
         """
         # Trimmed exactly as the preview trims it, so a code that previewed as
         # valid is not refused here for a pasted trailing space.
@@ -1003,7 +1003,10 @@ class ShopService:
             if coupon:
                 Coupon.objects.filter(pk=coupon.pk).update(used_count=F("used_count") + 1)
             Payment.objects.create(
-                order=order, provider="manual", amount=total, currency=options.currency()
+                order=order,
+                provider=options.payment_provider(),
+                amount=total,
+                currency=options.currency(),
             )
             # Issued here rather than on payment, because it is the demand for
             # payment: a shopper who has to pay by transfer needs the document
@@ -1064,6 +1067,10 @@ class ShopService:
             )
             if payment is None:
                 raise ShopRefused("This order has no payment waiting to be settled.")
+            if payment.provider == WALLET and provider != WALLET:
+                # Marking it paid without taking the money would hand the goods
+                # over for free; a wallet order is paid by the wallet, only.
+                raise ShopRefused("This order is paid from the customer's wallet, not by hand.")
             for reservation in locked.reservations.filter(released_at__isnull=True):
                 Product.objects.filter(pk=reservation.product_id).update(
                     sales_count=F("sales_count") + reservation.quantity
@@ -1098,6 +1105,47 @@ class ShopService:
                 },
             )
         return locked
+
+    def pay_order(self, user: Any, number: str) -> Order:
+        """Pay one of this account's pending orders from its wallet balance.
+
+        The only way a wallet order becomes paid. The price is the order's, set
+        at checkout under lock; the caller names the order and nothing else, so
+        there is no amount here for anybody to choose. The debit and the
+        settlement share one transaction: the money leaves exactly when the
+        order is paid, or neither happens.
+
+        Retrying is safe. The debit is keyed on the order number, and an order
+        that is already paid is simply returned.
+        """
+        if options.payment_provider() != WALLET:
+            raise ShopRefused("Paying from a wallet is not available here.")
+        from apps.wallet.errors import WalletError
+        from apps.wallet.services import wallet_service
+
+        with transaction.atomic():
+            order = Order.objects.select_for_update().filter(number=number, user=user).first()
+            if order is None:
+                raise ShopNotFound("No such order.")
+            if order.status == OrderStatus.PAID:
+                return order
+            if order.status != OrderStatus.PENDING:
+                raise ShopRefused("Only a pending order can be paid.")
+            if order.total <= 0:
+                return self.settle_order(order, provider=WALLET, actor=user)
+            try:
+                if wallet_service.wallet_for(user).currency != order.currency:
+                    raise ShopRefused(f"This order is in {order.currency} and your wallet is not.")
+                entry = wallet_service.pay(
+                    user,
+                    amount=order.total,
+                    reference=f"shop-order:{order.number}",
+                    description=f"Order {order.number}",
+                    metadata={"order": order.number},
+                )
+            except WalletError as refusal:
+                raise ShopRefused(str(refusal)) from None
+            return self.settle_order(order, reference=str(entry["id"]), provider=WALLET, actor=user)
 
     def reject_payment(self, order: Order, *, reason: str = "", actor: Any = None) -> Order:
         """Record that a payment attempt did not happen, and open another.
@@ -1343,6 +1391,19 @@ class ShopService:
         waiting for, so it is failed rather than left open for somebody to
         settle after the money has gone back out.
         """
+        for paid in order.payments.filter(status=PaymentStatus.SUCCEEDED, provider=WALLET).exclude(
+            provider_reference=""
+        ):
+            # Money taken from the wallet goes back to the wallet, as a refund
+            # entry beside the payment rather than an edit of it.
+            from apps.wallet.services import wallet_service
+
+            wallet_service.reverse(
+                order.user,
+                UUID(paid.provider_reference),
+                reference=f"shop-refund:{paid.pk}",
+                reason=f"Order {order.number} refunded.",
+            )
         order.payments.filter(status=PaymentStatus.SUCCEEDED).update(
             status=PaymentStatus.REFUNDED, updated_at=timezone.now()
         )
@@ -1600,3 +1661,7 @@ class ShopService:
 
 
 shop_service = ShopService()
+
+
+#: The provider a payment taken from the wallet balance is recorded under.
+WALLET = "wallet"

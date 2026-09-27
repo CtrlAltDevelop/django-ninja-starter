@@ -569,6 +569,10 @@ SHOP_CURRENCY = os.getenv("DJANGO_SHOP_CURRENCY", "USD").upper()
 # default: a storefront that publishes whatever is typed into it is a spam
 # target from the first week.
 SHOP_REVIEW_MODERATION = os.getenv("DJANGO_SHOP_REVIEW_MODERATION", "true").lower() == "true"
+# How an order is paid. Empty means `wallet` wherever the wallet app is
+# installed -- orders are paid from the customer's balance, and only that way --
+# and `manual` (settled by an operator in the admin) where it is not.
+SHOP_PAYMENT_PROVIDER = os.getenv("DJANGO_SHOP_PAYMENT_PROVIDER", "")
 SHOP_MAX_ITEM_QUANTITY = int(os.getenv("DJANGO_SHOP_MAX_ITEM_QUANTITY", "99"))
 SHOP_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_PAGE_SIZE", "24"))
 SHOP_MAX_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_MAX_PAGE_SIZE", "100"))
@@ -638,6 +642,46 @@ WALLET_WEBHOOK_SECRETS = {
 # covers the timestamp, so this is what stops a confirmation captured off the
 # wire from being replayed tomorrow.
 WALLET_WEBHOOK_TOLERANCE_SECONDS = int(os.getenv("DJANGO_WALLET_WEBHOOK_TOLERANCE_SECONDS", "300"))
+# Hosted payment gateways a wallet can be topped up through, configured the way
+# sign-in providers are: fill a gateway's keys and it is offered, leave them
+# empty and it does not exist. Each is reached through a payment method (in the
+# admin) whose code is the gateway's key. See `apps.wallet.gateways`.
+_GATEWAY_SANDBOX = os.getenv("DJANGO_WALLET_GATEWAY_SANDBOX", "false").lower() == "true"
+WALLET_GATEWAYS = {
+    "zarinpal": {"merchant_id": os.getenv("ZARINPAL_MERCHANT_ID", "")},
+    "idpay": {"api_key": os.getenv("IDPAY_API_KEY", "")},
+    "zibal": {"merchant": os.getenv("ZIBAL_MERCHANT", "")},
+    "nextpay": {"api_key": os.getenv("NEXTPAY_API_KEY", "")},
+    "payir": {"api_key": os.getenv("PAYIR_API_KEY", "")},
+    "vandar": {"api_key": os.getenv("VANDAR_API_KEY", "")},
+    "saman": {"terminal_id": os.getenv("SAMAN_TERMINAL_ID", "")},
+    "mellat": {
+        "terminal_id": os.getenv("MELLAT_TERMINAL_ID", ""),
+        "username": os.getenv("MELLAT_USERNAME", ""),
+        "password": os.getenv("MELLAT_PASSWORD", ""),
+    },
+    "sadad": {
+        "merchant_id": os.getenv("SADAD_MERCHANT_ID", ""),
+        "terminal_id": os.getenv("SADAD_TERMINAL_ID", ""),
+        "terminal_key": os.getenv("SADAD_TERMINAL_KEY", ""),
+    },
+    "stripe": {"secret_key": os.getenv("STRIPE_SECRET_KEY", "")},
+    "paypal": {
+        "client_id": os.getenv("PAYPAL_CLIENT_ID", ""),
+        "client_secret": os.getenv("PAYPAL_CLIENT_SECRET", ""),
+    },
+}
+# Sandbox applies to the gateways that have one. Zibal and Pay.ir need no
+# credentials in sandbox, so turning this on offers them straight away.
+for _gateway in WALLET_GATEWAYS.values():
+    _gateway["sandbox"] = _GATEWAY_SANDBOX  # type: ignore[assignment]
+# This wallet's public URL prefix, e.g. https://api.example.com/api/wallet. The
+# gateways send customers back under it; empty derives it from the request.
+WALLET_GATEWAY_CALLBACK_URL = os.getenv("DJANGO_WALLET_GATEWAY_CALLBACK_URL", "")
+# The front-end page a customer lands on afterwards, given ?entry=&status=.
+# Empty answers the return trip with the entry as JSON.
+WALLET_GATEWAY_RETURN_URL = os.getenv("DJANGO_WALLET_GATEWAY_RETURN_URL", "")
+WALLET_GATEWAY_TIMEOUT_SECONDS = int(os.getenv("DJANGO_WALLET_GATEWAY_TIMEOUT_SECONDS", "15"))
 # Reading a balance costs one checkpoint row plus every entry written since it,
 # so the archive keeps that second number small. Either trigger is enough: an
 # entry old enough, or enough of them to slow a read down.

@@ -26,12 +26,15 @@ import strawberry
 from strawberry.scalars import JSON
 from strawberry.types import Info
 
+from apps.wallet import gateways
 from apps.wallet.graph.types import (
     BalanceType,
     CheckpointType,
     EntryPageType,
     EntryType,
     ExchangeType,
+    GatewayDepositType,
+    GatewayType,
     MethodType,
     QuoteType,
     RateType,
@@ -41,6 +44,7 @@ from apps.wallet.graph.types import (
     entry_page_type,
     entry_type,
     exchange_type,
+    gateway_deposit_type,
     method_type,
     quote_type,
     rate_type,
@@ -109,6 +113,12 @@ class Query:
         return [
             method_type(row) for row in _run(wallet_service.methods, direction, currency=currency)
         ]
+
+    @strawberry.field(description="The hosted gateways a top-up can go through.")
+    @resolver
+    def wallet_gateways(self, info: Info[Any, Any]) -> list[GatewayType]:
+        _caller(info)
+        return [GatewayType(**row) for row in wallet_service.offered_gateways()]
 
     @strawberry.field(description="One way to pay, in full.")
     @resolver
@@ -242,6 +252,35 @@ class Mutation:
                 external_reference=external_reference,
                 description=description,
                 metadata=metadata,
+            )
+        )
+
+    @strawberry.mutation(
+        description="Top up through a hosted gateway. Answers with the pending entry "
+        "and where to send the customer; the gateway, asked by this server, settles it."
+    )
+    @resolver
+    def wallet_gateway_deposit(
+        self,
+        info: Info[Any, Any],
+        method: str,
+        amount: Decimal,
+        reference: str,
+        currency: str = "",
+        description: str = "",
+    ) -> GatewayDepositType:
+        caller_account = _caller(info)
+        return gateway_deposit_type(
+            _run(
+                lambda: wallet_service.start_gateway_deposit(
+                    caller_account,
+                    method=method,
+                    amount=amount,
+                    reference=reference,
+                    currency=currency,
+                    description=description,
+                    callback_base=gateways.return_base(method),
+                )
             )
         )
 

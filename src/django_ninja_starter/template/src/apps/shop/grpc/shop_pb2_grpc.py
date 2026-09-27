@@ -145,6 +145,11 @@ class ShopControllerStub:
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.FromString,
                 _registered_method=True)
+        self.PayOrder = channel.unary_unary(
+                '/config.shop.ShopController/PayOrder',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderResult.FromString,
+                _registered_method=True)
         self.PreviewCoupon = channel.unary_unary(
                 '/config.shop.ShopController/PreviewCoupon',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CouponPreviewRequest.SerializeToString,
@@ -362,6 +367,12 @@ class ShopControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PayOrder(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def PreviewCoupon(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -570,6 +581,11 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     servicer.Orders,
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.SerializeToString,
+            ),
+            'PayOrder': grpc.unary_unary_rpc_method_handler(
+                    servicer.PayOrder,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderResult.SerializeToString,
             ),
             'PreviewCoupon': grpc.unary_unary_rpc_method_handler(
                     servicer.PreviewCoupon,
@@ -1246,6 +1262,33 @@ class ShopController:
             '/config.shop.ShopController/Orders',
             apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.SerializeToString,
             apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PayOrder(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/PayOrder',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderResult.FromString,
             options,
             channel_credentials,
             insecure,

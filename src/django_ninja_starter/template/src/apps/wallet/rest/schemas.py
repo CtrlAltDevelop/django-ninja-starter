@@ -412,3 +412,35 @@ class RailEventIn(Schema):
 
     reason: str = ""
     """Why it failed, for the record and for whoever asks about it later."""
+
+
+class GatewayOut(Schema):
+    """A hosted gateway this deployment can take a top-up through."""
+
+    code: str
+    """The method code to start a deposit with."""
+    label: str
+
+
+class GatewayDepositIn(Schema):
+    """A top-up through a hosted gateway."""
+
+    amount: Decimal
+    reference: str
+    """Your idempotency key. Retrying returns the same redirect, not a second payment."""
+    currency: str = ""
+    description: str = ""
+
+
+class RedirectOut(Schema):
+    """Where to send the customer. `POST` means submit `fields` as a form to `url`."""
+
+    url: str
+    method: str
+    fields: dict[str, str]
+
+
+class GatewayDepositOut(Schema):
+    entry: EntryOut
+    redirect: RedirectOut | None
+    """Empty once the entry is no longer waiting on the gateway."""

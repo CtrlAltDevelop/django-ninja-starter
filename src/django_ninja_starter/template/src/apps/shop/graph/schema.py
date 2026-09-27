@@ -487,6 +487,16 @@ class Mutation:
             raise _refuse(error) from None
         return order_type(shop_service.order(caller_account, order.number))
 
+    @strawberry.mutation(description="Pay a pending order from the caller's wallet balance.")
+    @resolver
+    def shop_pay_order(self, info: Info[Any, Any], number: str) -> OrderType:
+        caller_account = _caller(info)
+        try:
+            order = shop_service.pay_order(caller_account, number)
+        except (ShopNotFound, ShopRefused) as error:
+            raise _refuse(error) from None
+        return order_type(shop_service.order(caller_account, order.number))
+
     @strawberry.mutation(description="Cancel an unpaid order and put its stock back.")
     @resolver
     def shop_cancel_order(self, info: Info[Any, Any], number: str) -> OrderType:

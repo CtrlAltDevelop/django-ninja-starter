@@ -153,6 +153,35 @@ returns the first entry rather than moving the money twice. That lock needs a
 database that has one: `select_for_update` compiles to nothing on SQLite, so run
 this on PostgreSQL or MySQL before there is real money in it.
 
+## Topping up through a hosted gateway
+
+Zarinpal, IDPay, Zibal, NextPay, Pay.ir, Vandar, Saman (SEP), Mellat
+(Behpardakht), Sadad (Bank Melli), Stripe and PayPal live in `gateways.py`. You
+configure them the way sign-in providers are configured: fill a gateway's keys in
+the environment (`ZARINPAL_MERCHANT_ID`, `STRIPE_SECRET_KEY`, ...; see
+`.env.example`) and it is offered. Leave them empty and it does not exist.
+
+1. Set the keys, and `DJANGO_WALLET_GATEWAY_CALLBACK_URL` to the wallet's public
+   prefix (for example `https://api.example.com/api/v1/wallet`).
+2. In the admin, add a payment method whose **code is the gateway's key**
+   (`zarinpal`), rail `gateway`, and turn deposits on. Fees, limits and approval
+   on that method apply as usual. The Iranian gateways take rials, so price them
+   in `IRR`.
+3. `GET /wallet/gateways` lists what is offered. `POST
+   /wallet/gateways/{code}/deposits` records a `pending` deposit and returns
+   `redirect`. Send the customer there: a link for `GET`, an auto-submitted form of
+   `fields` for `POST` (Mellat).
+4. The gateway sends the customer back to
+   `/wallet/hooks/gateways/{code}/{entry_id}`. Nothing on that trip is believed.
+   It must name the token the gateway gave us, and then this server asks the
+   gateway, with the merchant credential, whether that amount was paid. Only that
+   answer settles the deposit. If the gateway can't be reached, the deposit stays
+   `pending`. `DJANGO_WALLET_GATEWAY_RETURN_URL` is where the customer lands
+   afterwards, with `?entry=&status=`.
+
+`DJANGO_WALLET_GATEWAY_SANDBOX=true` points every gateway that has a sandbox at
+it.
+
 ## The files
 
 | File | What is in it |

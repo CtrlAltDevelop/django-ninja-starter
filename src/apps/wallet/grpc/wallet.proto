@@ -10,6 +10,7 @@ service WalletController {
     rpc Convert(ExchangeRequest) returns (ExchangeResult) {}
     rpc Deposit(DepositRequest) returns (DepositResult) {}
     rpc Entries(EntriesRequest) returns (EntryPage) {}
+    rpc GatewayDeposit(GatewayDepositRequest) returns (GatewayDepositResult) {}
     rpc GetBalance(google.protobuf.Empty) returns (BalanceResult) {}
     rpc GetEntry(EntryRequest) returns (EntryResult) {}
     rpc GetMethod(MethodRequest) returns (MethodResult) {}
@@ -188,6 +189,21 @@ message Fee {
     string minimum = 7;
     string maximum = 8;
     string currency = 9;
+}
+
+message GatewayDepositRequest {
+    string method = 1;
+    string amount = 2;
+    string reference = 3;
+    string currency = 4;
+    string description = 5;
+}
+
+message GatewayDepositResult {
+    Entry entry = 1;
+    string redirect_url = 2;
+    string redirect_method = 3;
+    string redirect_fields = 4;
 }
 
 message Method {

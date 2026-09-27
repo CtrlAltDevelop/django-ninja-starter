@@ -120,3 +120,14 @@ class SignatureInvalid(WalletError):
     """
 
     status = 401
+
+
+class GatewayUnavailable(WalletError):
+    """A payment gateway could not be reached, or answered in a way we cannot read.
+
+    Its own status because it is not the caller's mistake: the request was fine
+    and somebody else's server was not. A 502 tells a client to retry later
+    rather than to change what it sent.
+    """
+
+    status = 502
