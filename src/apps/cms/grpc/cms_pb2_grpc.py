@@ -6,7 +6,7 @@ import warnings
 from apps.cms.grpc import cms_pb2 as apps_dot_cms_dot_grpc_dot_cms__pb2
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

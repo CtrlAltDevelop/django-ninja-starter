@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package config.club;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+service ClubController {
+    rpc Awards(AwardsRequest) returns (AwardList) {}
+    rpc Events(google.protobuf.Empty) returns (EventList) {}
+    rpc GetClub(ClubRequest) returns (ClubResult) {}
+    rpc Join(JoinRequest) returns (JoinResult) {}
+    rpc LeaderboardCall(LeaderboardRequest) returns (Leaderboard) {}
+    rpc Leave(google.protobuf.Empty) returns (LeaveResult) {}
+    rpc Levels(LevelsRequest) returns (LevelList) {}
+    rpc ListClubs(ListClubsRequest) returns (ClubList) {}
+    rpc Missions(google.protobuf.Empty) returns (MissionList) {}
+    rpc MyMembership(google.protobuf.Empty) returns (MembershipResult) {}
+}
+
+message Award {
+    string id = 1;
+    int32 xp = 2;
+    string reason = 3;
+    string reference = 4;
+    string mission_id = 5;
+    google.protobuf.Struct metadata = 6;
+    string created_at = 7;
+}
+
+message AwardList {
+    repeated Award awards = 1;
+    int32 count = 2;
+}
+
+message AwardsRequest {
+    int32 limit = 1;
+    int32 offset = 2;
+}
+
+message Club {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+    string description = 4;
+    string logo = 5;
+    string status = 6;
+    string join_policy = 7;
+    bool is_open = 8;
+    int32 member_count = 9;
+    google.protobuf.Struct metadata = 10;
+    string created_at = 11;
+    repeated Level levels = 12;
+}
+
+message ClubBrief {
+    string id = 1;
+    string name = 2;
+    string slug = 3;
+    string logo = 4;
+}
+
+message ClubList {
+    repeated Club clubs = 1;
+}
+
+message ClubRequest {
+    string slug = 1;
+}
+
+message ClubResult {
+    Club club = 1;
+}
+
+message Event {
+    string key = 1;
+    string label = 2;
+    string description = 3;
+    string value_label = 4;
+    google.protobuf.Struct fields = 5;
+    string source = 6;
+}
+
+message EventList {
+    repeated Event events = 1;
+}
+
+message JoinRequest {
+    string slug = 1;
+}
+
+message JoinResult {
+    Membership membership = 1;
+}
+
+message Leaderboard {
+    repeated Rank ranks = 1;
+}
+
+message LeaderboardRequest {
+    int32 limit = 1;
+}
+
+message LeaveResult {
+    Membership membership = 1;
+}
+
+message Level {
+    string id = 1;
+    int32 position = 2;
+    string name = 3;
+    int32 xp_required = 4;
+    string logo = 5;
+    string perks = 6;
+    google.protobuf.Struct metadata = 7;
+}
+
+message LevelList {
+    repeated Level levels = 1;
+}
+
+message LevelsRequest {
+    string slug = 1;
+}
+
+message ListClubsRequest {
+    int32 limit = 1;
+    int32 offset = 2;
+}
+
+message Membership {
+    string id = 1;
+    ClubBrief club = 2;
+    string status = 3;
+    int32 xp = 4;
+    optional Level level = 5;
+    optional Level next_level = 6;
+    int32 xp_to_next = 7;
+    float progress = 8;
+    string joined_at = 9;
+}
+
+message MembershipResult {
+    Membership membership = 1;
+}
+
+message Mission {
+    string id = 1;
+    string code = 2;
+    string title = 3;
+    string description = 4;
+    string event = 5;
+    google.protobuf.Struct criteria = 6;
+    int32 xp = 7;
+    string repeat = 8;
+    int32 target_count = 9;
+    int32 count = 10;
+    int32 completions = 11;
+    bool completed = 12;
+    bool available = 13;
+    string last_completed_at = 14;
+    string starts_at = 15;
+    string ends_at = 16;
+}
+
+message MissionList {
+    repeated Mission missions = 1;
+}
+
+message Rank {
+    int32 position = 1;
+    string membership_id = 2;
+    string username = 3;
+    int32 xp = 4;
+    optional Level level = 5;
+    bool is_you = 6;
+}
+

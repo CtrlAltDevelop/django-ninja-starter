@@ -368,6 +368,23 @@ class TestReviews:
 
         assert laptop.rating_average == Decimal("4.00")
 
+    def test_a_racing_first_review_becomes_an_update_not_a_500(
+        self, laptop: Product, alice: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other submit wrote its row between this one's lookup and its insert."""
+        from apps.shop.services import shop_service
+
+        Review.objects.create(product=laptop, user=alice, rating=2)
+        real = Review.objects.filter
+        calls = iter([Review.objects.none])
+        monkeypatch.setattr(
+            Review.objects, "filter", lambda *a, **k: next(calls, lambda: real(*a, **k))()
+        )
+
+        shop_service.review_product(alice, laptop.slug, rating=5)
+
+        assert Review.objects.get(product=laptop, user=alice).rating == 5
+
     def test_writing_twice_replaces_rather_than_refuses(
         self, client: Client, laptop: Product, alice: Any
     ) -> None:
@@ -428,7 +445,7 @@ class TestReviews:
         )
         [review] = data(client.get(f"{SHOP}/products/featherbook-14/reviews"))["items"]
 
-        assert review["author"] == "alice"
+        assert review["author"] == "Verified buyer"
         assert "alice@example.test" not in str(review)
 
     def test_my_reviews_are_only_mine(

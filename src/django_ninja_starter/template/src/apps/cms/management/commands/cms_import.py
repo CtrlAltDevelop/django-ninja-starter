@@ -81,6 +81,9 @@ def _page(row: dict[str, Any]) -> Page:
     page.og_description = row.get("og_description", {})
     page.og_image = row.get("og_image", "")
     page.og_url = row.get("og_url", "")
+    page.in_sitemap = row.get("in_sitemap", page.in_sitemap)
+    page.sitemap_changefreq = row.get("sitemap_changefreq", page.sitemap_changefreq)
+    page.sitemap_priority = row.get("sitemap_priority", page.sitemap_priority)
     page.save()
     for section_row in row.get("sections", []):
         _section(page, section_row)

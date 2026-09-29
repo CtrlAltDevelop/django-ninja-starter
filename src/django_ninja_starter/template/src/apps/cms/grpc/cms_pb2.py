@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17\x61pps/cms/grpc/cms.proto\x12\nconfig.cms\x1a\x1bgoogle/protobuf/empty.proto\"n\n\x0c\x43ontentField\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0c\n\x04type\x18\x03 \x01(\t\x12\x10\n\x08multiple\x18\x04 \x01(\x08\x12\x10\n\x08required\x18\x05 \x01(\x08\x12\x12\n\nvalue_json\x18\x06 \x01(\t\"K\n\nMenuDetail\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12#\n\x05items\x18\x03 \x03(\x0b\x32\x14.config.cms.MenuItem\"E\n\x08MenuItem\x12\r\n\x05label\x18\x01 \x01(\t\x12\x0c\n\x04page\x18\x02 \x01(\t\x12\x0b\n\x03url\x18\x03 \x01(\t\x12\x0f\n\x07new_tab\x18\x04 \x01(\x08\"2\n\x08MenuList\x12&\n\x05menus\x18\x01 \x03(\x0b\x32\x17.config.cms.MenuSummary\"-\n\x0bMenuRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\"\'\n\x0bMenuSummary\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\"\x93\x01\n\nPageDetail\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x10\n\x08language\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\"\n\x04meta\x18\x05 \x01(\x0b\x32\x14.config.cms.PageMeta\x12%\n\x08sections\x18\x06 \x03(\x0b\x32\x13.config.cms.Section\"2\n\x08PageList\x12&\n\x05pages\x18\x01 \x03(\x0b\x32\x17.config.cms.PageSummary\"z\n\x08PageMeta\x12\r\n\x05title\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x10\n\x08og_image\x18\x04 \x01(\t\x12\x10\n\x08og_title\x18\x05 \x01(\t\x12\x16\n\x0eog_description\x18\x06 \x01(\t\x12\x0e\n\x06og_url\x18\x07 \x01(\t\">\n\x0bPageRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x0f\n\x07preview\x18\x03 \x01(\t\"Y\n\x0bPageSummary\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\r\n\x05order\x18\x04 \x01(\x05\x12\x12\n\nupdated_at\x18\x05 \x01(\t\" \n\x0cPagesRequest\x12\x10\n\x08language\x18\x01 \x01(\t\"]\n\x07Section\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06shared\x18\x03 \x01(\x08\x12(\n\x06\x66ields\x18\x04 \x03(\x0b\x32\x18.config.cms.ContentField\"\xad\x02\n\x08SiteInfo\x12\x10\n\x08language\x18\x01 \x01(\t\x12\x11\n\tlanguages\x18\x02 \x03(\t\x12\x18\n\x10\x64\x65\x66\x61ult_language\x18\x03 \x01(\t\x12\x0c\n\x04name\x18\x04 \x01(\t\x12\x0f\n\x07tagline\x18\x05 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x06 \x01(\t\x12\x0c\n\x04logo\x18\x08 \x01(\t\x12\x0f\n\x07\x66\x61vicon\x18\t \x01(\t\x12\x10\n\x08og_image\x18\n \x01(\t\x12\x14\n\x0c\x63ontact_json\x18\x0b \x01(\t\x12\x19\n\x11social_links_json\x18\x0c \x01(\t\x12\x12\n\nextra_json\x18\r \x01(\t\x12\x10\n\x08og_title\x18\x0e \x01(\t\x12\x16\n\x0eog_description\x18\x0f \x01(\t\x12\x0e\n\x06og_url\x18\x10 \x01(\t\"\x1f\n\x0bSiteRequest\x12\x10\n\x08language\x18\x01 \x01(\t2\xb6\x02\n\x11\x43ontentController\x12\x39\n\x04Menu\x12\x17.config.cms.MenuRequest\x1a\x16.config.cms.MenuDetail\"\x00\x12\x37\n\x05Menus\x12\x16.google.protobuf.Empty\x1a\x14.config.cms.MenuList\"\x00\x12\x39\n\x04Page\x12\x17.config.cms.PageRequest\x1a\x16.config.cms.PageDetail\"\x00\x12\x39\n\x05Pages\x12\x18.config.cms.PagesRequest\x1a\x14.config.cms.PageList\"\x00\x12\x37\n\x04Site\x12\x17.config.cms.SiteRequest\x1a\x14.config.cms.SiteInfo\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17\x61pps/cms/grpc/cms.proto\x12\nconfig.cms\x1a\x1bgoogle/protobuf/empty.proto\"n\n\x0c\x43ontentField\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0c\n\x04type\x18\x03 \x01(\t\x12\x10\n\x08multiple\x18\x04 \x01(\x08\x12\x10\n\x08required\x18\x05 \x01(\x08\x12\x12\n\nvalue_json\x18\x06 \x01(\t\"F\n\tMenuChild\x12\r\n\x05label\x18\x01 \x01(\t\x12\x0c\n\x04page\x18\x02 \x01(\t\x12\x0b\n\x03url\x18\x03 \x01(\t\x12\x0f\n\x07new_tab\x18\x04 \x01(\x08\"K\n\nMenuDetail\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12#\n\x05items\x18\x03 \x03(\x0b\x32\x14.config.cms.MenuItem\"n\n\x08MenuItem\x12\r\n\x05label\x18\x01 \x01(\t\x12\x0c\n\x04page\x18\x02 \x01(\t\x12\x0b\n\x03url\x18\x03 \x01(\t\x12\x0f\n\x07new_tab\x18\x04 \x01(\x08\x12\'\n\x08\x63hildren\x18\x05 \x03(\x0b\x32\x15.config.cms.MenuChild\"2\n\x08MenuList\x12&\n\x05menus\x18\x01 \x03(\x0b\x32\x17.config.cms.MenuSummary\"-\n\x0bMenuRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\"\'\n\x0bMenuSummary\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\"\xa9\x01\n\nPageDetail\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x10\n\x08language\x18\x03 \x01(\t\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\"\n\x04meta\x18\x05 \x01(\x0b\x32\x14.config.cms.PageMeta\x12%\n\x08sections\x18\x06 \x03(\x0b\x32\x13.config.cms.Section\x12\x14\n\x0cjson_ld_json\x18\x07 \x01(\t\"2\n\x08PageList\x12&\n\x05pages\x18\x01 \x03(\x0b\x32\x17.config.cms.PageSummary\"z\n\x08PageMeta\x12\r\n\x05title\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x10\n\x08og_image\x18\x04 \x01(\t\x12\x10\n\x08og_title\x18\x05 \x01(\t\x12\x16\n\x0eog_description\x18\x06 \x01(\t\x12\x0e\n\x06og_url\x18\x07 \x01(\t\">\n\x0bPageRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08language\x18\x02 \x01(\t\x12\x0f\n\x07preview\x18\x03 \x01(\t\"Y\n\x0bPageSummary\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\r\n\x05title\x18\x03 \x01(\t\x12\r\n\x05order\x18\x04 \x01(\x05\x12\x12\n\nupdated_at\x18\x05 \x01(\t\" \n\x0cPagesRequest\x12\x10\n\x08language\x18\x01 \x01(\t\"m\n\x07Section\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06shared\x18\x03 \x01(\x08\x12(\n\x06\x66ields\x18\x04 \x03(\x0b\x32\x18.config.cms.ContentField\x12\x0e\n\x06parent\x18\x05 \x01(\t\"\xad\x02\n\x08SiteInfo\x12\x10\n\x08language\x18\x01 \x01(\t\x12\x11\n\tlanguages\x18\x02 \x03(\t\x12\x18\n\x10\x64\x65\x66\x61ult_language\x18\x03 \x01(\t\x12\x0c\n\x04name\x18\x04 \x01(\t\x12\x0f\n\x07tagline\x18\x05 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x06 \x01(\t\x12\x0c\n\x04logo\x18\x08 \x01(\t\x12\x0f\n\x07\x66\x61vicon\x18\t \x01(\t\x12\x10\n\x08og_image\x18\n \x01(\t\x12\x14\n\x0c\x63ontact_json\x18\x0b \x01(\t\x12\x19\n\x11social_links_json\x18\x0c \x01(\t\x12\x12\n\nextra_json\x18\r \x01(\t\x12\x10\n\x08og_title\x18\x0e \x01(\t\x12\x16\n\x0eog_description\x18\x0f \x01(\t\x12\x0e\n\x06og_url\x18\x10 \x01(\t\"\x1f\n\x0bSiteRequest\x12\x10\n\x08language\x18\x01 \x01(\t2\xb6\x02\n\x11\x43ontentController\x12\x39\n\x04Menu\x12\x17.config.cms.MenuRequest\x1a\x16.config.cms.MenuDetail\"\x00\x12\x37\n\x05Menus\x12\x16.google.protobuf.Empty\x1a\x14.config.cms.MenuList\"\x00\x12\x39\n\x04Page\x12\x17.config.cms.PageRequest\x1a\x16.config.cms.PageDetail\"\x00\x12\x39\n\x05Pages\x12\x18.config.cms.PagesRequest\x1a\x14.config.cms.PageList\"\x00\x12\x37\n\x04Site\x12\x17.config.cms.SiteRequest\x1a\x14.config.cms.SiteInfo\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,34 +34,36 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_CONTENTFIELD']._serialized_start=68
   _globals['_CONTENTFIELD']._serialized_end=178
-  _globals['_MENUDETAIL']._serialized_start=180
-  _globals['_MENUDETAIL']._serialized_end=255
-  _globals['_MENUITEM']._serialized_start=257
-  _globals['_MENUITEM']._serialized_end=326
-  _globals['_MENULIST']._serialized_start=328
-  _globals['_MENULIST']._serialized_end=378
-  _globals['_MENUREQUEST']._serialized_start=380
-  _globals['_MENUREQUEST']._serialized_end=425
-  _globals['_MENUSUMMARY']._serialized_start=427
-  _globals['_MENUSUMMARY']._serialized_end=466
-  _globals['_PAGEDETAIL']._serialized_start=469
-  _globals['_PAGEDETAIL']._serialized_end=616
-  _globals['_PAGELIST']._serialized_start=618
-  _globals['_PAGELIST']._serialized_end=668
-  _globals['_PAGEMETA']._serialized_start=670
-  _globals['_PAGEMETA']._serialized_end=792
-  _globals['_PAGEREQUEST']._serialized_start=794
-  _globals['_PAGEREQUEST']._serialized_end=856
-  _globals['_PAGESUMMARY']._serialized_start=858
-  _globals['_PAGESUMMARY']._serialized_end=947
-  _globals['_PAGESREQUEST']._serialized_start=949
-  _globals['_PAGESREQUEST']._serialized_end=981
-  _globals['_SECTION']._serialized_start=983
-  _globals['_SECTION']._serialized_end=1076
-  _globals['_SITEINFO']._serialized_start=1079
-  _globals['_SITEINFO']._serialized_end=1380
-  _globals['_SITEREQUEST']._serialized_start=1382
-  _globals['_SITEREQUEST']._serialized_end=1413
-  _globals['_CONTENTCONTROLLER']._serialized_start=1416
-  _globals['_CONTENTCONTROLLER']._serialized_end=1726
+  _globals['_MENUCHILD']._serialized_start=180
+  _globals['_MENUCHILD']._serialized_end=250
+  _globals['_MENUDETAIL']._serialized_start=252
+  _globals['_MENUDETAIL']._serialized_end=327
+  _globals['_MENUITEM']._serialized_start=329
+  _globals['_MENUITEM']._serialized_end=439
+  _globals['_MENULIST']._serialized_start=441
+  _globals['_MENULIST']._serialized_end=491
+  _globals['_MENUREQUEST']._serialized_start=493
+  _globals['_MENUREQUEST']._serialized_end=538
+  _globals['_MENUSUMMARY']._serialized_start=540
+  _globals['_MENUSUMMARY']._serialized_end=579
+  _globals['_PAGEDETAIL']._serialized_start=582
+  _globals['_PAGEDETAIL']._serialized_end=751
+  _globals['_PAGELIST']._serialized_start=753
+  _globals['_PAGELIST']._serialized_end=803
+  _globals['_PAGEMETA']._serialized_start=805
+  _globals['_PAGEMETA']._serialized_end=927
+  _globals['_PAGEREQUEST']._serialized_start=929
+  _globals['_PAGEREQUEST']._serialized_end=991
+  _globals['_PAGESUMMARY']._serialized_start=993
+  _globals['_PAGESUMMARY']._serialized_end=1082
+  _globals['_PAGESREQUEST']._serialized_start=1084
+  _globals['_PAGESREQUEST']._serialized_end=1116
+  _globals['_SECTION']._serialized_start=1118
+  _globals['_SECTION']._serialized_end=1227
+  _globals['_SITEINFO']._serialized_start=1230
+  _globals['_SITEINFO']._serialized_end=1531
+  _globals['_SITEREQUEST']._serialized_start=1533
+  _globals['_SITEREQUEST']._serialized_end=1564
+  _globals['_CONTENTCONTROLLER']._serialized_start=1567
+  _globals['_CONTENTCONTROLLER']._serialized_end=1877
 # @@protoc_insertion_point(module_scope)

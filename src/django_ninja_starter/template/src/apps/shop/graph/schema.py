@@ -287,6 +287,14 @@ class Query:
     def shop_addresses(self, info: Info[Any, Any]) -> list[AddressType]:
         return [address_type(row) for row in shop_service.addresses(_caller(info))]
 
+    @strawberry.field(description="One of your saved delivery addresses.")
+    @resolver
+    def shop_address(self, info: Info[Any, Any], address_id: str) -> AddressType:
+        try:
+            return address_type(shop_service.address(_caller(info), address_id))
+        except ShopNotFound as error:
+            raise _refuse(error) from None
+
     @strawberry.field(
         description=("Every delivery option, costed for your basket where you are signed in.")
     )
@@ -479,31 +487,22 @@ class Mutation:
             raise _refuse(error) from None
         return order_type(shop_service.order(caller_account, order.number))
 
+    @strawberry.mutation(description="Pay a pending order from the caller's wallet balance.")
+    @resolver
+    def shop_pay_order(self, info: Info[Any, Any], number: str) -> OrderType:
+        caller_account = _caller(info)
+        try:
+            order = shop_service.pay_order(caller_account, number)
+        except (ShopNotFound, ShopRefused) as error:
+            raise _refuse(error) from None
+        return order_type(shop_service.order(caller_account, order.number))
+
     @strawberry.mutation(description="Cancel an unpaid order and put its stock back.")
     @resolver
     def shop_cancel_order(self, info: Info[Any, Any], number: str) -> OrderType:
         caller_account = _caller(info)
         try:
             order = shop_service.cancel_order(caller_account, number)
-        except (ShopNotFound, ShopRefused) as error:
-            raise _refuse(error) from None
-        return order_type(shop_service.order(caller_account, order.number))
-
-    @strawberry.mutation(description="Settle a pending order's payment.")
-    @resolver
-    def shop_confirm_payment(
-        self, info: Info[Any, Any], number: str, reference: str = ""
-    ) -> OrderType:
-        """The seam a payment provider's callback is pointed at.
-
-        This starter wires up no gateway -- payments are created against the
-        `manual` provider and settled by somebody in the admin looking at a bank
-        statement. This is what a project points a real callback at once it has
-        one, and it settles the order exactly the way the admin does.
-        """
-        caller_account = _caller(info)
-        try:
-            order = shop_service.confirm_payment(caller_account, number, reference=reference)
         except (ShopNotFound, ShopRefused) as error:
             raise _refuse(error) from None
         return order_type(shop_service.order(caller_account, order.number))

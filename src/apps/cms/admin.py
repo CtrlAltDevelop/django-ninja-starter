@@ -471,16 +471,20 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
             return f"{location} — relative. Set a base URL in the site settings."
         return location
 
-    @admin.action(description="Publish now")
+    @admin.action(description="Publish now", permissions=["change"])
     def publish_now(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
         published = 0
         for page in queryset:
+            # A live page keeps its date: re-running this over a mixed selection
+            # must not move `datePublished` on pages that went out months ago.
+            if page.is_live:
+                continue
             page.publish(at=timezone.now())
             page.save()
             published += 1
         self.message_user(request, f"Published {published} page(s).", messages.SUCCESS)
 
-    @admin.action(description="Move back to draft")
+    @admin.action(description="Move back to draft", permissions=["change"])
     def unpublish(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
         drafted = 0
         for page in queryset:
@@ -489,7 +493,7 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
             drafted += 1
         self.message_user(request, f"Moved {drafted} page(s) back to draft.", messages.WARNING)
 
-    @admin.action(description="Duplicate as a draft")
+    @admin.action(description="Duplicate as a draft", permissions=["change"])
     def duplicate(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
         """Copy the structure, the content and the shared placements.
 
@@ -507,14 +511,14 @@ class PageAdmin(ContentScreenMixin, StructureAdmin):
         if not copied:
             self.message_user(request, "Nothing selected.", messages.INFO)
 
-    @admin.action(description="List in the sitemap")
+    @admin.action(description="List in the sitemap", permissions=["change"])
     def list_in_sitemap(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
         # `update` rather than a loop: nothing on a page validates against this
         # column, and a hundred pages is a hundred `full_clean` calls otherwise.
         listed = queryset.update(in_sitemap=True)
         self.message_user(request, f"Listed {listed} page(s) in the sitemap.", messages.SUCCESS)
 
-    @admin.action(description="Leave out of the sitemap")
+    @admin.action(description="Leave out of the sitemap", permissions=["change"])
     def hide_from_sitemap(self, request: HttpRequest, queryset: QuerySet[Page]) -> None:
         hidden = queryset.update(in_sitemap=False)
         self.message_user(request, f"Left {hidden} page(s) out of the sitemap.", messages.WARNING)
@@ -1072,7 +1076,7 @@ class SiteEventAdmin(ModelAdmin):
             return "Handled" if obj.is_done else "Waiting"
         return "Overdue" if obj.is_overdue() else "Due"
 
-    @admin.action(description="Mark as handled")
+    @admin.action(description="Mark as handled", permissions=["change"])
     def mark_handled(self, request: HttpRequest, queryset: QuerySet[SiteEvent]) -> None:
         """Ticked one at a time, because each has to record which date it settled."""
         handled = 0
@@ -1082,7 +1086,7 @@ class SiteEventAdmin(ModelAdmin):
             handled += 1
         self.message_user(request, f"Marked {handled} event(s) as handled.", messages.SUCCESS)
 
-    @admin.action(description="Reopen")
+    @admin.action(description="Reopen", permissions=["change"])
     def reopen(self, request: HttpRequest, queryset: QuerySet[SiteEvent]) -> None:
         reopened = 0
         for event in queryset:

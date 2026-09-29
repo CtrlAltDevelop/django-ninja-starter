@@ -11,7 +11,8 @@ from typing import Any
 import pytest
 from django.test import Client
 
-from apps.notifications.events import notify_user
+from apps.notifications import events
+from apps.notifications.events import notify_user, notify_users
 from apps.notifications.models import Notification, unread_count
 from apps.notifications.services import MAX_PAGE
 from apps.notifications.tests.conftest import access_token
@@ -392,3 +393,38 @@ def test_every_socket_command_the_documentation_names_actually_exists() -> None:
     implemented = set(NotificationSocket.commands())
 
     assert implemented <= documented, implemented - documented
+
+
+class _BrokenBroker:
+    def publish(self, channel: str, frame: dict[str, Any]) -> None:
+        raise ConnectionError("broker down")
+
+
+def test_a_broker_outage_neither_fails_the_request_nor_drops_notifications(
+    client: Client,
+    for_alice: Notification,
+    alice: Any,
+    bob: Any,
+    monkeypatch: Any,
+    django_capture_on_commit_callbacks: Any,
+) -> None:
+    """The row is committed either way; a missed live push must not become a 500."""
+    monkeypatch.setattr(events, "get_broker", _BrokenBroker)
+
+    with django_capture_on_commit_callbacks(execute=True) as callbacks:
+        assert len(notify_users([alice, bob], "Both of you")) == 2
+        response = client.post(f"{LIST}/{for_alice.pk}/read", **_bearer(alice))
+
+    assert callbacks  # the failing publishes really ran
+    assert Notification.objects.filter(subject="Both of you").count() == 2
+    assert response.status_code == 200
+
+
+def test_count_takes_the_lists_filters(client: Client, alice: Any) -> None:
+    """The number `/count` answers is the length the same filtered list pages through."""
+    notify_user(alice, "Quiet", level="info")
+    notify_user(alice, "Loud", level="warning")
+
+    counted = client.get(f"{LIST}/count?level=warning", **_bearer(alice)).json()["data"]["count"]
+
+    assert counted == len(_rows(client, alice, "?level=warning")) == 1

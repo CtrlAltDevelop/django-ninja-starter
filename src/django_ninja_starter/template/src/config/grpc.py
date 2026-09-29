@@ -16,9 +16,12 @@ from types import ModuleType
 from typing import Any
 
 from django.apps import AppConfig, apps
+from django.conf import settings
 from django_socio_grpc.protobuf import RegistrySingleton
 from django_socio_grpc.request_transformer.grpc_internal_container import GRPCRequestContainer
 from django_socio_grpc.services.app_handler_registry import AppHandlerRegistry
+
+from config.transports import serves
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +82,11 @@ def grpc_app_services(*, serving: bool = True) -> list[tuple[AppConfig, list[typ
             continue
         if serving and not getattr(module, "GRPC_SERVED", True):
             continue
+        # Only when serving: `generateproto` wants every app's document, so that
+        # a deployment which stopped serving an app's gRPC does not start
+        # rewriting its `.proto` to empty.
+        if serving and not serves(config.name, "grpc"):
+            continue
         services = list(getattr(module, "GRPC_SERVICES", ()))
         if services:
             found.append((config, services))
@@ -106,10 +114,17 @@ def grpc_handlers(server: Any) -> None:
     per process, and `generateproto` could not run in the same process either.
     """
     RegistrySingleton.clean_all()
+    serving = server is not None
+    # `DJANGO_GRPC_ENABLED=false` means this deployment does not speak gRPC, so
+    # nothing is registered against the server. It is deliberately not honoured
+    # on the generation pass: `manage.py protos` has to be able to keep the
+    # `.proto` files in step in a project that never serves them.
+    if serving and not settings.GRPC_ENABLED:
+        return
     # `generateproto` calls this with no server: that is the generation pass, and
     # it wants every app's document, not only the ones this deployment serves.
-    for config, services in grpc_app_services(serving=server is not None):
-        if server is not None and not _stubs_compiled(config):
+    for config, services in grpc_app_services(serving=serving):
+        if serving and not _stubs_compiled(config):
             logger.warning(
                 "Skipping gRPC services for %s: no compiled stubs. Run `manage.py protos`.",
                 config.label,

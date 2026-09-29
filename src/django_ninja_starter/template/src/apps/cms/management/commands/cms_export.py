@@ -57,6 +57,11 @@ def _section(section: Section) -> dict[str, Any]:
     }
 
 
+def _decimal(value: Any) -> str | None:
+    """A priority as text, because JSON has no decimal and a float would round it."""
+    return None if value is None else str(value)
+
+
 def _page(page: Page) -> dict[str, Any]:
     return {
         "slug": page.slug,
@@ -70,6 +75,9 @@ def _page(page: Page) -> dict[str, Any]:
         "og_description": page.og_description,
         "og_image": page.og_image,
         "og_url": page.og_url,
+        "in_sitemap": page.in_sitemap,
+        "sitemap_changefreq": page.sitemap_changefreq,
+        "sitemap_priority": _decimal(page.sitemap_priority),
         "sections": [
             _section(section) for section in page.sections.all() if section.parent_id is None
         ],
@@ -129,6 +137,10 @@ def export_content() -> dict[str, Any]:
             "contact": site.contact,
             "social_links": site.social_links,
             "extra": site.extra,
+            "sitemap_enabled": site.sitemap_enabled,
+            "sitemap_base_url": site.sitemap_base_url,
+            "sitemap_changefreq": site.sitemap_changefreq,
+            "sitemap_priority": _decimal(site.sitemap_priority),
         },
         "library": [_section(section) for section in library],
         "pages": [_page(page) for page in pages],

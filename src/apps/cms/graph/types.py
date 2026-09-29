@@ -62,6 +62,7 @@ class PageType:
     status: str
     meta: PageMetaType
     sections: list[SectionType]
+    json_ld: JSON
 
 
 @strawberry.type
@@ -156,6 +157,7 @@ def page_type(page: dict[str, Any]) -> PageType:
             og_url=meta.get("og_url", ""),
         ),
         sections=[section_type(section) for section in page.get("sections", [])],
+        json_ld=page.get("json_ld", {}),
     )
 
 

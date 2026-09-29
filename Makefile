@@ -6,7 +6,7 @@ install:
 # Every optional app turned on, so the checks below see the whole project
 # rather than whatever this developer happens to have in their `.env`. An app
 # left off is an app whose models, admin, migrations and protos nobody checked.
-ALL_APPS = DJANGO_CMS_ENABLED=true DJANGO_NOTIFICATIONS_ENABLED=true DJANGO_SHOP_ENABLED=true
+ALL_APPS = DJANGO_CMS_ENABLED=true DJANGO_NOTIFICATIONS_ENABLED=true DJANGO_SHOP_ENABLED=true DJANGO_SUPPORT_ENABLED=true DJANGO_WALLET_ENABLED=true DJANGO_CLUB_ENABLED=true
 
 check:
 	ruff check --no-cache .
@@ -37,11 +37,19 @@ package:
 run:
 	python3 manage.py runserver
 
-# `runserver` is WSGI and will not serve the notification WebSocket; this will.
+# `runserver` is WSGI and will not serve the WebSockets; this will, and it serves
+# the static files too -- see `config/asgi.py`, which puts in the handler
+# `runserver` would have added.
+#
+# `--reload-include` because uvicorn's reloader watches Python files only: a
+# changed template would otherwise go on serving its old self until somebody
+# restarted by hand, which is a confusing half hour to spend.
+#
 # `config/asgi.py` defaults to production settings, the way a deployment expects.
 serve:
 	DJANGO_SETTINGS_MODULE=config.settings.development \
-		python3 -m uvicorn config.asgi:application --reload --app-dir src
+		python3 -m uvicorn config.asgi:application --reload --app-dir src \
+		--reload-include '*.html' --reload-include '*.js' --reload-include '*.css'
 
 # The gRPC server. `runserver` serves REST and GraphQL; this serves the third
 # door, on DJANGO_GRPC_PORT.

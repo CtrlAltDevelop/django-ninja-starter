@@ -13,9 +13,9 @@ reader to configure and extend it:
 
 1.  ``examples/env.example`` is copied in as the project's ``.env``, which is
     what turns every login method, second factor, social provider and token
-    mode on, along with all three feature apps the template ships -- the CMS,
-    notifications and the shop, whose tables, routes and WebSocket exist only
-    once they are named.
+    mode on, along with all six feature apps the template ships -- the CMS,
+    notifications, the shop, the support desk, the wallet and the club, whose
+    tables, routes and WebSockets exist only once they are named.
 2.  ``manage.py startapi notes`` scaffolds and registers a feature API at v1 and
     again at v2, so the registry entries below are written by the project's own
     command rather than by hand.
@@ -24,8 +24,11 @@ reader to configure and extend it:
     a GraphQL contribution, a set of gRPC actions, and their tests.
 4.  ``manage.py protos`` compiles the notes app's ``.proto`` and its stubs, the
     same command a developer runs after touching a ``@grpc_action``.
-5.  ``manage.py migrate`` leaves a database behind, so ``make run`` in the built
-    project serves the API immediately.
+5.  ``manage.py migrate`` leaves a database behind, so ``make serve`` in the
+    built project serves the API immediately. ``make serve`` rather than ``make
+    run`` because the example enables every feature app, two of which publish a
+    WebSocket -- and ``runserver`` is WSGI, so the live chat desk and the admin's
+    live bell would be the one part of the tour that does not work.
 
 The result is a project a reader could have produced themselves, and the thing
 ``examples/walkthrough.py`` and ``tests/test_example_project.py`` both run

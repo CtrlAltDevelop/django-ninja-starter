@@ -76,6 +76,10 @@ dev = [
   "strawberry-graphql-django>=0.88,<1.0",
   "twine>=6.0",
   "uvicorn>=0.52,<1.0",
+  # uvicorn's own reloader watches Python files only, and refuses
+  # `--reload-include` without this -- so `make serve` would go on serving an
+  # old template until somebody restarted it by hand.
+  "watchfiles>=1.0,<2.0",
   "websockets>=15,<18",
 ]
 

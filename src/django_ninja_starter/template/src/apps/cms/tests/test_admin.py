@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.cms import theme
 from apps.cms.fields import FieldType
@@ -512,7 +513,95 @@ class TestPublishingFromTheAdmin:
         assert "?preview=" in page
 
 
+class TestActionsNeedTheChangePermission:
+    """Seeing the page list is not permission to change what is on the site."""
+
+    @pytest.mark.parametrize(
+        "action", ["publish_now", "unpublish", "duplicate", "list_in_sitemap", "hide_from_sitemap"]
+    )
+    def test_a_view_only_editor_cannot_run_a_page_action(
+        self, client: Client, draft: Page, editor: Any, action: str
+    ) -> None:
+        Page.objects.filter(pk=draft.pk).update(in_sitemap=False)
+        client.force_login(editor)
+
+        client.post(
+            reverse("admin:cms_page_changelist"),
+            {"action": action, "_selected_action": [str(draft.pk)], "index": 0},
+        )
+
+        draft.refresh_from_db()
+        assert draft.is_live is False
+        assert draft.in_sitemap is False
+        assert Page.objects.count() == 1
+
+    @pytest.mark.parametrize("action", ["mark_handled", "reopen"])
+    def test_a_view_only_user_cannot_run_an_event_action(self, client: Client, action: str) -> None:
+        from django.contrib.auth.models import Permission
+
+        from apps.cms.models import SiteEvent, SiteEventKind
+
+        done = action == "reopen"
+        item = SiteEvent.objects.create(
+            name="Renew the domain",
+            kind=SiteEventKind.RENEWAL,
+            happens_on=timezone.localdate() + timezone.timedelta(days=5),
+            is_done=done,
+        )
+        viewer = User.objects.create_user(username="vic", password="x", is_staff=True)
+        viewer.user_permissions.add(
+            Permission.objects.get(codename="view_siteevent", content_type__app_label="cms")
+        )
+        client.force_login(viewer)
+
+        client.post(
+            reverse("admin:cms_siteevent_changelist"),
+            {"action": action, "_selected_action": [str(item.pk)], "index": 0},
+        )
+
+        item.refresh_from_db()
+        assert item.is_done is done
+
+    def test_publishing_again_keeps_a_live_page_s_date(
+        self, client: Client, home: Page, superuser: Any
+    ) -> None:
+        """`datePublished` must not jump forward for a page that went out long ago."""
+        then = timezone.now() - timezone.timedelta(days=90)
+        Page.objects.filter(pk=home.pk).update(published_at=then)
+        client.force_login(superuser)
+
+        client.post(
+            reverse("admin:cms_page_changelist"),
+            {"action": "publish_now", "_selected_action": [str(home.pk)], "index": 0},
+        )
+
+        home.refresh_from_db()
+        assert home.published_at == then
+
+
 class TestDuplication:
+    def test_the_copy_drops_the_canonical_url_and_keeps_the_sitemap_settings(
+        self, home: Page
+    ) -> None:
+        from decimal import Decimal
+
+        from apps.cms.duplication import duplicate_page
+
+        Page.objects.filter(pk=home.pk).update(
+            og_url="https://x.example/pricing",
+            in_sitemap=False,
+            sitemap_changefreq="monthly",
+            sitemap_priority=Decimal("0.3"),
+        )
+        home.refresh_from_db()
+
+        copy = duplicate_page(home)
+
+        assert copy.og_url == ""
+        assert copy.in_sitemap is False
+        assert copy.sitemap_changefreq == "monthly"
+        assert copy.sitemap_priority == Decimal("0.3")
+
     def test_it_copies_structure_and_content_as_a_draft(
         self, client: Client, home_with_footer: Page, superuser: Any
     ) -> None:

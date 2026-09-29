@@ -125,10 +125,252 @@ SCENARIOS = {
 }
 
 
+def support_alone() -> int:
+    """The support app carrying a conversation with no login app installed.
+
+    The one scenario the rest of this file cannot express, because it issues no
+    token: the point is precisely that there is nothing to issue one. A feature
+    app has to work in a project that turned on nothing else, and support is the
+    app with the most ways not to -- a router whose auth comes from the login
+    apps, a socket that resolves a credential, and an optional hand-off to the
+    notification app. All three are behind guards, and this is what proves the
+    guards are guards rather than comments.
+
+    Django's own session login is the only identity available here, so it is the
+    one used: both halves of the app have to accept it.
+    """
+    from django.conf import settings
+    from django.contrib.auth import get_user_model
+
+    assert settings.SUPPORT_ENABLED, "the scenario is support, and support is off"
+
+    password_text = "corr3ct-horse-battery"
+    get_user_model().objects.create_user(username="zoe", password=password_text)
+    client = _client()
+    assert client.login(username="zoe", password=password_text), "session login failed"
+
+    opened = _post(
+        client,
+        "/api/v1/support",
+        {"subject": "Charged twice", "body": "Two charges on one order."},
+    )
+    assert opened.status_code == 201, _why(opened)
+    listed = client.get("/api/v1/support")
+    assert listed.status_code == 200, _why(listed)
+    assert listed.json()["data"]["tickets"], "the ticket just opened is not in the list"
+
+    _assert_the_socket_admits_a_session(client)
+    print("ok")
+    return 0
+
+
+def _assert_the_socket_admits_a_session(client) -> None:  # type: ignore[no-untyped-def]
+    """Drive the ASGI application directly: there is no server to connect to.
+
+    Asserts on the first frame rather than on the accept alone, because a socket
+    that accepts and then cannot name the account is the failure this is looking
+    for -- and it is the failure an ImportError guard that swallowed too much
+    would produce.
+    """
+    import asyncio
+    import json
+
+    from django.conf import settings
+
+    from apps.support.sockets import support_socket
+
+    cookie = client.cookies[settings.SESSION_COOKIE_NAME].value
+    scope = {
+        "type": "websocket",
+        "path": settings.SUPPORT_WS_PATH,
+        "query_string": b"",
+        "headers": [(b"cookie", f"{settings.SESSION_COOKIE_NAME}={cookie}".encode())],
+    }
+    frames: list[dict] = []
+
+    async def drive() -> None:
+        incoming: asyncio.Queue = asyncio.Queue()
+        await incoming.put({"type": "websocket.connect"})
+
+        async def receive():  # type: ignore[no-untyped-def]
+            return await incoming.get()
+
+        async def send(message) -> None:  # type: ignore[no-untyped-def]
+            frames.append(message)
+            if message["type"] == "websocket.send":
+                await incoming.put({"type": "websocket.disconnect", "code": 1000})
+
+        await asyncio.wait_for(support_socket(scope, receive, send), timeout=10)
+
+    asyncio.run(drive())
+
+    kinds = [frame["type"] for frame in frames]
+    assert "websocket.accept" in kinds, f"the handshake was refused: {frames}"
+    said = [json.loads(f["text"]) for f in frames if f["type"] == "websocket.send"]
+    assert said, "the socket accepted and said nothing"
+    assert said[0]["type"] == "ready", said[0]
+    assert said[0]["user"]["username"] == "zoe", said[0]
+
+
+def wallet_alone() -> int:
+    """The wallet moving money with no login app and no other feature app installed.
+
+    Booting is not the claim; the claim is that the app works. The wallet gets
+    the same deeper treatment the support desk does, and for a sharper reason:
+    it is the app where "it installed fine" and "it works" differ by somebody's
+    money. Its router takes its auth from the login apps behind an ImportError
+    guard, and this is what proves that guard is a guard rather than a comment --
+    a bare project has no bearer tokens to offer, so Django's own session login
+    is the only identity there is, and the router has to accept it.
+
+    The whole round trip, because each step is a different way to fail alone: a
+    method configured through the app's own models, a price quoted, money in,
+    money confirmed, and a balance that agrees with the quote to the last place.
+    """
+    from decimal import Decimal
+
+    from django.conf import settings
+    from django.contrib.auth import get_user_model
+
+    assert settings.WALLET_ENABLED, "the scenario is the wallet, and the wallet is off"
+
+    from apps.wallet.catalog import ChargeKind, MethodCurrency, MethodFee, PaymentMethod
+
+    # Configured the way an administrator would, through the app's own models --
+    # there is no other app here to have set anything up.
+    method = PaymentMethod.objects.create(
+        code="card",
+        name="Card",
+        rail="card",
+        is_enabled=True,
+        supports_deposit=True,
+        requires_approval=False,
+    )
+    MethodCurrency.objects.create(method=method, currency=settings.WALLET_CURRENCY)
+    MethodFee.objects.create(
+        method=method, kind=ChargeKind.COMMISSION, percent=Decimal("2.5"), fixed=Decimal("0.30")
+    )
+
+    password_text = "corr3ct-horse-battery"
+    get_user_model().objects.create_user(username="zoe", password=password_text)
+    client = _client()
+    assert client.login(username="zoe", password=password_text), "session login failed"
+
+    opened = client.get("/api/v1/wallet")
+    assert opened.status_code == 200, _why(opened)
+
+    offered = client.get("/api/v1/wallet/methods")
+    assert offered.status_code == 200, _why(offered)
+    assert [row["code"] for row in offered.json()["data"]] == ["card"], offered.json()
+
+    quoted = _post(
+        client,
+        "/api/v1/wallet/quotes",
+        {"method": "card", "direction": "credit", "amount": "100.00"},
+    )
+    assert quoted.status_code == 200, _why(quoted)
+    expected = quoted.json()["data"]["wallet_amount"]
+
+    made = _post(
+        client,
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "100.00", "reference": "alone-1"},
+    )
+    assert made.status_code == 200, _why(made)
+    entry = made.json()["data"]
+    assert entry["status"] == "pending", entry
+
+    # Confirmed the way a real deployment confirms one: signed, as the rail.
+    # The account itself has no way to say this -- that is the whole point of
+    # the hook existing -- so a bare project has to be able to reach it, and
+    # this is the configuration where a missing secret would go unnoticed.
+    refused = _post(client, f"/api/v1/wallet/entries/{entry['id']}/settle", {})
+    assert refused.status_code == 404, _why(refused)
+
+    settled = _confirm_as_the_rail(client, entry["id"])
+    assert settled.status_code == 200, _why(settled)
+    assert settled.json()["data"]["status"] == "done", settled.json()
+
+    balance = client.get("/api/v1/wallet/balance")
+    assert balance.status_code == 200, _why(balance)
+    # The figure quoted before any of this is the figure the wallet now holds.
+    assert balance.json()["data"]["settled"] == expected, (balance.json(), expected)
+
+    print("ok")
+    return 0
+
+
+def _confirm_as_the_rail(client, entry_id: str):  # type: ignore[no-untyped-def]
+    """Post a signed confirmation to the wallet's webhook, as the card rail would."""
+    import json as _json
+
+    from django.conf import settings
+
+    from apps.wallet import hooks
+
+    secret = settings.WALLET_WEBHOOK_SECRETS["card"]
+    body = _json.dumps({"entry_id": str(entry_id), "event": "done"}).encode()
+    return client.post(
+        "/api/v1/wallet/hooks/card",
+        body,
+        content_type="application/json",
+        headers=hooks.headers_for(secret, body),
+    )
+
+
+def admin_page() -> int:
+    """Render the admin front page in whatever configuration this process booted.
+
+    Prints the sidebar groups and dashboard sections it found, as JSON, so the
+    caller can assert that an app contributes its admin exactly when it is
+    installed. The page is *rendered*, not just assembled: a contribution that
+    reverses a URL an uninstalled app owns raises at render and nowhere earlier,
+    which is precisely the failure the old hard-coded template shipped with.
+    """
+    import json
+
+    from django.contrib.auth import get_user_model
+    from django.test import RequestFactory
+
+    from infrastructure.common.adminui import dashboard, sidebar_navigation
+
+    password_text = "corr3ct-horse-battery"
+    admin = get_user_model().objects.create_superuser(
+        username="root", email="root@example.test", password=password_text
+    )
+    client = _client()
+    assert client.login(username="root", password=password_text), "session login failed"
+
+    response = client.get("/admin/")
+    assert response.status_code == 200, _why(response)
+
+    request = RequestFactory().get("/admin/")
+    request.user = admin
+    print(
+        json.dumps(
+            {
+                "groups": [group["title"] for group in sidebar_navigation(request)],
+                "sections": [
+                    section["title"] for section in dashboard(request, {})["admin_sections"]
+                ],
+            }
+        )
+    )
+    print("ok")
+    return 0
+
+
 def main() -> int:
     scenario = sys.argv[1]
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
     _boot()
+
+    if scenario == "support_alone":
+        return support_alone()
+    if scenario == "wallet_alone":
+        return wallet_alone()
+    if scenario == "admin_page":
+        return admin_page()
 
     client, body = SCENARIOS[scenario]()
     assert body["requires_second_factor"] is False, body

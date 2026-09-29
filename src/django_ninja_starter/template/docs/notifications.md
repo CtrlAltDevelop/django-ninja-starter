@@ -18,6 +18,7 @@ guide.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/notifications` | Bearer | List every notification this account can see |
+| `GET` | `/api/v1/notifications/count` | Bearer | Count what matches a filter |
 | `POST` | `/api/v1/notifications/dismiss-all` | Bearer | Empty the tray |
 | `POST` | `/api/v1/notifications/read-all` | Bearer | Mark everything read |
 | `GET` | `/api/v1/notifications/unread-count` | Bearer | Count what is still unread |
@@ -169,6 +170,19 @@ this order:
 | Subprotocol | `Sec-WebSocket-Protocol: bearer, …` | A browser that would rather not put a token in a URL |
 | Header | `Authorization: Bearer …` | A native or server-side client |
 | Cookie | `sessionid=…` | A browser signed in through Django's own login |
+
+Prefer the subprotocol or an `authenticate` frame over `?token=`: a URL ends up
+in proxy and server access logs, and whoever reads those can replay the token
+until it expires. Use the query string only for a short-lived access token.
+
+An open connection re-checks its credential about once a minute. A token that
+was revoked, or an account that was deactivated, is answered with a
+`deauthenticated` frame carrying `"reason": "expired"`, and private delivery
+stops.
+
+Each connection may send `DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE`
+commands a minute (120 by default, zero for no limit); past that a command is
+answered with a `RATE_LIMITED` error. A frame larger than 64 KB is refused.
 
 A subprotocol that is offered is echoed on accept, because a browser that
 offered one and is answered with none closes the connection itself. A handshake
@@ -432,14 +446,23 @@ broadcasts being the case every caller forgets.
 | `NotificationReceipt` | No — read-only | — | `notification`, `user`, `read_at`, `dismissed_at` |
 <!-- /generated:admin -->
 
+Once a notification is saved its `audience` and `recipient` are read-only: it
+was broadcast on creation, so re-addressing it would expose it to people who
+were never told. Receipts cannot be added, edited or deleted.
+
 ## Setup
 
 <!-- generated:settings -->
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
+| `DJANGO_NOTIFICATIONS_ENABLED` | **Yes** | whether this deployment carries notifications at all -- their tables, their routes and their socket. |
+| `DJANGO_NOTIFICATIONS_WS_PATH` | **Yes** | where the live feed is mounted, which a reverse proxy has to be told. |
+| `DJANGO_NOTIFICATIONS_CHANNEL_PREFIX` | **Yes** | what this deployment's broadcast channels are named, so two deployments sharing a Redis do not deliver each other's notifications. |
+| `DJANGO_NOTIFICATIONS_REDIS_URL` | **Yes** | the Redis the broker fans out through. |
 | `DJANGO_NOTIFICATIONS_BROKER` | Recommended | how a notification created in one process reaches sockets held by another. |
 | `DJANGO_NOTIFICATIONS_RETENTION_DAYS` | Optional | how long notifications are kept before `manage.py notifications_prune` deletes them. 0 or more. |
 | `DJANGO_NOTIFICATIONS_SOCKET_BACKLOG` | Optional | how many unread notifications a client is caught up with on connect. Range 0–500. |
+| `DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE` | Optional | how many commands one socket may send a minute; zero turns it off. 0 or more. |
 <!-- /generated:settings -->
 
 ```bash
@@ -507,6 +530,9 @@ rather than off those helpers.
 Note that `on_commit` is what publishes, so a notification created inside a
 transaction that later rolls back is never pushed — a client told about a
 notification it can never fetch is worse than one told a moment later.
+A broker that fails to publish (Redis down) is logged and skipped: the row is
+already saved, so the request still succeeds and `notify_users` still reaches
+everyone on its list; only the live push is lost.
 
 On the other side, the whole client is this:
 

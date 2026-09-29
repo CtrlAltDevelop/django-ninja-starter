@@ -33,11 +33,12 @@ runs the same normaliser the model would, and reports the failure against the
 input it came from.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from apps.cms import uploads
 from apps.cms.fields import (
@@ -325,12 +326,33 @@ def _stored_by_url(previous: Any) -> dict[str, dict[str, Any]]:
     return {value_url(item): item for item in items if isinstance(item, dict) and value_url(item)}
 
 
-def value_from(field: Field, cleaned: dict[str, Any], previous: Any = None) -> Any:
+def _checked(upload: Any, field_type: Any) -> str:
+    """Refuse what :func:`apps.cms.uploads.store` would, without storing anything.
+
+    Stands in for ``store`` while the form validates: the file is only written
+    once every other box has passed, so a bad price beside a good picture does
+    not leave an orphan in storage on every retry.
+    """
+    uploads.check(upload, field_type)
+    return PENDING_UPLOAD
+
+
+#: The address a checked-but-unstored upload holds until :meth:`ContentForm.save`.
+#: Relative, so the URL normaliser accepts it like any stored path.
+PENDING_UPLOAD = "/pending-upload"
+
+
+def value_from(
+    field: Field,
+    cleaned: dict[str, Any],
+    previous: Any = None,
+    store: Callable[[Any, Any], str] = uploads.store,
+) -> Any:
     """Rebuild one content value out of the inputs that were submitted for it.
 
-    Uploads are stored here, because this is the point at which it is known that
-    a file was actually offered for this field -- and :func:`apps.cms.uploads.store`
-    refuses what the type does not take before anything reaches storage.
+    Uploads go through ``store``, because this is the point at which it is known
+    that a file was actually offered for this field. The form validates with a
+    ``store`` that only checks, and calls this again with the real one on save.
     """
     key = field_key(field)
     submitted = cleaned.get(key)
@@ -342,7 +364,7 @@ def value_from(field: Field, cleaned: dict[str, Any], previous: Any = None) -> A
         if field.field_type not in LINE_TYPES:
             return submitted
         addresses = _split(submitted)
-        addresses.extend(uploads.store(item, field.field_type) for item in picked or [])
+        addresses.extend(store(item, field.field_type) for item in picked or [])
         if field.field_type not in ADDRESSABLE:
             return addresses
         known = _stored_by_url(previous)
@@ -354,7 +376,7 @@ def value_from(field: Field, cleaned: dict[str, Any], previous: Any = None) -> A
     if field.field_type in ADDRESSABLE:
         # An upload wins: somebody who picked a file this time round meant the
         # file, whatever the box beside it still says from last time.
-        address = uploads.store(picked, field.field_type) if picked else submitted
+        address = store(picked, field.field_type) if picked else submitted
         if is_empty(address):
             return None
         stored = previous if isinstance(previous, dict) else {}
@@ -423,11 +445,15 @@ class ContentForm(forms.Form):
         """Normalise every value with the model's own rules, and blame the right box."""
         cleaned = super().clean()
         self.values: dict[Field, Any] = {}
+        #: Fields whose value holds an upload, rebuilt with the real store in `save`.
+        self.uploading: set[Field] = set()
         for field in self.content_fields:
             previous = field.values.get(self.language)
             key = field_key(field)
+            if cleaned.get(f"{key}__upload"):
+                self.uploading.add(field)
             try:
-                value = value_from(field, cleaned, previous)
+                value = value_from(field, cleaned, previous, store=_checked)
             except ValidationError as error:
                 # Raised by an upload the type or the size limit refuses, so the
                 # message belongs on the upload button when there is one.
@@ -458,17 +484,35 @@ class ContentForm(forms.Form):
         one that exists and an empty string would render as a blank heading.
         """
         changed = 0
-        for field, value in self.values.items():
-            values = dict(field.values)
-            if value is None:
-                values.pop(self.language, None)
-            else:
-                values[self.language] = value
-            if values != field.values:
-                field.values = values
-                field.save(update_fields=("values", "updated_at"))
-                changed += 1
+        with transaction.atomic():
+            for field, value in self.values.items():
+                changed += self._save_one(field, value)
         return changed
+
+    def _save_one(self, field: Field, value: Any) -> int:
+        # Re-read under a lock: another editor may have saved another language
+        # of this field since the form was built, and writing back the copy
+        # loaded then would erase their translation.
+        current = Field.objects.select_for_update().get(pk=field.pk)
+        if field in self.uploading:
+            previous = current.values.get(self.language)
+            value = normalize_value(
+                field.field_type,
+                value_from(field, self.cleaned_data, previous),
+                multiple=field.multiple,
+                options=field.options,
+            )
+        values = dict(current.values)
+        if value is None:
+            values.pop(self.language, None)
+        else:
+            values[self.language] = value
+        field.values = current.values
+        if values == current.values:
+            return 0
+        field.values = values
+        field.save(update_fields=("values", "updated_at"))
+        return 1
 
 
 #: The site attributes stored as ``{language: text}``, and what to call each on

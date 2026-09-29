@@ -1,15 +1,29 @@
-"""The admin's chrome: that it is themed, and that it shows what it may show."""
+"""The admin's chrome: that it is themed, assembled from the apps, and filtered.
+
+The sidebar and the front page are both built by walking the installed apps for
+an ``adminui`` module -- see :mod:`infrastructure.common.adminui`. So the tests
+here are about the *assembly*: that an app which is installed contributes, that
+one which is not leaves nothing behind, that same-titled groups merge rather than
+appearing twice, and that a reader is never offered a card or a link they cannot
+follow.
+"""
 
 from typing import Any
 
 import pytest
+from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
 
-from infrastructure.common.adminui import dashboard, environment_badge, sidebar_navigation
+from infrastructure.common.adminui import (
+    contributions,
+    dashboard,
+    environment_badge,
+    sidebar_navigation,
+)
 
 User = get_user_model()
 
@@ -73,10 +87,20 @@ def editor(db: None) -> Any:
     return user
 
 
-def _navigation(user: Any) -> list[dict[str, Any]]:
+def _request(user: Any) -> Any:
     request = RequestFactory().get("/admin/")
     request.user = user
-    return sidebar_navigation(request)
+    return request
+
+
+def _navigation(user: Any) -> list[Any]:
+    return sidebar_navigation(_request(user))
+
+
+def _sections(user: Any) -> dict[str, Any]:
+    """The front page's sections, by title."""
+    context = dashboard(_request(user), {})
+    return {section["title"]: section for section in context["admin_sections"]}
 
 
 def _titles(groups: list[dict[str, Any]]) -> set[str]:
@@ -124,27 +148,58 @@ class TestSidebar:
                 assert str(item["link"]).startswith("/")
 
 
+class TestAssembly:
+    def test_each_installed_app_may_contribute_its_own_navigation(self) -> None:
+        """The point of the protocol: an app carries its own admin, or none."""
+        labels = {label for _, label, _ in contributions("navigation")}
+
+        assert "accounts" in labels
+        if apps.is_installed("apps.cms"):
+            assert "cms" in labels
+        if apps.is_installed("apps.support"):
+            assert "support" in labels
+
+    def test_an_app_that_is_not_installed_contributes_nothing(self) -> None:
+        labels = {label for _, label, _ in contributions("dashboard")}
+
+        for app, label in (("apps.cms", "cms"), ("apps.shop", "shop")):
+            if not apps.is_installed(app):
+                assert label not in labels
+
+    def test_groups_with_one_title_are_merged_rather_than_repeated(self, superuser: Any) -> None:
+        """Several apps fill People and Audit; two headings would read as a bug."""
+        titles = [group["title"] for group in _navigation(superuser)]
+
+        assert len(titles) == len(set(titles))
+
+    def test_a_group_nobody_may_follow_is_not_shown_at_all(self, editor: Any) -> None:
+        """An empty heading reads as something broken, not as something absent."""
+        for group in _navigation(editor):
+            assert group["items"]
+
+
 class TestDashboard:
     def test_it_counts_the_content_a_superuser_may_see(self, superuser: Any, home: Any) -> None:
-        request = RequestFactory().get("/admin/")
-        request.user = superuser
+        sections = _sections(superuser)
 
-        context = dashboard(request, {})
+        content = {card["label"]: card["value"] for card in sections["Content"]["cards"]}
+        people = {card["label"]: card["value"] for card in sections["People"]["cards"]}
 
-        assert context["content_numbers"]["pages"] == 1
-        assert context["content_numbers"]["drafts"] == 0
-        assert context["content_numbers"]["fields"] == 3
-        assert context["account_numbers"]["total"] == 1
+        assert content["Published pages"] == 1
+        assert content["Content fields"] == 3
+        assert people["Accounts"] == 1
 
     def test_an_editor_gets_content_and_not_accounts(self, editor: Any, home: Any) -> None:
         """Half a dashboard beats a row of cards that answer 403."""
-        request = RequestFactory().get("/admin/")
-        request.user = editor
+        sections = _sections(editor)
 
-        context = dashboard(request, {})
+        assert "Content" in sections
+        assert "People" not in sections
 
-        assert context["content_numbers"] is not None
-        assert context["account_numbers"] is None
+    def test_a_section_with_nothing_to_say_is_left_out(self, editor: Any, home: Any) -> None:
+        """An app contributes cards or nothing; an empty heading is neither."""
+        for section in _sections(editor).values():
+            assert section.get("cards") or section.get("panels")
 
     def test_the_front_page_renders_those_numbers(
         self, client: Client, superuser: Any, home: Any
@@ -155,3 +210,5 @@ class TestDashboard:
 
         assert "Translation coverage" in page
         assert "Required, still empty" in page
+        # The section heading the template draws from the contribution itself.
+        assert "Content" in page

@@ -70,11 +70,14 @@ async def read_page(
 ) -> dict:
     """The whole page: metadata, sections -- its own and shared -- and every field.
 
-    A draft is a 404 unless ``?preview=`` carries a token that names this page.
+    A draft is a 404 unless ``?preview=`` -- or an ``X-Preview-Token`` header,
+    which stays out of access logs and Referer -- carries a token that names
+    this page.
     """
+    token = preview or request.headers.get("X-Preview-Token") or None
     try:
         return await content_service.page(
-            page_name, resolve_language(request, language), preview=preview
+            page_name, resolve_language(request, language), preview=token
         )
     except ContentNotFound as missing:
         raise HttpError(404, str(missing)) from None
@@ -87,15 +90,20 @@ async def read_page(
     # JSON. It returns an `HttpResponse`, which Django Ninja sends untouched --
     # so it never reaches the renderer, and the envelope every other endpoint is
     # wrapped in is neither applied nor claimed.
+    # Integer keys, not "200"/"404": Django Ninja builds its own responses map
+    # keyed by `int` and deep-merges this one into it, so a string key does not
+    # overwrite the default entry -- it sits beside it, and `json.dumps` writes
+    # `"200"` twice. Swagger UI parses the document as YAML, where a duplicated
+    # mapping key is fatal, and the page renders "Parser error" instead of the API.
     openapi_extra={
         "responses": {
-            "200": {
+            200: {
                 "description": "A sitemaps.org 0.9 document listing every live page.",
                 "content": {
                     CONTENT_TYPE: {"schema": {"type": "string", "xml": {"name": "urlset"}}}
                 },
             },
-            "404": {"description": "This installation publishes no sitemap."},
+            404: {"description": "This installation publishes no sitemap."},
         }
     },
 )

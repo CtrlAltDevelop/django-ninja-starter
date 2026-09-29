@@ -92,6 +92,21 @@ DELETE /api/v1/auth/token/sessions/{session_id}
 Only one mode's router is mounted, so a client never has to know which. Switching
 modes changes what a deployment stores, not what its clients parse.
 
+### CSRF
+
+A bearer token is not an ambient credential -- a browser never attaches one on
+its own -- so a request it authenticates cannot be forged from another site and
+needs no CSRF token. REST and GraphQL both take one without asking for anything
+else, which is what lets a mobile app, a SPA or `curl` post to `/graphql`.
+
+The session cookie is the opposite: the browser sends it with every request,
+wherever the request came from. So in the `none` mode, where the session *is*
+the credential, a write to REST or to `/graphql` has to carry Django's CSRF
+token -- the `csrftoken` cookie echoed in an `X-CSRFToken` header -- or it is
+refused with `403`. Reads are never checked. The same rule is applied by one
+helper, `infrastructure.common.identity.session_csrf_failure`, on both
+transports, so they cannot drift apart.
+
 The mode's app has to be installed, which `DJANGO_OAUTH_MODE` controls. Asking for
 `rotation` without it is a startup error, not a mystery at first login:
 

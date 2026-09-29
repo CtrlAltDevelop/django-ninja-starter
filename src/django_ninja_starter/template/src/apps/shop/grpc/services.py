@@ -1085,6 +1085,25 @@ class ShopService(generics.GenericService):
 
     @grpc_action(
         request=[{"name": "number", "type": "string"}],
+        request_name="PayOrderRequest",
+        response=[{"name": "order", "type": Order}],
+        response_name="PayOrderResult",
+    )
+    @action
+    async def PayOrder(self, request: Any, context: Any) -> Any:
+        """Pay a pending order from the caller's wallet balance."""
+        user = require_caller(await grpc_caller(context))
+        try:
+            order = await sync_to_async(shop_service.pay_order)(user, request.number)
+            row = await sync_to_async(shop_service.order)(user, order.number)
+        except ShopNotFound as error:
+            raise _missing(error) from None
+        except ShopRefused as error:
+            raise _refused(error) from None
+        return _pb2().PayOrderResult(order=_order(row))
+
+    @grpc_action(
+        request=[{"name": "number", "type": "string"}],
         request_name="CancelOrderRequest",
         response=[{"name": "order", "type": Order}],
         response_name="CancelOrderResult",
@@ -1101,36 +1120,6 @@ class ShopService(generics.GenericService):
         except ShopRefused as error:
             raise _refused(error) from None
         return _pb2().CancelOrderResult(order=_order(row))
-
-    @grpc_action(
-        request=[
-            {"name": "number", "type": "string"},
-            {"name": "reference", "type": "string"},
-        ],
-        request_name="ConfirmPaymentRequest",
-        response=[{"name": "order", "type": Order}],
-        response_name="ConfirmPaymentResult",
-    )
-    @action
-    async def ConfirmPayment(self, request: Any, context: Any) -> Any:
-        """The seam a payment provider's callback is pointed at.
-
-        This starter wires up no gateway -- payments are created against the
-        `manual` provider and settled by somebody in the admin looking at a bank
-        statement. This is what a project points a real callback at once it has
-        one, and it settles the order exactly the way the admin does.
-        """
-        user = require_caller(await grpc_caller(context))
-        try:
-            order = await sync_to_async(shop_service.confirm_payment)(
-                user, request.number, reference=request.reference
-            )
-            row = await sync_to_async(shop_service.order)(user, order.number)
-        except ShopNotFound as error:
-            raise _missing(error) from None
-        except ShopRefused as error:
-            raise _refused(error) from None
-        return _pb2().ConfirmPaymentResult(order=_order(row))
 
     @grpc_action(
         request=[

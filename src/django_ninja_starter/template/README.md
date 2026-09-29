@@ -45,6 +45,13 @@ top-bar selector to switch between registered API versions, or
 has no selector, so each version is its own page -- `/api/v1/redoc` -- and
 Swagger links across to whichever one its top bar is showing.
 
+> **Not seeing the cms, notifications, shop, support or wallet groups?** They ship turned
+> **off**: a feature app that is not named has no tables, no routes and no admin,
+> and never imports its package. Set `DJANGO_CMS_ENABLED=true`,
+> `DJANGO_NOTIFICATIONS_ENABLED=true`, `DJANGO_SHOP_ENABLED=true`,
+> `DJANGO_SUPPORT_ENABLED=true` or `DJANGO_WALLET_ENABLED=true` in your `.env`,
+> run `make migrate`, and restart.
+
 Signed into the admin as staff, the page authorises itself: it trades that
 session for a bearer token and fills **Authorize** in, because the API reads
 `Authorization` and ignores cookies. The session is left alone, and
@@ -71,10 +78,12 @@ python manage.py startapi reports --api-version v2 --prefix /internal-reports
 
 ```text
 src/
-├── apps/                   # Feature applications: yours, and the three that ship
+├── apps/                   # Feature applications: yours, and the five that ship
 │   ├── cms/                # Pages, sections and typed multilingual content
 │   ├── notifications/      # Stored notifications, a read API, and a WebSocket
-│   └── shop/               # A catalogue, several sellers per product, and orders
+│   ├── shop/               # A catalogue, several sellers per product, and orders
+│   ├── support/            # Live chat and support tickets, over four transports
+│   └── wallet/             # A wallet per account, priced payment methods, a derived balance
 ├── infrastructure/
 │   ├── common/             # Project-owned foundation application
 │   ├── accounts/           # The user model and the profile attached to it
@@ -229,12 +238,22 @@ make migrations  # create migrations
 make migrate     # apply migrations
 make superuser   # create an admin user
 make run         # start the development server (WSGI: no WebSocket)
-make serve       # start an ASGI server, which does serve the WebSocket
+make serve       # start an ASGI server: the WebSockets, and static files too
 ```
 
 `make run` is `manage.py runserver`, which is WSGI and will never serve a
 WebSocket — the connection simply never opens. Use `make serve` when
-notifications are enabled; it needs the `asgi` extra that `dev` already pulls in.
+notifications or support are enabled; it needs the `asgi` extra that `dev`
+already pulls in.
+
+`make serve` serves the **static files** as well. `runserver` quietly installs a
+handler that serves `STATIC_URL` from the finders and an ASGI server does not, so
+a project served this way would otherwise load its admin with no stylesheet: the
+pages answer 200 and the CSS answers 404. `config/asgi.py` puts that handler in
+by hand while `DEBUG` is on, and leaves it out otherwise — in production a web
+server or an object store serves what `collectstatic` wrote. Template, CSS and
+JavaScript edits are picked up by the reloader too, which is what `watchfiles`
+in the `asgi` extra is for: uvicorn's own reloader watches Python files only.
 
 ## Configuration
 
@@ -276,6 +295,10 @@ wrapping happens once, at the renderer, and `/api/docs` documents it.
 - `GET /api/<version>/openapi.json` — version-specific OpenAPI schema
 - `WS /ws/notifications` — the notification feed, when notifications are enabled
   and the project is served by `make serve` rather than `make run`
+- `WS /ws/support` — the support desk's live conversations, when support is
+  enabled and the project is served by `make serve`
 - `GET /api/v1/shop/...` — the storefront, when the shop is enabled: the
   catalogue and its sellers read without a credential, the basket and the orders
   with one
+- `GET /api/v1/support/...` — support tickets and live chat, when support is
+  enabled: a client's own conversations, and the desk's queue for staff

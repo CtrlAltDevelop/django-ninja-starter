@@ -43,8 +43,10 @@ redis = ["redis>=5.0,<7.0"]
 totp = ["pyotp>=2.9,<3.0"]
 # An ASGI server and a WebSocket protocol implementation, for the notification
 # socket. `runserver` is WSGI and will not serve it, and uvicorn on its own
-# speaks no WebSocket -- it needs one of these alongside it.
-asgi = ["uvicorn>=0.52,<1.0", "websockets>=15,<18"]
+# speaks no WebSocket -- it needs one of these alongside it. `watchfiles` is what
+# lets `make serve --reload` notice a changed template: uvicorn's own reloader
+# watches Python files and refuses `--reload-include` without it.
+asgi = ["uvicorn>=0.52,<1.0", "watchfiles>=1.0,<2.0", "websockets>=15,<18"]
 all = ["{{ project_name }}[oauth,redis,totp,asgi]"]
 dev = [
   "{{ project_name }}[all]",

@@ -110,7 +110,14 @@ open another.
 GET /api/v1/cms/pages/about-us?preview=ImFib3V0LXVzIg:1x1P3Q:5fKeYc…
 ```
 
-The admin shows the link on the page it belongs to.
+The admin shows the link on the page it belongs to. A link in a URL ends up in
+proxy logs and `Referer` headers, so a client that fetches the page itself can
+send the same token as an `X-Preview-Token` header instead (REST only; GraphQL
+and gRPC take it as the `preview` argument, which travels in the request body
+rather than the URL). Either way it opens only the page it was made for, and not
+a different page that later takes the same address. A token names the page's id
+as well as its slug, so links made before that change stopped working and have
+to be copied again from the admin.
 
 ## Shared sections
 
@@ -214,8 +221,11 @@ production.
 Two things are refused before anything reaches storage:
 
 - **an extension the type does not take.** An image field takes `.avif`, `.gif`,
-  `.jpeg`, `.jpg`, `.png`, `.svg`, `.webp`; video and audio their own lists; a
-  `file` field takes anything, which is what it is for. Checked by extension
+  `.jpeg`, `.jpg`, `.png`, `.webp`; video and audio their own lists; a
+  `file` field takes anything else. Nothing a browser would run is taken by any
+  field — `.html`, `.htm`, `.xhtml`, `.svg`, `.xml`, `.js` — because served from
+  this origin it runs as whoever opens it; link to vector art on a CDN instead.
+  Checked by extension
   rather than by the browser's reported MIME type, because the extension is at
   least the name the file will be served under.
 - **a file over `DJANGO_CMS_MAX_UPLOAD_MB`** (20 by default; `0` means no limit,
@@ -541,8 +551,8 @@ The rest of what the admin gives an editor:
 
 | | |
 | --- | --- |
-| **Publish now** / **Move back to draft** | Actions on the page list |
-| **Duplicate as a draft** | Copies structure, content and placements; never the published state |
+| **Publish now** / **Move back to draft** | Actions on the page list, for superusers only; a page already live keeps its publish date |
+| **Duplicate as a draft** | Copies structure, content, placements and sitemap settings; never the published state or the canonical URL |
 | **Preview** | A clickable signed link, on the page and on its content screen |
 | **Filled in: required, still empty** | A field filter, for the list an editor works from |
 | **Edit content** | On pages *and* on sections, since a shared one has no page to be reached from |
@@ -567,7 +577,8 @@ python manage.py cms_import content.json --prune
 The document holds slugs rather than ids, so it travels between databases. The
 import matches on those slugs and **updates** what it finds, so running it twice
 does nothing the second time and running a staging export against production
-edits the pages that exist rather than replacing the database. Every row goes
+edits the pages that exist rather than replacing the database. Sitemap settings,
+the site's and each page's, travel with the content. Every row goes
 through the models on the way in, so a value of the wrong shape is refused —
 whole, inside one transaction — with the message an editor would have seen.
 `--prune` is the exception that deletes what the document omits, and it is a
@@ -578,11 +589,11 @@ flag because that is not what anybody wants by accident.
 <!-- generated:settings -->
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
-| `DJANGO_CMS_ENABLED` | **Yes** | Installs the app, its migrations, its routes and its admin. Unset, a project carries no CMS at all. |
-| `DJANGO_CMS_LANGUAGES` | Optional | The languages content may be written in, most preferred first. Defaults to `LANGUAGE_CODE`. |
-| `DJANGO_CMS_PREVIEW_TTL_SECONDS` | Optional | How long a preview link opens a draft for. Defaults to a day. |
-| `DJANGO_CMS_UPLOAD_PATH` | Optional | Where a file uploaded on the content screen is written inside `STORAGES["default"]`. Defaults to `cms/uploads`. |
-| `DJANGO_CMS_MAX_UPLOAD_MB` | Optional | The largest file the content screen accepts. Defaults to 20; `0` means no limit, for a deployment whose proxy imposes one already. |
+| `DJANGO_CMS_ENABLED` | **Yes** | whether this deployment carries the CMS at all -- its tables, its routes and its admin. |
+| `DJANGO_CMS_LANGUAGES` | Optional | the languages content may be written in, most preferred first. |
+| `DJANGO_CMS_PREVIEW_TTL_SECONDS` | Optional | how long a preview link opens a draft for. Range 1–2592000. |
+| `DJANGO_CMS_UPLOAD_PATH` | **Yes** | where a file uploaded on the content screen is written inside STORAGES["default"]. |
+| `DJANGO_CMS_MAX_UPLOAD_MB` | Optional | the largest file the content screen accepts, in megabytes. Range 0–1024. |
 <!-- /generated:settings -->
 
 ```bash

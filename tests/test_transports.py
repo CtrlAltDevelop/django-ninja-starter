@@ -55,6 +55,24 @@ def test_the_suite_is_actually_exercising_the_apps() -> None:
     assert len(publishing_apps()) >= 10
 
 
+def test_every_feature_app_is_keyed_in_app_transports() -> None:
+    """A feature app missing from the mapping publishes every transport it has.
+
+    `config.transports.serves` treats an absent app as an infrastructure one, so
+    `DJANGO_<APP>_TRANSPORTS=rest` on an app nobody added here is accepted by
+    the settings and ignored by GraphQL and gRPC -- the quiet failure the setting
+    exists to prevent.
+    """
+    from django.conf import settings
+
+    feature_apps = {config.name for config in publishing_apps() if config.name.startswith("apps.")}
+
+    assert feature_apps, "no feature app is installed, so this proves nothing"
+    assert feature_apps <= settings.APP_TRANSPORTS.keys(), sorted(
+        feature_apps - settings.APP_TRANSPORTS.keys()
+    )
+
+
 def test_an_app_with_rest_routes_also_speaks_graphql_and_grpc(published: AppConfig) -> None:
     path = Path(published.path)
 

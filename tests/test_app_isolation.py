@@ -11,6 +11,7 @@ and worth every second: this is the only place the *shipped* defaults are
 exercised, rather than the test settings that turn everything on.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -35,6 +36,9 @@ BASE_ENV = {
     "DJANGO_AUTH_MAGIC_LINK_BASE_URL": "https://example.test/link",
 }
 METHODS = ["password", "email_code", "sms_code", "magic_link"]
+#: The optional apps, each of which has to install, work and be removable on its
+#: own. Adding an app here is what gives it isolation coverage.
+FEATURE_APPS = ["cms", "club", "notifications", "shop", "support", "wallet"]
 TOKEN_MODES = ["sliding", "session", "rotation"]
 PROVIDERS = {
     "google": {
@@ -86,6 +90,11 @@ def _run(
             "DJANGO_DB_NAME": str(database),
         },
     )
+
+
+def _enabled(app: str) -> str:
+    """The environment variable that turns one feature app on."""
+    return f"DJANGO_{app.upper()}_ENABLED"
 
 
 def _check(environment: dict[str, str], database: Path) -> subprocess.CompletedProcess[str]:
@@ -193,21 +202,250 @@ def test_a_token_mode_can_be_chosen_without_any_oauth_provider(tmp_path: Path) -
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_the_notification_app_installs_with_no_authentication_at_all(tmp_path: Path) -> None:
-    """It is a feature app, not part of the login story.
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_one_feature_app_installs_with_no_authentication_at_all(app: str, tmp_path: Path) -> None:
+    """A feature app is not part of the login story and must not require one.
 
-    Its API asks the project's own bearer auth who the caller is, and its socket
-    asks the same question of a token -- both behind an ImportError guard, so a
-    project that enabled notifications and nothing else has to boot rather than
-    fail on an import of apps it never turned on.
+    Each of these asks the project's own bearer auth who the caller is, and
+    support's socket asks the same question of a token -- all behind an
+    ImportError guard, so a project that enabled one feature app and nothing
+    else has to boot rather than fail importing apps it never turned on.
+
+    Parametrised rather than written out per app, because the interesting case
+    is always the app somebody adds next: a new entry in ``FEATURE_APPS`` is
+    covered by this file the day it is added, rather than the day somebody
+    remembers to copy a test.
     """
-    result = _check({"DJANGO_NOTIFICATIONS_ENABLED": "true"}, tmp_path / "db.sqlite3")
+    result = _check({_enabled(app): "true"}, tmp_path / "db.sqlite3")
 
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_notifications_left_unnamed_cost_no_tables(tmp_path: Path) -> None:
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_feature_app_left_unnamed_costs_no_tables(app: str, tmp_path: Path) -> None:
+    """Deleting the directory has to be as available as never enabling it.
+
+    Which means an app nobody named leaves nothing behind in the schema -- no
+    table, and so nothing to migrate away from later.
+    """
     result = _run(["manage.py", "migrate", "--plan"], {}, tmp_path / "db.sqlite3")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "notifications" not in result.stdout
+    assert app not in result.stdout
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_feature_app_installs_its_own_tables_and_no_others(app: str, tmp_path: Path) -> None:
+    """Turning one on brings one in.
+
+    The cheap failure this catches is a feature app importing another feature
+    app's models at module scope: the project would still boot, and a developer
+    who enabled the shop would quietly get the support desk's tables too.
+    """
+    result = _run(
+        ["manage.py", "migrate", "--plan"], {_enabled(app): "true"}, tmp_path / "db.sqlite3"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert app in result.stdout, f"enabling {app} installed none of its own tables"
+    for other in FEATURE_APPS:
+        if other != app:
+            assert other not in result.stdout, f"enabling {app} dragged in {other}"
+
+
+def test_support_alone_carries_a_conversation(tmp_path: Path) -> None:
+    """Booting is not the claim. The claim is that the app works.
+
+    Support gets this deeper treatment because it is the app with the most ways
+    to fail quietly in a bare project: a router whose auth comes from the login
+    apps, a socket that resolves a credential through them, and an optional
+    hand-off to the notification app. So this opens a ticket over HTTP and then
+    a socket over the same Django session, in a project that installed no login
+    app and no notification app -- the configuration the main suite, which turns
+    everything on, can never reach.
+    """
+    _drive("support_alone", {"DJANGO_SUPPORT_ENABLED": "true"}, tmp_path / "db.sqlite3")
+
+
+def test_the_wallet_alone_moves_money(tmp_path: Path) -> None:
+    """Booting is not the claim here either, and the gap is somebody's money.
+
+    The wallet gets the deeper treatment for a sharper reason than support does:
+    "it installed" and "it works" differ by a balance. Its router takes its auth
+    from the login apps behind an ImportError guard, and a bare project has no
+    bearer tokens to offer -- so Django's own session is the only identity there
+    is, and the router has to accept it.
+
+    The whole round trip, because each step fails differently alone: a method
+    configured through the app's own models, a price quoted, money in, money
+    confirmed by the rail over its signed webhook, and a balance that agrees
+    with the quote to the last place.
+
+    The webhook is the part this test earns its keep on. It is the only way a
+    movement can settle, it is the one endpoint in the app that is not
+    authenticated as an account, and a bare project is exactly where a mount
+    that quietly did not happen would go unnoticed -- the account's own settle
+    call is asserted to be a 404 in the same breath, so "nothing settles" cannot
+    pass for "the hook works".
+    """
+    _drive(
+        "wallet_alone",
+        {
+            "DJANGO_WALLET_ENABLED": "true",
+            "DJANGO_WALLET_WEBHOOK_SECRETS": "card:isolation-rail-secret",
+        },
+        tmp_path / "db.sqlite3",
+    )
+
+
+def test_an_unknown_wallet_rail_is_refused_at_startup(tmp_path: Path) -> None:
+    """A misspelt rail is not a narrower wallet, it is a wallet with no rails.
+
+    `enabled_methods` intersects the list with the rails the app knows, so
+    `card,crd` quietly means `card` and `crd` alone means nothing can be paid at
+    all. The spelling that works is checked in the same breath, so a rule that
+    refused everything could not pass for one that refuses typos.
+    """
+    wallet = {"DJANGO_WALLET_ENABLED": "true"}
+    misspelt = _check({**wallet, "DJANGO_WALLET_METHODS": "card,crd"}, tmp_path / "db.sqlite3")
+    spelt = _check({**wallet, "DJANGO_WALLET_METHODS": "card,crypto"}, tmp_path / "db.sqlite3")
+
+    assert misspelt.returncode != 0
+    assert "WALLET_METHODS names a rail" in misspelt.stdout + misspelt.stderr
+    assert spelt.returncode == 0, spelt.stdout + spelt.stderr
+
+
+# -- transports ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_an_app_can_be_installed_for_one_transport_only(app: str, tmp_path: Path) -> None:
+    """Enabling an app should not oblige a deployment to serve all four of them.
+
+    The narrowest configuration is the one worth checking, because it is the one
+    where a surface that ignored the setting would still be up: REST only, on an
+    app that also speaks GraphQL, gRPC and -- for two of them -- a socket.
+
+    Passing `check` is not the claim. The claim is that the other doors are shut,
+    so the GraphQL and gRPC registries are asked directly whether the app is in
+    them: an app the settings forgot to key reads as infrastructure there, and
+    publishes everything while `check` stays green.
+    """
+    environment = {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest"}
+    result = _check(environment, tmp_path / "db.sqlite3")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    script = (
+        "import json, django; django.setup();"
+        "from config.graph import graph_contributions;"
+        "from config.grpc import grpc_app_services;"
+        "graph = {label for kind in ('Query', 'Mutation')"
+        " for label, _ in graph_contributions(kind)};"
+        "grpc = {config.label for config, _ in grpc_app_services()};"
+        "print(json.dumps({'graph': sorted(graph), 'grpc': sorted(grpc)}))"
+    )
+    served = _run(["-c", script], environment, tmp_path / "db.sqlite3")
+
+    assert served.returncode == 0, served.stdout + served.stderr
+    published = json.loads(served.stdout.splitlines()[-1])
+    assert app not in published["graph"], f"{app} still publishes GraphQL: {published}"
+    assert app not in published["grpc"], f"{app} still publishes gRPC: {published}"
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_transport_the_app_does_not_speak_is_refused_at_startup(app: str, tmp_path: Path) -> None:
+    """Ignored would be worse than refused.
+
+    A deployment that asked for a transport it does not get, and was not told,
+    finds out from a client that cannot reach it.
+    """
+    result = _check(
+        {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest,telepathy"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode != 0
+    assert "telepathy" in result.stdout + result.stderr
+
+
+def test_a_socket_is_refused_for_an_app_that_has_none(tmp_path: Path) -> None:
+    """`ws` on the CMS means somebody believes the CMS has a socket. Say so."""
+    result = _check(
+        {"DJANGO_CMS_ENABLED": "true", "DJANGO_CMS_TRANSPORTS": "ws"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert result.returncode != 0
+    assert "does not publish" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("app", ["notifications", "support"])
+def test_dropping_ws_unmounts_that_app_socket(app: str, tmp_path: Path) -> None:
+    """The socket is a transport like the others and comes off with the rest."""
+    script = (
+        "import django; django.setup();"
+        "from config.sockets import websocket_routes;"
+        "print(sorted(path for path, _ in websocket_routes()))"
+    )
+    with_ws = _run(["-c", script], {_enabled(app): "true"}, tmp_path / "db.sqlite3")
+    without = _run(
+        ["-c", script],
+        {_enabled(app): "true", f"DJANGO_{app.upper()}_TRANSPORTS": "rest"},
+        tmp_path / "db.sqlite3",
+    )
+
+    assert with_ws.returncode == 0, with_ws.stdout + with_ws.stderr
+    assert without.returncode == 0, without.stdout + without.stderr
+    assert app in with_ws.stdout, with_ws.stdout
+    assert app not in without.stdout, without.stdout
+
+
+# -- the admin -----------------------------------------------------------------
+
+
+def _admin_page(environment: dict[str, str], database: Path) -> dict[str, list[str]]:
+    """Render the admin front page in one configuration and report what it drew."""
+    result = _run([str(DRIVER), "admin_page"], environment, database)
+
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    return json.loads(result.stdout.splitlines()[-2])
+
+
+#: What each feature app calls its own dashboard section, so that the assertion
+#: below is about the app's contribution rather than about a title this file
+#: happens to know. An app with no section belongs here as ``None``.
+ADMIN_SECTIONS = {
+    "cms": "Content",
+    "club": "Club",
+    "notifications": "Notifications",
+    "shop": "Shop",
+    "support": "Support",
+    "wallet": "Wallet",
+}
+
+
+def test_the_admin_front_page_renders_with_nothing_enabled(tmp_path: Path) -> None:
+    """The bare project has an admin too, and it is the configuration most likely
+    to be broken by a dashboard that assumes an app is there."""
+    drawn = _admin_page({}, tmp_path / "db.sqlite3")
+
+    assert "Overview" in drawn["groups"]
+    for section in ADMIN_SECTIONS.values():
+        assert section not in drawn["sections"], section
+
+
+@pytest.mark.parametrize("app", FEATURE_APPS)
+def test_a_feature_app_brings_its_own_admin_and_only_its_own(app: str, tmp_path: Path) -> None:
+    """The point of the contribution protocol, asserted end to end.
+
+    Enabling an app has to be the whole of installing its admin -- no project
+    file edited, no template block added -- and enabling it must not draw a
+    heading belonging to an app this deployment does not have.
+    """
+    drawn = _admin_page({_enabled(app): "true"}, tmp_path / "db.sqlite3")
+
+    assert ADMIN_SECTIONS[app] in drawn["sections"], f"enabling {app} contributed no section"
+    for other, section in ADMIN_SECTIONS.items():
+        if other != app:
+            assert section not in drawn["sections"], f"enabling {app} drew {other}'s section"

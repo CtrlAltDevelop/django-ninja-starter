@@ -22,7 +22,12 @@ from apps.notifications.graph.types import (
     ReadType,
     notification_type,
 )
-from apps.notifications.services import DEFAULT_PAGE, NotificationNotFound, notification_service
+from apps.notifications.services import (
+    DEFAULT_PAGE,
+    NotificationNotFound,
+    notification_service,
+    window,
+)
 from infrastructure.common.errors import ApiError
 from infrastructure.common.graph.errors import require_caller, resolver
 from infrastructure.common.identity import caller
@@ -69,8 +74,8 @@ class Query:
         return NotificationPageType(
             notifications=[notification_type(row) for row in rows],
             total=notification_service.count(user, **filters),
-            limit=limit,
-            offset=offset,
+            limit=window(limit, offset)[0],
+            offset=window(limit, offset)[1],
         )
 
     @strawberry.field(description="One notification by id, dismissed or not.")
@@ -88,6 +93,24 @@ class Query:
     @resolver
     def unread_notification_count(self, info: Info[Any, Any]) -> int:
         return notification_service.unread_count(_caller(info))
+
+    @strawberry.field(description="How many notifications match a filter, without the rows.")
+    @resolver
+    def notification_count(
+        self,
+        info: Info[Any, Any],
+        unread: bool | None = None,
+        level: str | None = None,
+        audience: str | None = None,
+        include_dismissed: bool = False,
+    ) -> int:
+        return notification_service.count(
+            _caller(info),
+            unread=unread,
+            level=level,
+            audience=audience,
+            include_dismissed=include_dismissed,
+        )
 
 
 @strawberry.type

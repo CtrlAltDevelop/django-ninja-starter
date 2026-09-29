@@ -37,6 +37,21 @@ def currency() -> str:
     return str(_setting("SHOP_CURRENCY", DEFAULT_CURRENCY)).upper()
 
 
+def payment_provider() -> str:
+    """What a new order is paid through: ``wallet`` or ``manual``.
+
+    ``wallet`` -- the default wherever the wallet app is installed -- means an
+    order is paid from the customer's balance and nothing else can mark it
+    paid. ``manual`` is the operator settling it in the admin by hand.
+    """
+    from infrastructure.common.app_labels import app_installed
+
+    chosen = str(_setting("SHOP_PAYMENT_PROVIDER", "")).lower()
+    if chosen == "manual" or not app_installed("wallet"):
+        return "manual"
+    return "wallet"
+
+
 def review_moderation() -> bool:
     """Whether a review is held for a moderator before anybody else can read it.
 

@@ -36,7 +36,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
 
@@ -282,28 +282,36 @@ def restore(user: Any, notification: Notification) -> bool:
 def _apply_to_all(user: Any, queryset: Any, **state: Any) -> int:
     """Apply one state change across a whole queryset in two round trips.
 
-    Written as a bulk update of the receipts that exist plus a bulk insert of the
-    ones that do not, rather than a loop, so catching up on a long-neglected
-    inbox does not cost a query per row. ``ignore_conflicts`` covers the race
-    where a receipt lands between the two.
+    Written as a bulk insert of the receipts that do not exist yet plus a bulk
+    update, rather than a loop, so catching up on a long-neglected inbox does not
+    cost a query per row. Inserting first, then updating every receipt, means a
+    receipt that lands concurrently -- and makes ``ignore_conflicts`` drop our
+    insert -- is still updated. ``read_at`` only fills a gap: a notification read
+    last week keeps the moment it was read.
     """
     identifiers = list(queryset.values_list("id", flat=True))
     if not identifiers:
         return 0
-    existing = set(
-        NotificationReceipt.objects.filter(notification_id__in=identifiers, user=user).values_list(
-            "notification_id", flat=True
+    with transaction.atomic():
+        existing = set(
+            NotificationReceipt.objects.filter(
+                notification_id__in=identifiers, user=user
+            ).values_list("notification_id", flat=True)
         )
-    )
-    if existing:
-        NotificationReceipt.objects.filter(notification_id__in=existing, user=user).update(**state)
-    missing = [
-        NotificationReceipt(notification_id=identifier, user=user, **state)
-        for identifier in identifiers
-        if identifier not in existing
-    ]
-    if missing:
-        NotificationReceipt.objects.bulk_create(missing, ignore_conflicts=True)
+        NotificationReceipt.objects.bulk_create(
+            [
+                NotificationReceipt(notification_id=identifier, user=user, **state)
+                for identifier in identifiers
+                if identifier not in existing
+            ],
+            ignore_conflicts=True,
+        )
+        receipts = NotificationReceipt.objects.filter(notification_id__in=identifiers, user=user)
+        read_at = state.pop("read_at", None)
+        if read_at is not None:
+            receipts.filter(read_at__isnull=True).update(read_at=read_at)
+        if state:
+            receipts.update(**state)
     return len(identifiers)
 
 
@@ -332,8 +340,9 @@ def prune(older_than: Any) -> int:
     no archive, because a notification nobody has looked at in months is not
     worth the storage of pretending it might be.
     """
-    deleted, _ = Notification.objects.filter(created_at__lt=older_than).delete()
-    return deleted
+    _, per_model = Notification.objects.filter(created_at__lt=older_than).delete()
+    # Notifications only: the total `delete()` returns counts the cascaded receipts too.
+    return per_model.get(Notification._meta.label, 0)
 
 
 def receipts_for(

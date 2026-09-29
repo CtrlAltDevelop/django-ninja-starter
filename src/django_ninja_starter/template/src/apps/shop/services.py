@@ -29,12 +29,12 @@ from typing import Any
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, F, Q, QuerySet, Value
 from django.db.models.functions import Greatest
 from django.utils import timezone
 
-from apps.shop import options
+from apps.shop import options, signals
 from apps.shop.attributes import AttributeType, normalize_value
 from apps.shop.models import (
     RESTOCKING_STATUSES,
@@ -541,12 +541,17 @@ class ShopService:
         product = Product.objects.live().filter(slug=slug).first()
         if product is None:
             raise ShopNotFound("No such product.")
+        # Through the same ceiling every other listing goes through. This route
+        # is public and prices every row it returns, so a `limit` taken at its
+        # word is an unauthenticated request for as much work as the caller
+        # cares to name.
+        size, _ = options.bounded_page(limit, 0)
         siblings = list(
             listed_products()
             .live()
             .filter(category_id=product.category_id)
             .exclude(pk=product.pk)
-            .order_by("-rating_average", "-sales_count")[: max(1, limit)]
+            .order_by("-rating_average", "-sales_count")[:size]
         )
         discounts = running_discounts()
         branches = reach(discounts)
@@ -563,7 +568,9 @@ class ShopService:
         """The published reviews of one product, newest first, with the total."""
         product = self._product_row(slug)
         published = (
-            Review.objects.filter(product=product).published().select_related("user", "product")
+            Review.objects.filter(product=product)
+            .published()
+            .select_related("user__profile", "product")
         )
         size, start = options.bounded_page(limit, offset)
         return {
@@ -588,18 +595,37 @@ class ShopService:
         """
         product = self._product_row(slug)
         status = ReviewStatus.PENDING if options.review_moderation() else ReviewStatus.APPROVED
-        review = Review.objects.filter(product=product, user=user).first() or Review(
-            product=product, user=user
-        )
-        review.rating = rating
-        review.title = title
-        review.body = body
-        review.status = status
-        try:
-            review.save()
-        except ValidationError as invalid:
-            raise ShopRefused("; ".join(invalid.messages)) from None
+        # Twice at most: a double-submit can race past the lookup, and the loser
+        # of the one-review-per-account constraint becomes an update instead.
+        for attempt in range(2):
+            review = Review.objects.filter(product=product, user=user).first() or Review(
+                product=product, user=user
+            )
+            review.rating = rating
+            review.title = title
+            review.body = body
+            review.status = status
+            try:
+                with transaction.atomic():
+                    review.save()
+                break
+            except (ValidationError, IntegrityError) as error:
+                if not attempt and review._state.adding:
+                    continue
+                if isinstance(error, ValidationError):
+                    raise ShopRefused("; ".join(error.messages)) from None
+                raise
         review.refresh_from_db()
+        if review.status == ReviewStatus.APPROVED:
+            signals.announce(
+                signals.review_published,
+                review={
+                    "id": review.pk,
+                    "user_id": review.user_id,
+                    "product_id": review.product_id,
+                    "rating": review.rating,
+                },
+            )
         return review_payload(review)
 
     def delete_review(self, user: Any, slug: str) -> dict[str, Any]:
@@ -621,7 +647,7 @@ class ShopService:
         The one place a pending review is visible, because its author is the one
         person entitled to know it exists.
         """
-        mine = Review.objects.filter(user=user).select_related("product", "user")
+        mine = Review.objects.filter(user=user).select_related("product", "user__profile")
         size, start = options.bounded_page(limit, offset)
         return {
             "items": [review_payload(review) for review in mine[start : start + size]],
@@ -698,10 +724,14 @@ class ShopService:
         offer = self._offer_row(product, variant, offer_id)
         self._check_stock(product, variant, quantity, offer)
         with transaction.atomic():
-            cart = Cart.for_user(user)
-            line = CartItem.objects.filter(
-                cart=cart, product=product, variant=variant, offer=offer
-            ).first()
+            # The basket row, locked: there is no line to lock yet when the item
+            # is new, and two adds racing past the lookup would both insert.
+            cart = Cart.objects.select_for_update().get(pk=Cart.for_user(user).pk)
+            line = (
+                CartItem.objects.select_for_update()
+                .filter(cart=cart, product=product, variant=variant, offer=offer)
+                .first()
+            )
             wanted = (line.quantity if line else 0) + quantity
             ceiling = options.max_item_quantity()
             if wanted > ceiling:
@@ -853,38 +883,65 @@ class ShopService:
         shipping_method_id: UUID | str,
         coupon_code: str = "",
         note: str = "",
-        provider: str = "manual",
     ) -> Order:
-        """Atomically turn the caller's cart into an immutable order and payment intent."""
+        """Atomically turn the caller's cart into an immutable order and payment intent.
+
+        The payment is opened against :func:`options.payment_provider`: with
+        ``wallet`` the order is paid from the balance, through :meth:`pay_order`,
+        and nothing else; with ``manual`` an operator settles it by hand.
+        """
+        # Trimmed exactly as the preview trims it, so a code that previewed as
+        # valid is not refused here for a pasted trailing space.
+        coupon_code = (coupon_code or "").strip()
         with transaction.atomic():
             cart = Cart.objects.select_for_update().filter(user=user).first()
             if cart is None or not cart.items.exists():
                 raise ShopRefused("Your cart is empty.")
-            address = Address.objects.filter(pk=address_id, user=user).first()
-            shipping = ShippingMethod.objects.filter(pk=shipping_method_id, is_active=True).first()
+            # A malformed id is a missing row, exactly as it is everywhere else
+            # in this service, rather than a ValidationError escaping as a 500.
+            try:
+                address = Address.objects.filter(pk=address_id, user=user).first()
+                shipping = ShippingMethod.objects.filter(
+                    pk=shipping_method_id, is_active=True
+                ).first()
+            except (ValueError, ValidationError):
+                address, shipping = None, None
             if address is None or shipping is None:
                 raise ShopNotFound("No such delivery address or shipping method.")
             lines = list(
                 cart.items.select_related("product", "variant", "offer__seller").select_for_update()
             )
+            # Every row this checkout will lock, locked up front, one query per
+            # table and in primary-key order. Locking them line by line follows
+            # the order the basket was filled, so two shoppers holding the same
+            # two products in opposite orders would each wait on the other.
+            products = {
+                row.pk: row
+                for row in Product.objects.select_for_update()
+                .filter(pk__in={line.product_id for line in lines})
+                .order_by("pk")
+            }
+            variants = {
+                row.pk: row
+                for row in ProductVariant.objects.select_for_update()
+                .filter(pk__in={line.variant_id for line in lines if line.variant_id})
+                .order_by("pk")
+            }
+            offers = {
+                row.pk: row
+                for row in ProductOffer.objects.select_for_update()
+                .select_related("seller")
+                .filter(pk__in={line.offer_id for line in lines if line.offer_id})
+                .order_by("pk")
+            }
             discounts, branches = running_discounts(), None
             rows: list[tuple[CartItem, Any, Any]] = []
             subtotal = Decimal("0.00")
             tax_total = Decimal("0.00")
             for line in lines:
-                product = Product.objects.select_for_update().get(pk=line.product_id)
-                variant = (
-                    ProductVariant.objects.select_for_update().get(pk=line.variant_id)
-                    if line.variant_id
-                    else None
-                )
-                offer = (
-                    ProductOffer.objects.select_for_update()
-                    .select_related("seller")
-                    .get(pk=line.offer_id)
-                    if line.offer_id
-                    else None
-                )
+                product = products[line.product_id]
+                variant = variants[line.variant_id] if line.variant_id else None
+                offer = offers[line.offer_id] if line.offer_id else None
                 self._check_still_sold(product, variant, offer, line.quantity)
                 price = price_of(product, variant, discounts, branches, offer)
                 line_total = to_cents(price.amount * line.quantity)
@@ -946,7 +1003,10 @@ class ShopService:
             if coupon:
                 Coupon.objects.filter(pk=coupon.pk).update(used_count=F("used_count") + 1)
             Payment.objects.create(
-                order=order, provider=provider, amount=total, currency=options.currency()
+                order=order,
+                provider=options.payment_provider(),
+                amount=total,
+                currency=options.currency(),
             )
             # Issued here rather than on payment, because it is the demand for
             # payment: a shopper who has to pay by transfer needs the document
@@ -998,6 +1058,8 @@ class ShopService:
         """
         with transaction.atomic():
             locked = Order.objects.select_for_update().get(pk=order.pk)
+            if locked.status == OrderStatus.CANCELLED:
+                raise ShopRefused("This order was cancelled, so it cannot be paid.")
             if locked.status != OrderStatus.PENDING:
                 return locked
             payment = (
@@ -1005,6 +1067,10 @@ class ShopService:
             )
             if payment is None:
                 raise ShopRefused("This order has no payment waiting to be settled.")
+            if payment.provider == WALLET and provider != WALLET:
+                # Marking it paid without taking the money would hand the goods
+                # over for free; a wallet order is paid by the wallet, only.
+                raise ShopRefused("This order is paid from the customer's wallet, not by hand.")
             for reservation in locked.reservations.filter(released_at__isnull=True):
                 Product.objects.filter(pk=reservation.product_id).update(
                     sales_count=F("sales_count") + reservation.quantity
@@ -1027,9 +1093,61 @@ class ShopService:
                 note=f"Paid via {payment.provider}.",
                 actor=actor,
             )
+            signals.announce(
+                signals.order_paid,
+                order={
+                    "id": locked.pk,
+                    "number": locked.number,
+                    "user_id": locked.user_id,
+                    "total": locked.total,
+                    "currency": locked.currency,
+                    "items": locked.items.count(),
+                },
+            )
         return locked
 
-    def reject_payment(self, order: Order, *, reason: str = "") -> Order:
+    def pay_order(self, user: Any, number: str) -> Order:
+        """Pay one of this account's pending orders from its wallet balance.
+
+        The only way a wallet order becomes paid. The price is the order's, set
+        at checkout under lock; the caller names the order and nothing else, so
+        there is no amount here for anybody to choose. The debit and the
+        settlement share one transaction: the money leaves exactly when the
+        order is paid, or neither happens.
+
+        Retrying is safe. The debit is keyed on the order number, and an order
+        that is already paid is simply returned.
+        """
+        if options.payment_provider() != WALLET:
+            raise ShopRefused("Paying from a wallet is not available here.")
+        from apps.wallet.errors import WalletError
+        from apps.wallet.services import wallet_service
+
+        with transaction.atomic():
+            order = Order.objects.select_for_update().filter(number=number, user=user).first()
+            if order is None:
+                raise ShopNotFound("No such order.")
+            if order.status == OrderStatus.PAID:
+                return order
+            if order.status != OrderStatus.PENDING:
+                raise ShopRefused("Only a pending order can be paid.")
+            if order.total <= 0:
+                return self.settle_order(order, provider=WALLET, actor=user)
+            try:
+                if wallet_service.wallet_for(user).currency != order.currency:
+                    raise ShopRefused(f"This order is in {order.currency} and your wallet is not.")
+                entry = wallet_service.pay(
+                    user,
+                    amount=order.total,
+                    reference=f"shop-order:{order.number}",
+                    description=f"Order {order.number}",
+                    metadata={"order": order.number},
+                )
+            except WalletError as refusal:
+                raise ShopRefused(str(refusal)) from None
+            return self.settle_order(order, reference=str(entry["id"]), provider=WALLET, actor=user)
+
+    def reject_payment(self, order: Order, *, reason: str = "", actor: Any = None) -> Order:
         """Record that a payment attempt did not happen, and open another.
 
         The order stays pending and its stock stays reserved, because a declined
@@ -1060,15 +1178,33 @@ class ShopService:
                 amount=locked.total,
                 currency=locked.currency,
             )
+            # On the order's own trail, with who said so, as settling is.
+            OrderEvent.objects.create(
+                order=locked,
+                status=OrderStatus.PENDING,
+                note=f"Payment attempt refused{f': {reason}' if reason else ''}."[:300],
+                actor=actor,
+            )
         return locked
 
     def confirm_payment(self, user: Any, number: str, *, reference: str = "") -> Order:
         """The provider-webhook seam, scoped to the account whose order it is.
 
+        **Deliberately not published on any transport.** Settling an order is a
+        statement that money arrived somewhere this app cannot see, and the
+        account that owes the money is the one party who cannot be trusted to
+        make it -- a shopper who could call this would be marking their own
+        basket paid. The two callers that may are an operator in the admin, which
+        goes through :meth:`settle_order` directly, and a gateway callback, which
+        a project mounts itself once it has a gateway to verify a signature from.
+
+        Kept scoped to ``user`` for that second caller: a callback names an order
+        and the account it belongs to, and a lookup that took the number alone
+        would settle by guessable identifier.
+
         There is no gateway wired up in this starter -- the default provider is
-        ``manual`` and the working path is the admin -- so this is the endpoint a
-        project points its callback at once it has one, and the reason the
-        settling itself lives in :meth:`settle_order` rather than here.
+        ``manual`` and the working path is the admin -- which is why the settling
+        itself lives in :meth:`settle_order` rather than here.
         """
         return self.settle_order(self._order_row(user, number), reference=reference)
 
@@ -1081,6 +1217,8 @@ class ShopService:
             if order.status != OrderStatus.PENDING:
                 raise ShopRefused("Only an unpaid order can be cancelled here.")
             self._release_stock(order)
+            self._refund_payments(order)
+            self._return_coupon(order)
             order.status = OrderStatus.CANCELLED
             order.save(update_fields=["status", "updated_at"])
             OrderEvent.objects.create(
@@ -1141,7 +1279,11 @@ class ShopService:
             if wanted in RESTOCKING_STATUSES:
                 self._release_stock(locked)
             changed = ["status", "updated_at"]
-            if wanted == OrderStatus.REFUNDED:
+            if wanted == OrderStatus.CANCELLED:
+                self._return_coupon(locked)
+            if wanted in RESTOCKING_STATUSES:
+                # A cancelled order's pending attempt is closed too, or somebody
+                # could still settle a payment for an order that no longer exists.
                 self._refund_payments(locked)
             if wanted == OrderStatus.SHIPPED:
                 locked.shipped_at = timezone.now()
@@ -1235,6 +1377,13 @@ class ShopService:
                 sales_count=Greatest(F("sales_count") - reservation.quantity, Value(0))
             )
 
+    def _return_coupon(self, order: Order) -> None:
+        """Give back the use an unpaid order took, or cancelling drains a limited coupon."""
+        if order.coupon_id is not None:
+            Coupon.objects.filter(pk=order.coupon_id).update(
+                used_count=Greatest(F("used_count") - 1, Value(0))
+            )
+
     def _refund_payments(self, order: Order) -> None:
         """Mark what was collected as given back, and close what never arrived.
 
@@ -1242,6 +1391,19 @@ class ShopService:
         waiting for, so it is failed rather than left open for somebody to
         settle after the money has gone back out.
         """
+        for paid in order.payments.filter(status=PaymentStatus.SUCCEEDED, provider=WALLET).exclude(
+            provider_reference=""
+        ):
+            # Money taken from the wallet goes back to the wallet, as a refund
+            # entry beside the payment rather than an edit of it.
+            from apps.wallet.services import wallet_service
+
+            wallet_service.reverse(
+                order.user,
+                UUID(paid.provider_reference),
+                reference=f"shop-refund:{paid.pk}",
+                reason=f"Order {order.number} refunded.",
+            )
         order.payments.filter(status=PaymentStatus.SUCCEEDED).update(
             status=PaymentStatus.REFUNDED, updated_at=timezone.now()
         )
@@ -1499,3 +1661,7 @@ class ShopService:
 
 
 shop_service = ShopService()
+
+
+#: The provider a payment taken from the wallet balance is recorded under.
+WALLET = "wallet"

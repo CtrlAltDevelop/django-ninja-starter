@@ -57,7 +57,7 @@ it, and an id belonging to somebody else's basket is a 404 rather than a 403.
 | `GET` | `/api/v1/shop/orders/{number}` | Bearer | Read one of your orders |
 | `POST` | `/api/v1/shop/orders/{number}/cancel` | Bearer | Cancel an unpaid order |
 | `GET` | `/api/v1/shop/orders/{number}/invoice` | Bearer | Read an order's invoice |
-| `POST` | `/api/v1/shop/orders/{number}/payment/confirm` | Bearer | Confirm a payment |
+| `POST` | `/api/v1/shop/orders/{number}/pay` | Bearer | Pay an order from your wallet |
 | `GET` | `/api/v1/shop/products` | None | Search and filter the catalogue |
 | `GET` | `/api/v1/shop/products/{slug}` | None | Read one product |
 | `DELETE` | `/api/v1/shop/products/{slug}/like` | Bearer | Unlike a product |
@@ -245,12 +245,31 @@ declined tries another, and releasing the stock underneath them would mean the
 retry oversells. Cancelling the order is the separate act that puts the stock
 back.
 
-`POST /api/v1/shop/orders/{number}/payment/confirm` is the seam a real gateway's
-callback is pointed at when a project has one. It settles the order through the
-same service method the admin action calls, so there is one place an order
-becomes paid however that was decided — and it is idempotent, because a provider
-that retries its webhook must settle the same order rather than selling the stock
-twice.
+### Nothing a shopper holds settles an order
+
+There is no endpoint, mutation or RPC that marks an order paid. The verb exists —
+`ShopService.settle_order` — and the two callers that may reach it are the admin
+action above and a payment gateway's callback, which a project mounts itself once
+it has a gateway whose signature it can verify.
+
+It is deliberately not published on any of the three transports, because all
+three authenticate the *shopper*, and the shopper is the one party who must not
+be able to assert that they paid. An endpoint scoped to `request.user` reads like
+a callback seam and behaves like a way to check out for nothing.
+
+The line between the two order verbs a shopper does hold and the ones they do not
+is what each asserts about the world. Cancelling an unpaid order asserts nothing
+outside this app, so it stays theirs. Settling asserts that money arrived
+somewhere this app cannot see — the gateway's statement, or an operator's reading
+a bank statement.
+
+When a project wires a real gateway, `ShopService.confirm_payment(user, number)`
+is the method to call from the verified callback: it is scoped to the account the
+order belongs to, so a callback naming an order number alone cannot settle by
+guessable identifier, and it settles through the same path the admin does, so
+there is one place an order becomes paid however that was decided. It is
+idempotent, because a provider that retries its webhook must settle the same
+order rather than selling the stock twice.
 
 ## Reviews and likes
 
@@ -268,8 +287,25 @@ one side of it leaves the shop unable to answer what happened. `GET
 /api/v1/shop/reviews/mine` includes what is still in the queue: you are the one
 person entitled to know your own review exists.
 
-A review never publishes an address. The author is a display name, because
+A review never publishes an address, nor the username, which is built from the
+phone number or email the account signed up with. The author is a first name and
+a last initial, or "Verified buyer" when the account has no first name, because
 reviews are the most-read and most-scraped page a shop has.
+
+## What it announces
+
+Two signals in `apps/shop/signals.py`, so another app can react to the shop
+without the shop importing it -- the club's bridge is the one that ships. Both are
+sent after the transaction commits and carry plain dictionaries, so a receiver
+needs none of the shop's models, and one receiver failing cannot fail a checkout.
+
+| Signal | Sent when | Carries |
+| --- | --- | --- |
+| `order_paid` | `settle_order` marks a pending order paid. Settling one already paid sends nothing | `id`, `number`, `user_id`, `total`, `currency`, `items` |
+| `review_published` | A review is written while moderation is off, or a moderator approves it | `id`, `user_id`, `product_id`, `rating` |
+
+Approving from the admin is a queryset `update`, which raises no `post_save`, so a
+receiver on the model would never hear a moderated review. Listen to the signal.
 
 ## Models
 
@@ -801,12 +837,12 @@ request needs a way to.
 <!-- generated:settings -->
 | Environment variable | Required | Purpose |
 | --- | --- | --- |
-| `DJANGO_SHOP_ENABLED` | **Yes** | Installs the app, its migrations, its routes and its admin. Unset, a project carries no shop at all. |
-| `DJANGO_SHOP_CURRENCY` | Optional | The ISO 4217 code every price is quoted in. Defaults to `USD`. |
-| `DJANGO_SHOP_REVIEW_MODERATION` | Optional | Whether a review waits for a moderator before anybody can read it. Defaults to on. |
-| `DJANGO_SHOP_MAX_ITEM_QUANTITY` | Optional | The most of one product a single cart line may hold. Defaults to 99. |
-| `DJANGO_SHOP_PAGE_SIZE` | Optional | How many products a listing returns when the caller does not say. Defaults to 24. |
-| `DJANGO_SHOP_MAX_PAGE_SIZE` | Optional | The ceiling on `limit`, so one request cannot ask for the catalogue. Defaults to 100. |
+| `DJANGO_SHOP_ENABLED` | **Yes** | whether this deployment carries the shop at all -- its tables, its routes and its admin. |
+| `DJANGO_SHOP_CURRENCY` | **Yes** | the ISO 4217 code every price in the catalogue is quoted in. |
+| `DJANGO_SHOP_REVIEW_MODERATION` | Recommended | whether a review waits for a moderator before anybody can read it. |
+| `DJANGO_SHOP_MAX_ITEM_QUANTITY` | Optional | the most of one product a single cart line may hold. Range 1–10000. |
+| `DJANGO_SHOP_PAGE_SIZE` | Optional | how many products a listing returns when the caller does not say. Range 1–200. |
+| `DJANGO_SHOP_MAX_PAGE_SIZE` | Optional | the ceiling on `limit`, so one request cannot ask for the catalogue. Range 1–1000. |
 <!-- /generated:settings -->
 
 ```bash

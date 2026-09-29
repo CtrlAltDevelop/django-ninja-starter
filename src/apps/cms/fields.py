@@ -120,11 +120,19 @@ LONG_TYPES = frozenset({FieldType.TEXTAREA, FieldType.HTML, FieldType.MARKDOWN})
 #: rather than MIME types, because a browser's reported type is the client's
 #: claim and an extension is at least the name the file will be served under.
 UPLOAD_EXTENSIONS: dict[Any, tuple[str, ...]] = {
-    FieldType.IMAGE: (".avif", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"),
+    # No `.svg`: it is a document that may carry `<script>`, and it runs on this
+    # origin when an editor opens it. Link to vector art on a CDN instead.
+    FieldType.IMAGE: (".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"),
     FieldType.VIDEO: (".mov", ".mp4", ".ogv", ".webm"),
     FieldType.AUDIO: (".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"),
     FieldType.FILE: (),
 }
+#: Never stored, whatever the type says: a browser runs each of these when it
+#: opens one served from this deployment's own origin -- stored XSS against
+#: whoever is signed in to the admin.
+REFUSED_EXTENSIONS = frozenset(
+    {".htm", ".html", ".js", ".mjs", ".shtml", ".svg", ".svgz", ".xht", ".xhtml", ".xml"}
+)
 
 
 def _text(value: Any) -> str:

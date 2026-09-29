@@ -4,11 +4,14 @@
     python examples/walkthrough.py
 
 Four login methods, four second factors, four social providers, a token mode,
-the accounts and health endpoints, all three feature apps the starter ships --
-the CMS, notifications with its socket, and the shop from catalogue to settled
-invoice -- the notes app you would write yourself, the audit trail, the
-generated OpenAPI documents, and every admin screen any of them registers. All
-of it printed as a transcript of the calls a real client would make.
+the accounts and health endpoints, all six feature apps the starter ships --
+the CMS, notifications with its socket, the shop from catalogue to settled
+invoice, the support desk from both sides of it, the wallet from an empty
+balance to a settled one, and the club paying for what the other apps did --
+the notes app you would write yourself, the audit
+trail, the generated OpenAPI documents, and every admin screen any of them
+registers. All of it printed as a transcript of the calls a real client would
+make.
 
 The admin is the last section and is not an afterthought. The API is half of
 what this project is; the other half is the screen the people who run it use,
@@ -55,7 +58,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import build
 
@@ -136,6 +139,10 @@ class Api:
 
         self.client = Client()
         self.token = ""
+        # Every path this tour has asked for, so a section can assert it left
+        # nothing out. A transcript that quietly stops covering an endpoint is
+        # how a tour comes to describe an app it no longer exercises.
+        self.visited: set[tuple[str, str]] = set()
 
     def request(
         self,
@@ -147,13 +154,25 @@ class Api:
         expect: int = 200,
         show: bool = True,
         headers: dict[str, str] | None = None,
+        files: dict[str, tuple[str, bytes]] | None = None,
     ) -> Any:
+        self.visited.add((method.upper(), path.split("?")[0]))
         bearer = self.token if token is None else token
         extra: dict[str, Any] = {"HTTP_AUTHORIZATION": f"Bearer {bearer}"} if bearer else {}
         if headers:
             extra["headers"] = headers
         send = getattr(self.client, method.lower())
-        if payload is None:
+        if files is not None:
+            # Multipart rather than JSON, because an upload endpoint takes a
+            # file and there is no way to put one in a JSON body. Django's test
+            # client picks the encoding from the absence of `content_type`.
+            from django.core.files.uploadedfile import SimpleUploadedFile
+
+            body_files = {
+                field: SimpleUploadedFile(name, content) for field, (name, content) in files.items()
+            }
+            response = send(path, {**(payload or {}), **body_files}, **extra)
+        elif payload is None:
             response = send(path, **extra)
         else:
             response = send(path, payload, content_type="application/json", **extra)
@@ -195,6 +214,42 @@ class Api:
     def delete(self, path: str, **kwargs: Any) -> Any:
         return self.request("DELETE", path, **kwargs)
 
+    def post_raw(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        headers: dict[str, str] | None = None,
+        expect: int = 200,
+        show: bool = True,
+    ) -> Any:
+        """POST exact bytes, with no bearer -- what a payment rail actually sends.
+
+        The body has to go out byte for byte, because the signature is over the
+        bytes: re-encoding the dict on the way would change them and the
+        confirmation would be refused for the wrong reason.
+        """
+        body = json.dumps(payload).encode()
+        self.visited.add(("POST", path.split("?")[0]))
+        response = self.client.post(
+            path, body, content_type="application/json", headers=headers or {}
+        )
+        parsed: Any = {}
+        if response.headers.get("Content-Type", "").startswith("application/json"):
+            parsed = response.json()
+        ok = response.status_code == expect
+        tint = GREEN if ok else RED
+        signed = f" {DIM}+signed{OFF}" if headers else ""
+        print(f"  {CYAN}{'POST':<6}{OFF} {path}{signed} {tint}→ {response.status_code}{OFF}")
+        if show and parsed:
+            rendered = json.dumps(shorten(parsed), indent=2, ensure_ascii=False)
+            print("".join(f"  {DIM}│{OFF} {line}\n" for line in rendered.splitlines()), end="")
+        if not ok:
+            raise WalkthroughError(f"POST {path} returned {response.status_code}, not {expect}")
+        if isinstance(parsed, dict) and "isSuccess" in parsed:
+            return parsed["data"]
+        return parsed
+
     def sign_in_as(self, credentials: dict[str, Any]) -> None:
         self.token = credentials["access_token"]
 
@@ -209,6 +264,11 @@ class Socket:
     path below is resolved the way a real connection's would be, and a project
     that mounted nothing there would fail here too.
     """
+
+    #: Every command name any connection in this tour has sent. Shared across
+    #: instances because a conversation is two connections and the coverage
+    #: question is about the socket, not about either end of it.
+    sent: ClassVar[set[str]] = set()
 
     def __init__(self, path: str, *, query: str = "", label: str = "") -> None:
         from config.sockets import websocket_application
@@ -280,9 +340,42 @@ class Socket:
         print(f"  {CYAN}{'WS':<6}{OFF} {self._path}{offered} {GREEN}→ accepted{OFF}")
         return await self.frame("ready")
 
-    async def frame(self, expect: str, *, show: bool = True) -> dict[str, Any]:
-        """Read one server frame, insisting it is the one the tour says it is."""
+    async def refused(self) -> dict[str, Any]:
+        """Shake hands expecting to be turned away, and return the close frame.
+
+        The mirror of :meth:`open`: a socket that requires a credential has to
+        be shown refusing one that has none, or the transcript only ever proves
+        the happy path.
+        """
+        self._task = asyncio.ensure_future(
+            self._application(self._scope, self._to_server.get, self._send)
+        )
+        await self._to_server.put({"type": "websocket.connect"})
+        answer = await self._next_message()
+        if answer["type"] != "websocket.close":
+            raise WalkthroughError(f"the socket at {self._path} accepted a connection as nobody")
+        print(f"  {CYAN}{'WS':<6}{OFF} {self._path} {RED}-> refused{OFF}")
+        return answer
+
+    async def frame(
+        self, expect: str, *, show: bool = True, patient: bool = False
+    ) -> dict[str, Any]:
+        """Read one server frame, insisting it is the one the tour says it is.
+
+        ``patient`` reads past anything else that arrives first. One command
+        can legitimately produce several frames -- a reply, the thread's own
+        update, a read receipt -- and a connection belonging to an agent is
+        joined to the desk's channel as well as to its own conversations. A
+        transcript that wants one of those frames should not have to know the
+        order the others happen to arrive in.
+        """
         message = await self._next_message()
+        if patient:
+            while message["type"] == "websocket.send":
+                if json.loads(message["text"]).get("type") == expect:
+                    break
+                print(f"  {DIM}│ (also sent {json.loads(message['text']).get('type')}){OFF}")
+                message = await self._next_message()
         if message["type"] != "websocket.send":
             raise WalkthroughError(f"the socket closed instead of answering: {message}")
         frame: dict[str, Any] = json.loads(message["text"])
@@ -297,12 +390,20 @@ class Socket:
         return frame
 
     async def command(
-        self, command: dict[str, Any], expect: str, *, show: bool = True
+        self, command: dict[str, Any], expect: str, *, show: bool = True, patient: bool = False
     ) -> dict[str, Any]:
-        """Send one command and read the frame it is answered with."""
+        """Send one command and read the frame it is answered with.
+
+        ``patient`` reads past anything else that arrives first. A connection
+        belonging to an agent is joined to the desk's channel as well as to its
+        own conversations, so it is told about a thread changing at the same
+        time as it is answered -- which is right for a client and unhelpful for
+        a transcript that wants the answer to the command it just sent.
+        """
+        Socket.sent.add(command["command"])
         print(f"  {DIM}│{OFF} {CYAN}→ {command['command']}{OFF}")
         await self._to_server.put({"type": "websocket.receive", "text": json.dumps(command)})
-        return await self.frame(expect, show=show)
+        return await self.frame(expect, show=show, patient=patient)
 
 
 def outbox() -> list[Any]:
@@ -417,6 +518,13 @@ def section_configuration() -> None:
     if settings.NOTIFICATIONS_ENABLED:
         notifications = f"on, socket at {settings.NOTIFICATIONS_WS_PATH}"
     print(f"  notifications    {notifications}")
+    print(f"  shop             {'on' if settings.SHOP_ENABLED else 'off'}")
+    support = "off"
+    if settings.SUPPORT_ENABLED:
+        support = f"on, socket at {settings.SUPPORT_WS_PATH}"
+    print(f"  support          {support}")
+    print(f"  wallet           {'on' if settings.WALLET_ENABLED else 'off'}")
+    print(f"  club             {'on' if settings.CLUB_ENABLED else 'off'}")
     print()
     for app in settings.INSTALLED_APPS:
         marker = " " if app.startswith("django.contrib") else "•"
@@ -638,7 +746,7 @@ def section_cms(api: Api) -> None:
         slug="standfirst",
         field_type=FieldType.TEXTAREA,
         order=2,
-        values={"en-us": "Four login methods, three feature apps, one project."},
+        values={"en-us": "Four login methods, four feature apps, one project."},
     )
     Field.objects.create(
         section=hero,
@@ -744,8 +852,19 @@ def section_cms(api: Api) -> None:
     )
     api.get("/api/v1/cms/pages/about-us", token="", expect=404, show=False)
     api.get(
-        f"/api/v1/cms/pages/about-us?preview={make_token('about-us')}",
+        f"/api/v1/cms/pages/about-us?preview={make_token('about-us', about.pk)}",
         token="",
+        show=False,
+    )
+
+    note(
+        "A URL ends up in proxy logs and Referer headers, so a client that fetches "
+        "the draft itself can carry the same token in `X-Preview-Token` instead."
+    )
+    api.get(
+        "/api/v1/cms/pages/about-us",
+        token="",
+        headers={"X-Preview-Token": make_token("about-us", about.pk)},
         show=False,
     )
 
@@ -817,16 +936,65 @@ def section_notifications(api: Api) -> None:
     api.get("/api/v1/notifications?unread=true", show=False)
 
     note(
+        "`/count` takes the list's filters and answers with the number alone -- "
+        '"3 warnings" without fetching them.'
+    )
+    api.get("/api/v1/notifications/count?level=warning")
+
+    note(
         "Another account's notification is a 404, the same answer an id that "
         "never existed gets: saying which would confirm somebody else's mail."
     )
     theirs = Notification.objects.filter(recipient=stranger).get()
     api.post(f"/api/v1/notifications/{theirs.pk}/read", expect=404, show=False)
 
+    note("One notification on its own -- what a link in an email opens.")
+    api.get(f"/api/v1/notifications/{export.pk}", show=False)
+
+    note("Marked unread again, then taken out of the tray and put back: each is per account.")
+    api.post(f"/api/v1/notifications/{export.pk}/unread", show=False)
+    api.post(f"/api/v1/notifications/{export.pk}/dismiss", show=False)
+    api.post(f"/api/v1/notifications/{export.pk}/restore", show=False)
+
     note("Clearing the tray, so the socket below starts from a known count.")
     api.post("/api/v1/notifications/read-all")
 
     asyncio.run(_notification_sockets(api, zoe))
+
+    note(
+        "Emptying the tray dismisses everything, and keeps the moment each one was "
+        "first read -- a notification read last week was not read just now."
+    )
+    api.post("/api/v1/notifications/dismiss-all")
+
+    _notifications_surface_covered(api)
+
+
+def _notifications_surface_covered(api: Api) -> None:
+    """Assert the section above called every route notifications publishes.
+
+    The same check the support, wallet and club sections make of themselves,
+    asked of the router rather than of a list kept here.
+    """
+    from apps.notifications.rest.v1 import router
+
+    missed: list[str] = []
+    total = 0
+    for path, view in router.path_operations.items():
+        literals = re.split(r"\{[^}]+\}", f"/api/v1/notifications{path}")
+        pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+        for operation in view.operations:
+            for method in operation.methods:
+                total += 1
+                if not any(
+                    seen_method == method and pattern.match(seen_path)
+                    for seen_method, seen_path in api.visited
+                ):
+                    missed.append(f"{method} /api/v1/notifications{path}")
+
+    if missed:
+        raise WalkthroughError("the notifications tour skipped " + ", ".join(sorted(missed)))
+    print(f"  {DIM}│ toured {total} of {total} notification endpoints{OFF}")
 
 
 async def _notification_sockets(api: Api, user: Any) -> None:
@@ -948,12 +1116,10 @@ def section_shop(api: Api) -> None:
 
     from decimal import Decimal
 
-    from django.contrib.auth import get_user_model
     from django.utils import timezone
 
     from apps.shop.attributes import AttributeType
     from apps.shop.models import (
-        Address,
         Brand,
         Category,
         CategoryAttribute,
@@ -1036,6 +1202,21 @@ def section_shop(api: Api) -> None:
     ProductOffer.objects.create(
         product=laptop, seller=bargains, price=Decimal("1100.00"), stock=2, lead_time_days=2
     )
+    # A sibling in the same category, so the row under a product page has
+    # something in it rather than proving only that the endpoint answers.
+    Product.objects.create(
+        category=laptops,
+        brand=acme,
+        seller=store,
+        name="Acme Featherbook 16",
+        slug="featherbook-16",
+        summary="The same laptop, two inches wider.",
+        sku="FB-16",
+        price=Decimal("1500.00"),
+        status=ProductStatus.ACTIVE,
+        stock=2,
+        sales_count=11,
+    )
     tee = Product.objects.create(
         category=shirts,
         name="Plain tee",
@@ -1076,19 +1257,15 @@ def section_shop(api: Api) -> None:
     shipping = ShippingMethod.objects.create(
         name="Standard", price=Decimal("5.00"), free_from=Decimal("2000.00")
     )
-    zoe = get_user_model().objects.get(username="zoe")
-    address = Address.objects.create(
-        user=zoe,
-        full_name="Zoe Example",
-        phone="+441234567890",
-        country="GB",
-        city="Bristol",
-        postal_code="BS1 4ST",
-        line1="1 Example Street",
-    )
-
     note("The category tree, with a count on each node. No credential anywhere here.")
     api.get("/api/v1/shop/categories", token="")
+
+    note("And one node of it alone, which is what a category page opens with.")
+    api.get("/api/v1/shop/categories/laptops", token="", show=False)
+
+    note("The two other axes a shopper narrows by before searching at all.")
+    api.get("/api/v1/shop/brands", token="", show=False)
+    api.get("/api/v1/shop/sellers", token="", show=False)
 
     note(
         "One endpoint answers search, a category page and every filter on it. "
@@ -1110,6 +1287,12 @@ def section_shop(api: Api) -> None:
     api.get("/api/v1/shop/products/featherbook-14", token="")
 
     note(
+        "The row every product page carries under it: the same category, best "
+        "rated first, and never the product being looked at."
+    )
+    api.get("/api/v1/shop/products/featherbook-14/related", token="", show=False)
+
+    note(
         "A product sold in variants answers the picker's two questions at once: "
         "which sizes exist, and which of them are still buyable -- here, the "
         "large is made but nobody is holding one. Each size also carries its own "
@@ -1120,11 +1303,22 @@ def section_shop(api: Api) -> None:
     note("Named lists are filters over the live catalogue, so none of them can go stale.")
     api.get("/api/v1/shop/listings", token="", show=False)
     api.get("/api/v1/shop/listings/bestsellers", token="", show=False)
+    api.get("/api/v1/shop/collections", token="", show=False)
     api.get("/api/v1/shop/collections/staff-picks", token="", show=False)
     api.get("/api/v1/shop/sellers/bargain-bin", token="", show=False)
 
     note("A view is recorded without a credential; popularity is a public fact.")
     api.post("/api/v1/shop/products/featherbook-14/view", token="", show=False)
+
+    note(
+        "A basket is scratch paper before it is an order. A line can be dropped "
+        "and the whole thing tipped out, and either way what comes back is the "
+        "basket as it now stands rather than a bare 204 to go and re-read."
+    )
+    scratch = api.post("/api/v1/shop/cart/items", {"product": "featherbook-16"}, show=False)
+    api.delete(f"/api/v1/shop/cart/items/{scratch['items'][0]['id']}", show=False)
+    api.post("/api/v1/shop/cart/items", {"product": "featherbook-16"}, show=False)
+    api.delete("/api/v1/shop/cart", show=False)
 
     note("The basket needs one. Without a seller named, it takes the one the page showed.")
     api.post("/api/v1/shop/cart/items", {"product": "featherbook-14", "quantity": 1})
@@ -1164,6 +1358,69 @@ def section_shop(api: Api) -> None:
     api.get("/api/v1/shop/reviews/mine", show=False)
     api.get("/api/v1/shop/favourites", show=False)
 
+    note("Both are the shopper's to take back, and taking one back is not an error.")
+    api.put("/api/v1/shop/products/plain-tee/like", show=False)
+    api.delete("/api/v1/shop/products/plain-tee/like", show=False)
+    api.post(
+        "/api/v1/shop/products/plain-tee/reviews",
+        {"rating": 3, "title": "Plain", "body": "It is a shirt."},
+        show=False,
+    )
+    api.delete("/api/v1/shop/products/plain-tee/reviews", show=False)
+
+    note(
+        "Checkout needs an address and a delivery option, and the address book "
+        "is the caller's own -- written, read, corrected and defaulted through "
+        "the API rather than seeded behind it."
+    )
+    address = api.post(
+        "/api/v1/shop/addresses",
+        {
+            "full_name": "Zoe Example",
+            "phone": "+441234567890",
+            "country": "GB",
+            "city": "Bristol",
+            "postal_code": "BS1 4ST",
+            "line1": "1 Example Street",
+        },
+    )
+    api.get("/api/v1/shop/addresses", show=False)
+    api.get(f"/api/v1/shop/addresses/{address['id']}", show=False)
+    api.patch(f"/api/v1/shop/addresses/{address['id']}", {"line2": "Flat 2"}, show=False)
+    api.put(f"/api/v1/shop/addresses/{address['id']}/default", show=False)
+
+    note("A second one, saved and then forgotten again.")
+    spare = api.post(
+        "/api/v1/shop/addresses",
+        {
+            "label": "Work",
+            "full_name": "Zoe Example",
+            "phone": "+441234567890",
+            "country": "GB",
+            "city": "Bath",
+            "postal_code": "BA1 1AA",
+            "line1": "2 Example Road",
+        },
+        show=False,
+    )
+    api.delete(f"/api/v1/shop/addresses/{spare['id']}", show=False)
+
+    note(
+        "Delivery options are public, so a shopper comparing them need not have "
+        "signed in -- but a caller who has gets each one costed against what is "
+        "actually in the basket, which is the only way a free-over threshold can "
+        "be printed honestly."
+    )
+    api.get("/api/v1/shop/shipping-methods")
+
+    note(
+        "A coupon is tried before it is committed to. A code the shop will not "
+        "take comes back as an answer saying why, not as a 400 per keystroke on "
+        "a checkout page somebody is still typing into."
+    )
+    api.post("/api/v1/shop/cart/coupon", {"code": "WELCOME"}, show=False)
+    api.post("/api/v1/shop/cart/coupon", {"code": "NOT-A-COUPON"})
+
     note(
         "Checkout is one atomic step: it prices the basket, holds the stock, "
         "writes an immutable order and issues its invoice."
@@ -1171,7 +1428,7 @@ def section_shop(api: Api) -> None:
     order = api.post(
         "/api/v1/shop/checkout",
         {
-            "address": str(address.pk),
+            "address": address["id"],
             "shipping_method": str(shipping.pk),
             "coupon": "WELCOME",
         },
@@ -1188,26 +1445,1559 @@ def section_shop(api: Api) -> None:
     api.get(f"/api/v1/shop/orders/{order['number']}/invoice")
 
     note(
-        "This starter wires up no gateway. Payments are created against the "
-        "`manual` provider, and this is the seam a real callback is pointed at."
+        "Nothing the shopper holds can mark this order paid. There is no such "
+        "endpoint, because every credential this API accepts belongs to the "
+        "person who owes the money -- and one who could say it arrived would be "
+        "checking out for nothing."
     )
     api.post(
         f"/api/v1/shop/orders/{order['number']}/payment/confirm",
         {"reference": "bank-statement-4417"},
+        expect=404,
         show=False,
     )
+
+    note(
+        "It is settled the way a deployment settles it: by an operator reading a "
+        "bank statement, or by a gateway callback the project verifies a "
+        "signature on. Both land on the same service method the admin action "
+        "calls, so an order becomes paid in one place however that was decided."
+    )
+    note(
+        "With the wallet in charge of payment, the shopper pays from their balance "
+        "instead. This tour runs the shop in `manual` mode, so that is refused here."
+    )
+    api.post(f"/api/v1/shop/orders/{order['number']}/pay", expect=400, show=False)
+    _settle_as_the_desk(order["number"], reference="bank-statement-4417")
     api.get(f"/api/v1/shop/orders/{order['number']}", show=False)
+
+    note("And the whole shelf of them, newest first, which is what an account page shows.")
+    api.get("/api/v1/shop/orders", show=False)
 
     note("An order that has been paid for can no longer be cancelled.")
     api.post(f"/api/v1/shop/orders/{order['number']}/cancel", expect=400, show=False)
+
+    note(
+        "An unpaid one can, and cancelling hands back what it took: the stock, the "
+        "payment it was waiting on, and the coupon use -- or placing and "
+        "cancelling orders over and over would drain a limited code."
+    )
+    welcome = Coupon.objects.get(code="WELCOME")
+    uses = welcome.used_count
+    api.post("/api/v1/shop/cart/items", {"product": "featherbook-14"}, show=False)
+    second = api.post(
+        "/api/v1/shop/checkout",
+        {"address": address["id"], "shipping_method": str(shipping.pk), "coupon": "WELCOME"},
+        show=False,
+    )
+    api.post(f"/api/v1/shop/orders/{second['number']}/cancel", show=False)
+    welcome.refresh_from_db()
+    print(f"  {DIM}│ WELCOME uses: {uses} before, {welcome.used_count} after{OFF}")
+    if welcome.used_count != uses:
+        raise WalkthroughError("cancelling an order kept its coupon use")
 
     note("And somebody else's order number is a 404, not a 403.")
     api.get("/api/v1/shop/orders/S00000000XXXX0000", expect=404, show=False)
 
 
-def section_email_code(api: Api) -> None:
+def _settle_as_the_desk(number: str, *, reference: str = "") -> None:
+    """Settle an order the way the back office does, not the way a shopper cannot.
+
+    Straight through the service, because that is the honest depiction: the two
+    callers allowed to say an order was paid are an operator in the admin and a
+    gateway callback a project verifies for itself, and neither of them is an
+    HTTP request carrying the shopper's token.
+    """
+    from apps.shop.models import Order
+    from apps.shop.services import shop_service
+
+    shop_service.settle_order(Order.objects.get(number=number), reference=reference)
+
+
+def section_support(api: Api) -> None:
+    """The fourth feature app: one conversation, seen from both sides of a desk."""
+    from django.apps import apps as django_apps
+    from django.conf import settings
+
+    if not settings.SUPPORT_ENABLED or not django_apps.is_installed("apps.support"):
+        heading(
+            10,
+            "Support",
+            "apps.support",
+            "Not installed: DJANGO_SUPPORT_ENABLED is not set.",
+        )
+        return
+
+    from django.contrib.auth import get_user_model
+
+    from apps.support.models import CannedReply, Category, Tag
+
     heading(
         10,
+        "A support desk, from both sides of it",
+        "apps.support",
+        "A ticket is a conversation, which is what lets live chat and a filed "
+        "problem be one app. Everything below is the same account's token "
+        "answering as a client, and an agent's answering as the desk.",
+    )
+
+    agatha = get_user_model().objects.create_user(
+        username="agatha", email="agatha@example.com", is_staff=True
+    )
+    desk = desk_token(agatha)
+
+    note(
+        "The desk's own furniture, made the way an operator would: a category "
+        "carrying the promise, a tag, and a reply somebody says often."
+    )
+    billing = Category.objects.create(
+        name="Billing",
+        description="Invoices, payments and refunds.",
+        first_response_minutes=60,
+        resolution_minutes=60 * 24,
+    )
+    Category.objects.create(name="General")
+    Tag.objects.create(name="Escalated", colour="#dc2626")
+    CannedReply.objects.create(
+        title="Asking for an invoice number",
+        body="Could you send us the invoice number from the email?",
+    )
+    print(f"  {DIM}│ 2 categories, 1 tag, 1 saved reply{OFF}")
+
+    note(
+        "What a client is offered when they file something. The response times "
+        "are a promise the desk is making, so they are public to anybody "
+        "signed in rather than an internal target."
+    )
+    api.get("/api/v1/support/categories")
+
+    note(
+        "The rest of that furniture is the desk's own and is answered for "
+        "staff only: a tag is what the desk says about a thread, not what the "
+        "client is told, and fetching a saved reply counts it, which is what "
+        "tells an operator which ones are worth keeping."
+    )
+    api.get("/api/v1/support/tags", token=desk, show=False)
+    api.get("/api/v1/support/canned-replies", token=desk)
+
+    note(
+        "Opening a ticket. The subject and the category are what make it a "
+        "ticket rather than a chat -- and the category is where the SLA "
+        "deadlines below come from."
+    )
+    ticket = api.post(
+        "/api/v1/support",
+        {
+            "kind": "ticket",
+            "subject": "I was charged twice",
+            "body": "There are two charges on the 3rd, both for $49.",
+            "category": billing.slug,
+        },
+        expect=201,
+    )
+    ticket_id = ticket["id"]
+
+    note(
+        f"The reference {ticket['reference']} is the short string somebody "
+        "reads down a telephone. The id is what every other call takes. Note "
+        "the SLA: two deadlines written now, never a breach flag set later."
+    )
+
+    note(
+        "A file goes up on its own, before the message that carries it. This "
+        "is the one half of the app that has to be HTTP: a WebSocket frame is "
+        "JSON and cannot carry a multipart body."
+    )
+    upload = api.post(
+        "/api/v1/support/uploads",
+        None,
+        expect=201,
+        show=False,
+        files={"file": ("statement.txt", b"03/09 -49.00\n03/09 -49.00\n")},
+    )
+    print(f"  {DIM}│ staged {upload['name']} as {shorten(upload['id'], 12)}{OFF}")
+
+    note("And the message that claims it, sent over HTTP here and over the socket below.")
+    said = api.post(
+        f"/api/v1/support/{ticket_id}/messages",
+        {"body": "Here is the statement.", "upload_ids": [upload["id"]]},
+        expect=201,
+        show=False,
+    )
+
+    note(
+        "Rewriting it is the author's alone -- staff get no exception, because "
+        "editing what somebody else is recorded as having said is not "
+        "moderation. The desk that needs a message gone has the retraction "
+        "below, which leaves a tombstone saying so."
+    )
+    api.patch(
+        f"/api/v1/support/messages/{said['id']}",
+        {"body": "Here is the statement -- both charges are on page 2."},
+        show=False,
+    )
+
+    note(
+        "The desk's queue is the same endpoint, answering a different question "
+        "because a different account is asking. Nothing here takes an account "
+        "id, so no parameter widens what a client can see."
+    )
+    api.get("/api/v1/support?unassigned=true", token=desk)
+
+    note("An agent takes it, and moves it up the queue.")
+    api.post(f"/api/v1/support/{ticket_id}/claim", token=desk, show=False)
+    api.post(f"/api/v1/support/{ticket_id}/priority", {"priority": "high"}, token=desk, show=False)
+    api.post(f"/api/v1/support/{ticket_id}/tags", {"tags": ["escalated"]}, token=desk, show=False)
+
+    note(
+        "A tag is the desk's note about a client, so the client reading the same "
+        "thread is sent none -- `escalated` is not theirs to see."
+    )
+    seen = api.get(f"/api/v1/support/{ticket_id}", show=False)
+    print(f"  {DIM}│ tags the client sees: {seen['tags']}{OFF}")
+    if seen["tags"]:
+        raise WalkthroughError("the client was shown the desk's tags")
+
+    note(
+        "Billing is somebody else's, so it is handed on. Who a complaint has "
+        "been passed between is recorded as an internal event: telling the "
+        "client answers a question they did not ask with something that reads "
+        "as an apology."
+    )
+    bruno = get_user_model().objects.create_user(
+        username="bruno", email="bruno@example.com", is_staff=True
+    )
+    api.post(
+        f"/api/v1/support/{ticket_id}/assign", {"agent": str(bruno.pk)}, token=desk, show=False
+    )
+
+    note(
+        "A third person joins the same thread as an observer. An observer who "
+        "is not staff reads the public half of it, exactly as the client does."
+    )
+    dara = get_user_model().objects.create_user(username="dara", email="dara@example.com")
+    api.post(
+        f"/api/v1/support/{ticket_id}/participants",
+        {"account": str(dara.pk), "role": "observer"},
+        token=desk,
+        expect=201,
+        show=False,
+    )
+
+    note(
+        "Typing is published to whoever is in the thread and never stored. It "
+        "is offered over HTTP too, so a client polling one transport is not a "
+        "client missing half the app."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/typing", {"typing": True}, token=desk, show=False)
+
+    note(
+        "A staff-only note goes into the same thread, in the order it was "
+        "written. A thread whose notes live somewhere else is a thread nobody "
+        "reads in order."
+    )
+    api.post(
+        f"/api/v1/support/{ticket_id}/notes",
+        {"body": "Duplicate charge confirmed in the gateway. Refunding."},
+        token=desk,
+        expect=201,
+        show=False,
+    )
+
+    note("The desk sees it. The client asks for the same thread and simply does not.")
+    theirs = api.get(f"/api/v1/support/{ticket_id}/messages", token=desk, show=False)
+    hers = api.get(f"/api/v1/support/{ticket_id}/messages", show=False)
+    print(f"  {DIM}│ desk: {theirs['total']} messages · client: {hers['total']}{OFF}")
+    if theirs["total"] == hers["total"]:
+        raise WalkthroughError("the client was shown the desk's internal note")
+
+    note("The reply the client is meant to see.")
+    api.post(
+        f"/api/v1/support/{ticket_id}/messages",
+        {"body": "Confirmed -- the second charge is refunded, 3-5 working days."},
+        token=desk,
+        expect=201,
+        show=False,
+    )
+
+    note(
+        "Retracting leaves a tombstone rather than removing the row, and is "
+        "answered with the message instead of with nothing -- every reader has "
+        "it on screen and has to be told what it became."
+    )
+    api.delete(f"/api/v1/support/messages/{said['id']}", show=False)
+
+    note(
+        "Moving it without settling it. `pending` and `on_hold` are statements "
+        "about what the desk is doing and are the desk's alone to make; the "
+        "client's own verbs are the three below."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/status", {"status": "pending"}, token=desk, show=False)
+
+    note(
+        "The badge, counted per participant rather than per message: one row "
+        "carrying a watermark, not a receipt for every line ever written."
+    )
+    api.get("/api/v1/support/unread")
+
+    note(
+        "Marking read never moves the watermark backwards, and does not move "
+        "it at all when there was nothing unread -- which is what lets a "
+        "scroll handler call this as often as it likes."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/read")
+    api.post(f"/api/v1/support/{ticket_id}/read", show=False)
+
+    note(
+        "Putting it back is the one way the watermark does move backwards, and "
+        "it drops it entirely rather than by a message: `mark as unread` means "
+        "the whole thread is waiting again, which is what somebody clicking it "
+        "is asking for."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/unread", show=False)
+    api.post(f"/api/v1/support/{ticket_id}/read", show=False)
+
+    note("Somebody else's conversation is a 404, the same answer an id that never existed gets.")
+    stranger = get_user_model().objects.create_user(username="colin", email="colin@example.com")
+    api.get(f"/api/v1/support/{ticket_id}", token=desk_token(stranger), expect=404, show=False)
+
+    note("And the desk's verbs are refused for a client, with FORBIDDEN rather than a 404.")
+    api.post(f"/api/v1/support/{ticket_id}/claim", expect=403, show=False)
+
+    note(
+        "Settled by the client -- and reopened by them, which is the client's "
+        "right of reply to being told a thing is finished. Then settled again."
+    )
+    api.post(f"/api/v1/support/{ticket_id}/close", show=False)
+    api.post(f"/api/v1/support/{ticket_id}/reopen", show=False)
+    api.post(f"/api/v1/support/{ticket_id}/close", show=False)
+
+    note("Rated -- which only the client may do, and only once it is settled.")
+    api.post(f"/api/v1/support/{ticket_id}/rating", {"score": 5, "comment": "Quick."})
+
+    note("The numbers the desk runs on, which a client is not shown at all.")
+    api.get("/api/v1/support/stats", token=desk)
+
+    note(
+        "-- and the same app, used the other way. A ticket is a conversation, "
+        "which is what lets the desk's threads and people talking to each "
+        "other be one socket and one table. Three more kinds, and the rule "
+        "that separates them from everything above is who may read them."
+    )
+
+    note(
+        "A channel is the one thing here anybody signed in may find. Its "
+        "address is refused if it is taken rather than suffixed into "
+        "uniqueness: somebody who asked for `general` and quietly got "
+        "`general-2` has been handed a different room from the one they meant."
+    )
+    channel = api.post(
+        "/api/v1/support/channels",
+        {"name": "Product announcements", "body": "Ship notes go here."},
+        expect=201,
+    )
+
+    note("Found by somebody who is not in it, which is what a channel is for.")
+    api.get("/api/v1/support/channels", token=desk_token(dara))
+
+    note("Joined, and left again. Both idempotent enough for a client that does not keep count.")
+    api.post(
+        f"/api/v1/support/{channel['id']}/join", token=desk_token(dara), expect=201, show=False
+    )
+    api.post(f"/api/v1/support/{channel['id']}/leave", token=desk_token(dara), show=False)
+
+    note("Posting is not a way back in: a channel is joined with `join`, not by talking.")
+    api.post(
+        f"/api/v1/support/{channel['id']}/messages",
+        {"body": "Still here?"},
+        token=desk_token(dara),
+        expect=403,
+    )
+
+    note(
+        "A group is the opposite: invisible to everybody but its members, and "
+        "the members are named now rather than invited later, because a group "
+        "of one is not a group and the first message should reach somebody."
+    )
+    group = api.post(
+        "/api/v1/support/groups",
+        {"name": "Billing escalations", "members": [str(bruno.pk), str(dara.pk)]},
+        expect=201,
+        show=False,
+    )
+    print(f"  {DIM}| {group['reference']}, 3 members{OFF}")
+
+    note(
+        "A private chat between two accounts, opened by naming the other one. "
+        "The answer is a 200 rather than a 201 because the usual answer is the "
+        "conversation you already had -- the same thread whichever of the two asks."
+    )
+    chat = api.post("/api/v1/support/direct", {"account": str(bruno.pk)}, show=False)
+    again = api.post("/api/v1/support/direct", {"account": str(bruno.pk)}, show=False)
+    print(f"  {DIM}| {chat['reference']}, and asking again returns it{OFF}")
+    if chat["id"] != again["id"]:
+        raise WalkthroughError("opening the same private chat twice made two of them")
+
+    note(
+        "And the rule the whole arrangement rests on: an agent may read every "
+        "ticket in the building, and none of these. `is_staff` answers the "
+        "desk's queue, never somebody's private conversation."
+    )
+    api.get(f"/api/v1/support/{group['id']}", token=desk, expect=404, show=False)
+    api.get(f"/api/v1/support/{chat['id']}", token=desk, expect=404, show=False)
+    print(f"  {DIM}| the group and the private chat are both 404 to the desk{OFF}")
+
+    asyncio.run(_support_socket(api, desk, bruno, dara))
+
+    _support_surface_covered(api)
+
+
+def _support_surface_covered(api: Api) -> None:
+    """Assert the section above left no route and no command untoured.
+
+    Asked of the app's own registries rather than of a list kept here, for the
+    reason the admin section walks Django's: a second list is a list that goes
+    stale quietly, and a tour that has stopped exercising an endpoint is a tour
+    describing an app it no longer checks. Adding a route or a command without
+    showing it here fails the tour, which is the point.
+    """
+    import re
+
+    from apps.support.rest import router
+    from apps.support.sockets import SupportSocket
+
+    missed_routes: list[str] = []
+    total_routes = 0
+    for path, view in router.path_operations.items():
+        # "/{ticket_id}/messages" is a pattern, not a path: the tour visited it
+        # with a real id in place, so each placeholder matches one segment.
+        literals = re.split(r"\{[^}]+\}", f"/api/v1/support{path}")
+        pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+        for operation in view.operations:
+            for method in operation.methods:
+                total_routes += 1
+                if not any(
+                    seen_method == method and pattern.match(seen_path)
+                    for seen_method, seen_path in api.visited
+                ):
+                    missed_routes.append(f"{method} /api/v1/support{path}")
+
+    commands = set(SupportSocket.commands())
+    missed_commands = sorted(commands - Socket.sent)
+
+    if missed_routes or missed_commands:
+        raise WalkthroughError(
+            "the support tour skipped "
+            + ", ".join(sorted(missed_routes) + [f"socket:{name}" for name in missed_commands])
+        )
+    print(
+        f"  {DIM}│ toured {total_routes} of {total_routes} support endpoints and "
+        f"{len(commands)} of {len(commands)} socket commands{OFF}"
+    )
+
+
+def desk_token(user: Any) -> str:
+    """A real credential for somebody the tour did not sign in as."""
+    from django.test import RequestFactory
+
+    from infrastructure.auth.core.sessions import issue_credentials
+
+    issued = issue_credentials(RequestFactory().post("/"), user, method="password")
+    return str(issued.access_token)
+
+
+async def _support_socket(api: Api, desk: str, bruno: Any, dara: Any) -> None:
+    """Two connections, because this socket only makes sense as a conversation."""
+    from django.conf import settings
+
+    path = settings.SUPPORT_WS_PATH
+
+    note(
+        "This socket admits nobody it cannot name. Unlike the notification "
+        "one it has no public traffic to deliver -- every frame belongs to a "
+        "named conversation -- so a handshake with no credential is closed "
+        "rather than accepted. A page that opened a socket which then said "
+        "nothing would be a bug nobody reports; a refused upgrade is one they do."
+    )
+    async with Socket(path) as anonymous:
+        refusal = await anonymous.refused()
+        print(f"  {DIM}│ closed with {refusal['code']}, before any accept{OFF}")
+
+    note(
+        "Two connections now, one each side of the desk, both authenticated in "
+        "the handshake so neither waits a round trip."
+    )
+    async with (
+        Socket(path, query=f"token={api.token}", label="client") as client,
+        Socket(path, query=f"token={desk}", label="desk") as agent,
+    ):
+        await client.open()
+        await agent.open()
+
+        note(
+            "A chat needs no subject and no category. Opening it over the "
+            "socket subscribes this connection in the same round trip -- a "
+            "client that had to subscribe afterwards would miss whatever the "
+            "desk said in between."
+        )
+        opened = await client.command(
+            {"command": "open", "kind": "chat", "body": "Is the refund through yet?"},
+            "opened",
+            show=False,
+            patient=True,
+        )
+        chat = opened["ticket"]["id"]
+        print(f"  {DIM}│ {opened['ticket']['reference']}{OFF}")
+
+        note("The desk joins the thread and is handed its tail, so it has something to render.")
+        await agent.command(
+            {"command": "subscribe", "ticket": chat}, "subscribed", show=False, patient=True
+        )
+
+        note(
+            "The reference data a client needs to render a composer, fetched "
+            "over the socket rather than over HTTP beside it."
+        )
+        await client.command({"command": "categories"}, "categories", show=False, patient=True)
+        await agent.command({"command": "tags"}, "tags", show=False, patient=True)
+        await agent.command({"command": "canned"}, "canned", show=False, patient=True)
+
+        note(
+            "The desk's whole queue-working vocabulary is here too: take it, "
+            "hand it on, reprioritise, tag, and bring somebody else in."
+        )
+        await agent.command(
+            {"command": "claim", "ticket": chat}, "assigned", show=False, patient=True
+        )
+        await agent.command(
+            {"command": "assign", "ticket": chat, "agent": str(bruno.pk)},
+            "assigned",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "priority", "ticket": chat, "priority": "urgent"},
+            "priority",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "tag", "ticket": chat, "tags": ["escalated"]},
+            "tagged",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "invite", "ticket": chat, "account": str(dara.pk), "role": "observer"},
+            "invited",
+            show=False,
+            patient=True,
+        )
+
+        note(
+            "Presence is the socket's own: who is actually looking at the "
+            "thread right now, which no endpoint can answer because HTTP has "
+            "nobody to stop asking."
+        )
+        await client.command(
+            {"command": "presence", "ticket": chat, "present": True},
+            "presence_ack",
+            show=False,
+            patient=True,
+        )
+
+        note("A typing indicator: not stored, and worth nothing unless it is live.")
+        await agent.command(
+            {"command": "typing", "ticket": chat, "typing": True},
+            "typing_ack",
+            show=False,
+            patient=True,
+        )
+        await client.frame("typing", show=False, patient=True)
+
+        note("The desk answers, and the client hears it without asking for anything.")
+        await agent.command(
+            {"command": "send", "ticket": chat, "body": "It went out this morning."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        await client.frame("message", patient=True)
+
+        note(
+            "An internal note is published to the same thread and dropped on "
+            "the way out for a connection that may not read it. This is the "
+            "app's one real confidentiality rule, and this is where it is "
+            "enforced for everybody who is connected."
+        )
+        await agent.command(
+            {"command": "note", "ticket": chat, "body": "Refund reference RF-8812."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        await agent.command(
+            {"command": "send", "ticket": chat, "body": "Anything else?"},
+            "sent",
+            show=False,
+            patient=True,
+        )
+
+        note(
+            "The next thing the client is sent is the public message. The note "
+            "between them never reached this connection at all."
+        )
+        heard = await client.frame("message", show=False, patient=True)
+        print(f"  {DIM}│ {heard['message']['body']}{OFF}")
+        if "RF-8812" in heard["message"]["body"]:
+            raise WalkthroughError("the client was sent the desk's internal note")
+
+        note(
+            "The client says something of its own, then rewrites it and takes "
+            "it back -- the same two rules the endpoints enforce, applied by "
+            "the same service underneath."
+        )
+        mine = await client.command(
+            {"command": "send", "ticket": chat, "body": "No, that is everythng."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {
+                "command": "edit",
+                "message": mine["message"]["id"],
+                "body": "No, that is everything.",
+            },
+            "edited",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {"command": "delete", "message": mine["message"]["id"]},
+            "deleted",
+            show=False,
+            patient=True,
+        )
+
+        note(
+            "Reading is the socket's too: a page of the thread, the badge, and "
+            "putting a whole thread back into it -- so a client that opened "
+            "this connection never has to reach for HTTP to render itself."
+        )
+        await client.command(
+            {"command": "messages", "ticket": chat, "limit": 5},
+            "messages",
+            show=False,
+            patient=True,
+        )
+        await client.command({"command": "unread"}, "unread", show=False, patient=True)
+        await client.command(
+            {"command": "unread_ticket", "ticket": chat},
+            "unread_ticket",
+            show=False,
+            patient=True,
+        )
+
+        note("The socket does everything the endpoints do, so a client needs no HTTP beside it.")
+        await client.command({"command": "read", "ticket": chat}, "read", show=False, patient=True)
+        await agent.command(
+            {"command": "status", "ticket": chat, "status": "pending"},
+            "status",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {"command": "close", "ticket": chat}, "status", show=False, patient=True
+        )
+        await client.command(
+            {"command": "reopen", "ticket": chat}, "status", show=False, patient=True
+        )
+        await client.command(
+            {"command": "close", "ticket": chat}, "status", show=False, patient=True
+        )
+        await client.command(
+            {"command": "rate", "ticket": chat, "score": 5}, "rated", show=False, patient=True
+        )
+        await agent.command({"command": "stats"}, "stats", patient=True)
+
+        note(
+            "Leaving a thread stops it being sent without dropping the "
+            "connection. The channel stays joined underneath -- a subscription "
+            "can be added to but not removed from -- and the filter is what "
+            "goes quiet."
+        )
+        await agent.command(
+            {"command": "unsubscribe", "ticket": chat}, "unsubscribed", show=False, patient=True
+        )
+
+        note(
+            "A refusal is a frame, not a close -- a mistyped id should cost one "
+            "message, not the conversation flowing over the connection."
+        )
+        await client.command(
+            {"command": "ticket", "ticket": "not-a-uuid"}, "error", show=False, patient=True
+        )
+
+        note("-- and the proof is that the connection is still answering.")
+        await client.command({"command": "ping"}, "pong", show=False, patient=True)
+
+        note(
+            "Who this connection belongs to. Worth asking after a sleep, and "
+            "now it always has an answer: there is no signed-out state left."
+        )
+        await client.command({"command": "whoami"}, "whoami", show=False, patient=True)
+        await client.command({"command": "tickets"}, "tickets", show=False, patient=True)
+
+        note(
+            "-- and the rooms, on this same connection. One socket carries the "
+            "desk's threads, the channels you are in, your groups and your "
+            "private chats, because they are one table and one subscription "
+            "model. A client renders four lists off one connection."
+        )
+        made = await client.command(
+            {"command": "create_channel", "name": "Release notes", "body": "2.0 is out."},
+            "created",
+            show=False,
+            patient=True,
+        )
+        room = made["ticket"]["id"]
+        print(f"  {DIM}| {made['ticket']['reference']} #release-notes{OFF}")
+
+        note("Creating subscribes you in the same round trip, so nothing said next is missed.")
+        await client.command(
+            {"command": "send", "ticket": room, "body": "Notes below."},
+            "sent",
+            show=False,
+            patient=True,
+        )
+
+        note("The desk is somebody signed in like anybody else, so it can find and join one.")
+        await agent.command({"command": "channels"}, "channels", show=False, patient=True)
+        await agent.command({"command": "join", "ticket": room}, "joined", show=False, patient=True)
+
+        note("And hears what is said in it without asking for anything.")
+        await client.command(
+            {"command": "send", "ticket": room, "body": "Anyone reading?"},
+            "sent",
+            show=False,
+            patient=True,
+        )
+        heard = await agent.frame("message", show=False, patient=True)
+        print(f"  {DIM}| the desk heard: {heard['message']['body']}{OFF}")
+        await agent.command({"command": "leave", "ticket": room}, "left", show=False, patient=True)
+
+        note(
+            "A group, made with its members, and a private chat named by the "
+            "other account. Both are invisible to everybody outside them -- "
+            "which on this socket means the frames are never published to a "
+            "connection that is not in the room."
+        )
+        await client.command(
+            {"command": "create_group", "name": "Weekend cover", "members": [str(dara.pk)]},
+            "created",
+            show=False,
+            patient=True,
+        )
+        await client.command(
+            {"command": "direct", "account": str(dara.pk)}, "created", show=False, patient=True
+        )
+
+
+def _confirm_as_the_rail(
+    api: Api,
+    entry_id: str,
+    *,
+    method: str = "card",
+    event: str = "done",
+    external_reference: str = "",
+    reason: str = "",
+    expect: int = 200,
+    show: bool = True,
+) -> Any:
+    """Post a signed confirmation to the wallet's webhook, as the processor would.
+
+    The signature is the hex HMAC-SHA256 of ``"{timestamp}.{body}"`` under the
+    secret this deployment shares with that one rail. It is the only way a
+    movement can settle or fail: neither verb is published to the account at
+    all, since a customer able to confirm their own deposit is a customer able
+    to print money.
+    """
+    from django.conf import settings
+
+    from apps.wallet import hooks
+
+    payload: dict[str, Any] = {"entry_id": str(entry_id), "event": event}
+    if external_reference:
+        payload["external_reference"] = external_reference
+    if reason:
+        payload["reason"] = reason
+    secret = settings.WALLET_WEBHOOK_SECRETS[method]
+    return api.post_raw(
+        f"/api/v1/wallet/hooks/{method}",
+        payload,
+        headers=hooks.headers_for(secret, json.dumps(payload).encode()),
+        expect=expect,
+        show=show,
+    )
+
+
+def section_wallet(api: Api) -> None:
+    """The fifth feature app: money that is derived from its movements, not stored."""
+    from django.apps import apps as django_apps
+    from django.conf import settings
+
+    if not settings.WALLET_ENABLED or not django_apps.is_installed("apps.wallet"):
+        heading(
+            11,
+            "Wallet",
+            "apps.wallet",
+            "Not installed: DJANGO_WALLET_ENABLED is not set.",
+        )
+        return
+
+    from decimal import Decimal
+
+    from apps.wallet.catalog import (
+        Applies,
+        Basis,
+        ChargeKind,
+        ExchangeRate,
+        MethodCurrency,
+        MethodFee,
+        MethodNetwork,
+        PaymentMethod,
+    )
+    from apps.wallet.models import WalletEntry
+    from apps.wallet.services import wallet_service
+
+    heading(
+        11,
+        "A wallet, from an empty balance to a settled one",
+        "apps.wallet",
+        "There is no balance column: the balance is the last checkpoint plus "
+        "the movements written since it. And there is never one number -- what "
+        "is settled and what is merely promised are different questions.",
+    )
+
+    note(
+        "The ways to pay are rows an administrator fills in, not a list compiled "
+        "into the app. Here are three, of the three shapes that behave differently."
+    )
+
+    counter = PaymentMethod.objects.create(
+        code="counter",
+        name="Branch counter",
+        rail="cash",
+        description="Money handed over at a counter.",
+        instructions="Quote your account number at the desk.",
+        is_enabled=True,
+        supports_deposit=True,
+        # On, so a deposit somebody merely claims to have made is a request
+        # until an operator has seen the money.
+        requires_approval=True,
+    )
+    MethodCurrency.objects.create(method=counter, currency="USD", min_amount=Decimal("5"))
+
+    card = PaymentMethod.objects.create(
+        code="card",
+        name="Card",
+        rail="card",
+        description="An authorisation the processor confirms.",
+        is_enabled=True,
+        supports_deposit=True,
+        supports_withdrawal=True,
+        requires_approval=False,
+    )
+    MethodCurrency.objects.create(
+        method=card, currency="USD", min_amount=Decimal("5"), max_amount=Decimal("10000")
+    )
+    MethodFee.objects.create(
+        method=card,
+        kind=ChargeKind.COMMISSION,
+        label="Processing",
+        applies_to=Applies.BOTH,
+        percent=Decimal("2.9"),
+        fixed=Decimal("0.30"),
+        position=0,
+    )
+    MethodFee.objects.create(
+        method=card,
+        kind=ChargeKind.TAX,
+        label="VAT",
+        applies_to=Applies.BOTH,
+        percent=Decimal("20"),
+        # Of the charges before it, not of the amount -- which is how VAT on a
+        # payment commission actually works.
+        basis=Basis.CHARGES,
+        position=1,
+    )
+
+    usdt = PaymentMethod.objects.create(
+        code="usdt",
+        name="USDT",
+        rail="crypto",
+        description="An on-chain transfer.",
+        is_enabled=True,
+        supports_deposit=True,
+        supports_withdrawal=True,
+        requires_approval=False,
+    )
+    asset = MethodCurrency.objects.create(
+        method=usdt, currency="USDT", display_decimals=6, min_amount=Decimal("10")
+    )
+    MethodNetwork.objects.create(
+        asset=asset,
+        code="trc20",
+        name="Tron (TRC20)",
+        confirmations=20,
+        network_fee=Decimal("1"),
+        address_pattern=r"T[1-9A-HJ-NP-Za-km-z]{33}",
+    )
+    MethodNetwork.objects.create(
+        asset=asset,
+        code="erc20",
+        name="Ethereum (ERC20)",
+        confirmations=12,
+        network_fee=Decimal("8"),
+        address_pattern=r"0x[0-9a-fA-F]{40}",
+    )
+    ExchangeRate.objects.create(
+        base="USDT", quote="USD", rate=Decimal("1"), margin_percent=Decimal("1"), source="tour"
+    )
+
+    note(
+        "A fresh deployment has no way to pay at all, so `wallet_methods` writes "
+        "one method per rail -- switched off and charging nothing, because a fee "
+        "invented by a command is a fee nobody decided on. The three configured "
+        "above are left exactly as they are."
+    )
+    _run_wallet_command("wallet_methods")
+
+    note(
+        "A client reads the methods rather than hard-coding them, because turning "
+        "one on is an afternoon in the admin rather than a release. The ones the "
+        "command just wrote are not here: switched off is unpublished."
+    )
+    methods = api.get("/api/v1/wallet/methods", show=False)
+    print(f"  {DIM}│ published: {', '.join(row['code'] for row in methods)}{OFF}")
+    api.get("/api/v1/wallet/methods/usdt")
+
+    note("An empty wallet, opened by the first request that needed one.")
+    api.get("/api/v1/wallet")
+
+    note(
+        "What a deposit would cost, before committing to it. The same function "
+        "prices the deposit itself, so this figure is the figure charged."
+    )
+    api.post(
+        "/api/v1/wallet/quotes",
+        {"method": "card", "direction": "credit", "amount": "100.00"},
+    )
+
+    note(
+        "Pay 100 in: 2.90 commission, 0.58 VAT on that commission, 96.16 reaches "
+        "the wallet. The charges are written onto the movement as their own lines."
+    )
+    deposit = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "100.00", "reference": "tour-card-1"},
+    )
+
+    note(
+        "Recorded is not arrived. A card deposit is pending until the processor "
+        "says otherwise, and a pending deposit is worth nothing -- which is why "
+        "`settled` is still zero and `projected` is not."
+    )
+    api.get("/api/v1/wallet/balance")
+
+    note(
+        "The account asks to confirm its own deposit. There is no such endpoint, "
+        "and that is the whole security of this app: a customer who could say "
+        "`the money arrived` would be running a mint."
+    )
+    api.post(f"/api/v1/wallet/entries/{deposit['id']}/settle", {}, expect=404)
+
+    note(
+        "The processor's webhook lands instead -- signed with the secret only it "
+        "and this deployment hold, over a timestamp so it cannot be replayed. "
+        "This is where the money appears."
+    )
+    _confirm_as_the_rail(api, deposit["id"], external_reference="ch_3QxTour")
+    api.get("/api/v1/wallet/balance")
+
+    note("The same confirmation, unsigned. Rails prove who they are; nobody else can.")
+    api.post_raw(
+        "/api/v1/wallet/hooks/card",
+        {"entry_id": deposit["id"], "event": "done"},
+        expect=401,
+    )
+
+    note(
+        "The same request twice is one deposit. `reference` is the client's "
+        "idempotency key, and a retry after a timeout returns the first entry."
+    )
+    again = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "100.00", "reference": "tour-card-1"},
+        show=False,
+    )
+    if again["id"] != deposit["id"]:
+        raise WalkthroughError("a retried deposit created a second movement")
+    print(f"  {DIM}│ same entry returned: {again['id']}{OFF}")
+
+    note(
+        "`metadata` is the client's, except for the keys that say which operator "
+        "acted: a client writing one would put a staff member's name on money "
+        "they never touched, so it is refused."
+    )
+    api.post(
+        "/api/v1/wallet/deposits",
+        {
+            "method": "card",
+            "amount": "10.00",
+            "reference": "tour-card-forged",
+            "metadata": {"settled_by_operator": "someone-on-staff"},
+        },
+        expect=400,
+    )
+
+    note(
+        "A rail knows one other thing: the money did not move. A declined card is "
+        "reported through the same signed door, and the movement ends `failed` -- "
+        "kept in the history, never part of any balance."
+    )
+    declined = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "card", "amount": "25.00", "reference": "tour-card-declined"},
+        show=False,
+    )
+    failed = _confirm_as_the_rail(
+        api, declined["id"], event="failed", reason="Declined by the issuer.", show=False
+    )
+    print(f"  {DIM}│ {failed['status']}: {failed['metadata'].get('reason', '')}{OFF}")
+
+    note(
+        "A deposit through a method that requires approval is a *request*: it is "
+        "written down, it is visible, and it cannot settle until a person applies it."
+    )
+    request = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "counter", "amount": "40.00", "reference": "tour-counter-1"},
+    )
+    _confirm_as_the_rail(api, request["id"], method="counter", expect=409)
+
+    note(
+        "The back office applies it -- an admin action, because approving other "
+        "people's money is not something a request should be able to do. Cash "
+        "settles on approval: the approval *was* the confirmation."
+    )
+    applied = wallet_service.approve(request["id"], note="Counted at the desk.")
+    print(f"  {DIM}│ {applied['status']} / {applied['approval']}{OFF}")
+    api.get("/api/v1/wallet/balance")
+
+    note(
+        "Refusing one is the same stroke in the other direction, and it cancels "
+        "the movement with it: a refused request left pending would go on holding "
+        "money out of `available`, which is what refusing it was meant to release."
+    )
+    refused = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "counter", "amount": "900.00", "reference": "tour-counter-refused"},
+        show=False,
+    )
+    refused = wallet_service.reject(refused["id"], note="No cash was handed over.")
+    print(f"  {DIM}│ {refused['status']} / {refused['approval']}{OFF}")
+
+    note(
+        "One more request, left waiting. The admin section at the end of the tour "
+        "is where it gets decided, from the queue an operator actually works."
+    )
+    waiting = api.post(
+        "/api/v1/wallet/deposits",
+        {"method": "counter", "amount": "15.00", "reference": "tour-counter-2"},
+        show=False,
+    )
+    print(f"  {DIM}│ {waiting['status']}, awaiting approval: {waiting['awaiting_approval']}{OFF}")
+
+    note(
+        "A payout in another currency, on a chain that has to be named. The same "
+        "asset on the wrong chain is not a failed payment -- it is money gone to "
+        "an address nobody holds a key for, so the address is checked first."
+    )
+    api.post(
+        "/api/v1/wallet/withdrawals",
+        {
+            "method": "usdt",
+            "amount": "20",
+            "currency": "USDT",
+            "network": "trc20",
+            "destination": "0x" + "a" * 40,
+            "reference": "tour-wrong-chain",
+        },
+        expect=400,
+    )
+    payout = api.post(
+        "/api/v1/wallet/withdrawals",
+        {
+            "method": "usdt",
+            "amount": "20",
+            "currency": "USDT",
+            "network": "trc20",
+            "destination": "T" + "9" * 33,
+            "reference": "tour-usdt-1",
+        },
+    )
+
+    note(
+        "A pending payout holds its own money: `available` is `settled` less what "
+        "has already been promised. Authorise against `available`, never `settled`."
+    )
+    api.get("/api/v1/wallet/balance")
+
+    note("One movement read back, which is what a receipt page opens with.")
+    api.get(f"/api/v1/wallet/entries/{payout['id']}", show=False)
+
+    note(
+        "Cancelling is the one lifecycle verb that is the account's -- but only "
+        "while nothing has been sent. This payout needed no approval, so it went "
+        "straight to its rail, which may already be paying it: calling it off now "
+        "would release the hold and pay the money twice, so it is refused."
+    )
+    api.post(
+        f"/api/v1/wallet/entries/{payout['id']}/cancel",
+        {"reason": "Sent to the wrong exchange account."},
+        expect=409,
+    )
+
+    note("A movement that has already landed is past calling off.")
+    api.post(f"/api/v1/wallet/entries/{deposit['id']}/cancel", {}, expect=409)
+
+    note(
+        "Money to another account in this app: both sides written in one "
+        "transaction and settled at once, and free by construction -- nothing "
+        "left the app, so there is nothing to pass on."
+    )
+    from django.contrib.auth import get_user_model
+
+    zoe = get_user_model().objects.get(username="zoe")
+    ines = get_user_model().objects.create_user(username="ines", email="ines@example.com")
+    api.post(
+        "/api/v1/wallet/transfers",
+        {
+            "to_user_id": str(ines.pk),
+            "amount": "15.00",
+            "reference": "tour-transfer-1",
+            "description": "Half of dinner.",
+        },
+    )
+    received = api.get("/api/v1/wallet/balance", token=desk_token(ines), show=False)
+    print(f"  {DIM}│ ines now holds {received['settled']} settled, 15.00 of it from zoe{OFF}")
+    api.post(
+        "/api/v1/wallet/transfers",
+        {"to_user_id": str(zoe.pk), "amount": "1.00", "reference": "tour-transfer-self"},
+        expect=400,
+    )
+
+    note(
+        "Months later the cardholder disputes the first deposit. The rail says so "
+        "on the same signed webhook it settled on -- `reversed` rather than "
+        "`done` -- and a settled movement is never edited: the chargeback is "
+        "written beside it and the original is marked `reversed`, so the ledger "
+        "still agrees with the processor that remembers the payment happening."
+    )
+    _confirm_as_the_rail(
+        api,
+        deposit["id"],
+        event="reversed",
+        external_reference="ch_3QxTour",
+        reason="Disputed by the cardholder.",
+    )
+    api.get("/api/v1/wallet/balance")
+
+    note("What this deployment converts at, with the spread published beside the rate.")
+    api.get("/api/v1/wallet/rates")
+    api.get("/api/v1/wallet/exchange?amount=100&base=USDT&quote=USD")
+
+    note(
+        "Every movement the wallet has had, including what failed, was cancelled "
+        "or was reversed -- a customer asking why a deposit never arrived is "
+        "asking about exactly those rows."
+    )
+    history = api.get("/api/v1/wallet/entries?limit=20", show=False)
+    for row in history["entries"]:
+        print(
+            f"  {DIM}│ {row['kind']:<13} {row['status']:<10} "
+            f"{row['signed_amount']:>9} {row['reference']}{OFF}"
+        )
+
+    note(
+        "Folding the history into a checkpoint, the way the daily job does. "
+        "Reading a balance is one row plus the movements since it, so this is "
+        "what keeps a five-year-old wallet as cheap to read as a new one -- and "
+        "the number does not move."
+    )
+    before = api.get("/api/v1/wallet/balance", show=False)["settled"]
+    _run_wallet_command("wallet_archive", "--force")
+    after = api.get("/api/v1/wallet/balance")["settled"]
+    if Decimal(str(before)) != Decimal(str(after)):
+        raise WalkthroughError(f"archiving changed the balance: {before} became {after}")
+    print(f"  {DIM}│ balance unchanged: {after}{OFF}")
+    api.get("/api/v1/wallet/checkpoints")
+
+    note(
+        "A pending movement is never folded, however old: a checkpoint is a "
+        "number written down, and folding in something still free to change "
+        "would make that number wrong later."
+    )
+    still_open = WalletEntry.objects.filter(checkpoint__isnull=True, status="pending").count()
+    print(f"  {DIM}│ {still_open} pending movement(s) left unarchived{OFF}")
+
+    note(
+        "Hosted gateways -- Zarinpal, IDPay, Zibal, Saman, Mellat, Stripe, PayPal "
+        "and the rest -- are configured like sign-in providers: a gateway with no "
+        "credentials in the environment does not exist. This tour configures none, "
+        "so the list is empty and a top-up through one is refused."
+    )
+    api.get("/api/v1/wallet/gateways")
+    api.post(
+        "/api/v1/wallet/gateways/zarinpal/deposits",
+        {"amount": "50000", "reference": "tour-gateway"},
+        expect=400,
+    )
+    note(
+        "The customer's return trip from a gateway settles nothing by itself: the "
+        "server asks the gateway. For a gateway that is not configured there is "
+        "nobody to ask."
+    )
+    missing_entry = "00000000-0000-0000-0000-000000000000"
+    api.get(f"/api/v1/wallet/hooks/gateways/zarinpal/{missing_entry}", expect=400, show=False)
+    api.post(f"/api/v1/wallet/hooks/gateways/zarinpal/{missing_entry}", expect=400, show=False)
+
+    _wallet_surface_covered(api)
+
+
+def _run_wallet_command(name: str, *arguments: str) -> None:
+    """Run one of the wallet's management commands and print what it said."""
+    from django.core.management import call_command
+
+    stream = io.StringIO()
+    call_command(name, *arguments, stdout=stream, stderr=stream)
+    print(f"  {CYAN}{'CMD':<6}{OFF} manage.py {' '.join((name, *arguments))}")
+    for line in stream.getvalue().splitlines():
+        print(f"  {DIM}│ {line}{OFF}")
+
+
+def _wallet_surface_covered(api: Api) -> None:
+    """Assert the section above called every route the wallet publishes.
+
+    The same check the support section makes of itself, and for the same
+    reason: asked of the routers rather than of a list kept here, so a route
+    added to the app without a step in this tour fails the tour.
+    """
+    from apps.wallet.rest import router
+    from apps.wallet.rest.hooks import router as hooks_router
+
+    missed: list[str] = []
+    total = 0
+    for prefix, source in (("/api/v1/wallet", router), ("/api/v1/wallet/hooks", hooks_router)):
+        for path, view in source.path_operations.items():
+            literals = re.split(r"\{[^}]+\}", f"{prefix}{path}")
+            pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+            for operation in view.operations:
+                for method in operation.methods:
+                    total += 1
+                    if not any(
+                        seen_method == method and pattern.match(seen_path)
+                        for seen_method, seen_path in api.visited
+                    ):
+                        missed.append(f"{method} {prefix}{path}")
+
+    if missed:
+        raise WalkthroughError("the wallet tour skipped " + ", ".join(sorted(missed)))
+    print(f"  {DIM}│ toured {total} of {total} wallet endpoints{OFF}")
+
+
+def section_club(api: Api) -> None:
+    """The sixth feature app: missions nobody claims, paid for by what the others did."""
+    from django.apps import apps as django_apps
+    from django.conf import settings
+
+    if not settings.CLUB_ENABLED or not django_apps.is_installed("apps.club"):
+        heading(12, "Club", "apps.club", "Not installed: DJANGO_CLUB_ENABLED is not set.")
+        return
+
+    from django.contrib.auth import get_user_model
+
+    from apps.club.errors import InvalidLevels, UnknownEvent
+    from apps.club.models import Club, JoinPolicy
+    from apps.club.services import club_service
+
+    heading(
+        12,
+        "A club, and missions nobody claims",
+        "apps.club",
+        "A ladder of levels, and missions that complete themselves. The shop, the "
+        "wallet and the sign-in trail say what happened; the club decides what it "
+        "was worth. No endpoint lets a client say it did something.",
+    )
+
+    note(
+        "What a mission can be built out of is generated from what is installed. "
+        "The shop and the wallet are on, so their events are listed; a deployment "
+        "without them would not list them, and a mission naming one would be refused."
+    )
+    for event in api.get("/api/v1/club/events", show=False):
+        print(f"  {DIM}│ {event['source']:<9} {event['key']}{OFF}")
+
+    note(
+        "An operator defines the clubs and a ladder for each. A ladder is checked as "
+        "a whole, so one with a gap in it is refused and the ladder already there is kept."
+    )
+    Club.objects.create(name="Explorers", slug="explorers", description="Where everybody starts.")
+    Club.objects.create(name="Insiders", slug="insiders", join_policy=str(JoinPolicy.INVITE))
+    club_service.set_levels(
+        "explorers",
+        [
+            {"position": 1, "name": "Bronze", "xp_required": 0, "perks": "A badge."},
+            {"position": 2, "name": "Silver", "xp_required": 100, "perks": "Free delivery."},
+            {"position": 3, "name": "Gold", "xp_required": 250, "perks": "Early access."},
+        ],
+    )
+    club_service.set_levels("insiders", [{"position": 1, "name": "Member", "xp_required": 0}])
+    try:
+        club_service.set_levels(
+            "explorers",
+            [
+                {"position": 1, "name": "Bronze", "xp_required": 0},
+                {"position": 3, "name": "Gold", "xp_required": 250},
+            ],
+        )
+    except InvalidLevels as refusal:
+        print(f"  {DIM}│ refused: {refusal}{OFF}")
+    else:
+        raise WalkthroughError("a ladder with a gap in it was accepted")
+
+    shop_on = django_apps.is_installed("apps.shop")
+    wallet_on = django_apps.is_installed("apps.wallet")
+    note(
+        "Missions are rules, not tasks: an event, which of those events count, and "
+        "what finishing one pays. Each of these listens to a different app."
+    )
+    missions: list[dict[str, Any]] = [
+        {"code": "welcome", "title": "Say hello", "event": "club.member.joined", "xp": 25},
+        {
+            "code": "come-back",
+            "title": "Sign in today",
+            "event": "accounts.user.signed_in",
+            "xp": 10,
+            "repeat": "daily",
+        },
+    ]
+    if shop_on:
+        missions.append(
+            {
+                "code": "first-order",
+                "title": "Your first order",
+                "event": "shop.order.paid",
+                "xp": 60,
+            }
+        )
+    if wallet_on:
+        missions.append(
+            {
+                "code": "top-up",
+                "title": "Top up 50 or more",
+                "event": "wallet.deposit.settled",
+                "xp": 40,
+                "repeat": "every_time",
+                "criteria": {"min_value": 50},
+            }
+        )
+    for mission in missions:
+        written = club_service.define_mission("explorers", is_enabled=True, **mission)
+        print(f"  {DIM}│ {written['event']:<26} +{written['xp']:<3} {written['title']}{OFF}")
+    expected = sum(int(mission["xp"]) for mission in missions)
+
+    note(
+        "A mission listening for an event nothing emits is refused when it is "
+        "written -- not discovered weeks later, when nobody has earned anything."
+    )
+    try:
+        club_service.define_mission(
+            "explorers", code="typo", title="Typo", event="shop.order.payed", xp=1
+        )
+    except UnknownEvent as refusal:
+        print(f"  {DIM}│ refused: {refusal}{OFF}")
+    else:
+        raise WalkthroughError("a mission on an event nothing registers was accepted")
+
+    note("A ladder is what somebody reads to decide whether to join, so it needs no membership.")
+    api.get("/api/v1/club/clubs")
+    api.get("/api/v1/club/clubs/explorers")
+    api.get("/api/v1/club/clubs/explorers/levels", show=False)
+
+    note(
+        "An account in no club is told so: a 409, not an empty object that reads "
+        "like a club with nothing in it."
+    )
+    api.get("/api/v1/club/me", expect=409)
+
+    note("An invite-only club is joined from the back office, never by asking.")
+    api.post("/api/v1/club/join", {"slug": "insiders"}, expect=409)
+
+    note(
+        "Joining is an event like any other, so the welcome mission pays on the way "
+        "in. A double-tapped join is the same membership, and not a second welcome."
+    )
+    api.post("/api/v1/club/join", {"slug": "explorers"})
+    again = api.post("/api/v1/club/join", {"slug": "explorers"}, show=False)
+    print(f"  {DIM}│ still {again['xp']} XP{OFF}")
+
+    note(
+        "Now the other apps, none of which knows the club exists. Every login "
+        "method already writes a row to the sign-in audit trail; the club listens "
+        "for the row, so signing in is all the client does."
+    )
+    api.post(
+        "/api/v1/auth/password/login",
+        {"identifier": "zoe", "password": PASSWORD},
+        token="",
+        show=False,
+    )
+
+    if shop_on:
+        from apps.shop.models import ShippingMethod
+
+        note(
+            "An order, settled by the desk. The shop announces it once the payment "
+            "has committed, and the club's bridge is what is listening."
+        )
+        api.post("/api/v1/shop/cart/items", {"product": "featherbook-14"}, show=False)
+        address = api.get("/api/v1/shop/addresses", show=False)[0]
+        standard = ShippingMethod.objects.get(name="Standard")
+        order = api.post(
+            "/api/v1/shop/checkout",
+            {"address": address["id"], "shipping_method": str(standard.pk)},
+            show=False,
+        )
+        _settle_as_the_desk(order["number"], reference="club-tour")
+        note("The gateway retries its callback. One order, so one payment for it.")
+        _settle_as_the_desk(order["number"], reference="club-tour")
+
+    if wallet_on:
+        note(
+            "A deposit the card rail confirms. The wallet already announced every "
+            "settled movement, so it needed no change for the club to hear this one."
+        )
+        deposit = api.post(
+            "/api/v1/wallet/deposits",
+            {"method": "card", "amount": "80.00", "reference": "tour-club-top-up"},
+            show=False,
+        )
+        _confirm_as_the_rail(api, deposit["id"], show=False)
+
+    note(
+        "Where zoe stands, having claimed nothing. Her XP is not a column: it is the "
+        "sum of the ledger below it, which a client can add up for itself."
+    )
+    me = api.get("/api/v1/club/me")
+    api.get("/api/v1/club/missions", show=False)
+    ledger = api.get("/api/v1/club/awards")
+    added_up = sum(award["xp"] for award in ledger["awards"])
+    if not me["xp"] == added_up == expected:
+        raise WalkthroughError(
+            f"the club reports {me['xp']} XP, the ledger adds up to {added_up}, "
+            f"and the missions above pay {expected}"
+        )
+    print(f"  {DIM}│ {added_up} XP, on {me['level']['name']}{OFF}")
+
+    note(
+        "Somebody added from the back office, and XP an operator grants by hand -- "
+        "with a reason, because an unexplained level is the one a member asks about."
+    )
+    yara = get_user_model().objects.create_user(username="yara", email="yara@example.com")
+    club_service.add_member(yara, "explorers")
+    club_service.grant(yara, xp=300, reason="Beta tester.", reference="tour-grant-yara")
+    note("The leaderboard is your own club's, with your own row flagged. There is no other.")
+    api.get("/api/v1/club/leaderboard")
+
+    note(
+        "An account is in no club the moment it exists, so a mission on "
+        "accounts.user.registered would have nobody to pay. DJANGO_CLUB_JOIN_ON_SIGNUP "
+        "names a club every new account is put in as it is created -- turned on "
+        "here for one sign-up."
+    )
+    from django.test import override_settings
+
+    club_service.define_mission(
+        "explorers",
+        code="signed-up",
+        title="Signed up",
+        event="accounts.user.registered",
+        xp=15,
+        is_enabled=True,
+    )
+    with override_settings(CLUB_JOIN_ON_SIGNUP="explorers"):
+        omar = api.post(
+            "/api/v1/auth/password/signup",
+            {"identifier": "omar", "password": PASSWORD, "email": "omar@example.com"},
+            token="",
+            show=False,
+        )
+    arrivals = api.get("/api/v1/club/awards", token=omar["credentials"]["access_token"], show=False)
+    earned = sorted(award["reason"] for award in arrivals["awards"])
+    if not {"Say hello", "Signed up"} <= set(earned):
+        raise WalkthroughError(f"a new account in the signup club was paid for {earned}")
+    print(f"  {DIM}│ omar, on arrival: {', '.join(earned)}{OFF}")
+
+    note("Leaving keeps the history, and coming back picks the ladder up where it was left.")
+    api.post("/api/v1/club/leave", show=False)
+    api.get("/api/v1/club/me", expect=409, show=False)
+    back = api.post("/api/v1/club/join", {"slug": "explorers"}, show=False)
+    if back["xp"] != me["xp"]:
+        raise WalkthroughError(f"rejoining changed the XP: {me['xp']} became {back['xp']}")
+    print(f"  {DIM}│ back with {back['xp']} XP{OFF}")
+
+    note(
+        "And there is no way to claim a mission, on any transport. A mission a "
+        "client can report is a mission a client can invent."
+    )
+    api.post("/api/v1/club/missions/first-order/claim", expect=404, show=False)
+
+    _club_surface_covered(api)
+
+
+def _club_surface_covered(api: Api) -> None:
+    """Assert the section above called every route the club publishes.
+
+    The same check the wallet and support sections make of themselves, asked of
+    the router rather than of a list kept here.
+    """
+    from apps.club.rest.v1 import router
+
+    missed: list[str] = []
+    total = 0
+    for path, view in router.path_operations.items():
+        literals = re.split(r"\{[^}]+\}", f"/api/v1/club{path}")
+        pattern = re.compile("^" + "[^/]+".join(re.escape(part) for part in literals) + "$")
+        for operation in view.operations:
+            for method in operation.methods:
+                total += 1
+                if not any(
+                    seen_method == method and pattern.match(seen_path)
+                    for seen_method, seen_path in api.visited
+                ):
+                    missed.append(f"{method} /api/v1/club{path}")
+
+    if missed:
+        raise WalkthroughError("the club tour skipped " + ", ".join(sorted(missed)))
+    print(f"  {DIM}│ toured {total} of {total} club endpoints{OFF}")
+
+
+def section_email_code(api: Api) -> None:
+    heading(
+        13,
         "One-time code by email",
         "auth_email_code",
         "No password at all: a ticket goes to the client, a code goes to the "
@@ -1253,7 +3043,7 @@ def section_email_code(api: Api) -> None:
 
 def section_sms_code(api: Api) -> None:
     heading(
-        11,
+        14,
         "One-time code by SMS",
         "auth_sms_code",
         "The same two steps over a phone number, which is the one identifier "
@@ -1270,7 +3060,7 @@ def section_sms_code(api: Api) -> None:
 
 def section_magic_link(api: Api) -> None:
     heading(
-        12,
+        15,
         "Magic link",
         "auth_magic_link",
         "One emailed link, good once. The client never sees a code: the token in "
@@ -1286,7 +3076,7 @@ def section_magic_link(api: Api) -> None:
 
 def section_twofactor(api: Api) -> None:
     heading(
-        13,
+        16,
         "Second factors",
         "auth_twofactor",
         "Four factors on one app. Enrolment is not real until a code confirms "
@@ -1378,7 +3168,7 @@ def section_tokens(api: Api) -> None:
 
     mode = settings.AUTH_TOKEN_MODE
     heading(
-        14,
+        17,
         f"Token mode: {mode}",
         "no token app" if mode == "none" else f"oauth_core, oauth_{mode}",
         "All three modes publish the same endpoints under /auth/token, so a "
@@ -1436,7 +3226,7 @@ def section_social(api: Api) -> None:
     from django.conf import settings
 
     heading(
-        15,
+        18,
         "Social sign-in",
         ", ".join(f"oauth_{name}" for name in settings.OAUTH_PROVIDERS),
         "Each provider mounts a start and a callback. Start is the half this "
@@ -1456,7 +3246,7 @@ def section_audit(api: Api) -> None:
     from infrastructure.oauth.core import jwt_tokens
 
     heading(
-        16,
+        19,
         "What was recorded",
         "auth_core, oauth_core",
         "Every step above left an audit row, and every credential above was a "
@@ -1486,7 +3276,7 @@ def section_audit(api: Api) -> None:
 
 def section_openapi(api: Api) -> None:
     heading(
-        17,
+        20,
         "The document all of that produced",
         "config.api",
         "One NinjaAPI per registered version, every enabled app's router "
@@ -1553,6 +3343,20 @@ class AdminTour:
         self.visited += 1
         return response
 
+    def act(self, changelist: str, action: str, *pks: Any, label: str = "") -> Any:
+        """Run an admin action on some rows, as the changelist's Go button does."""
+        response = self.client.post(
+            changelist,
+            {"action": action, "_selected_action": [str(pk) for pk in pks], "index": 0},
+        )
+        ok = response.status_code == 302
+        tint = GREEN if ok else RED
+        suffix = f"  {DIM}{label}{OFF}" if label else ""
+        print(f"  {CYAN}{'POST':<6}{OFF} {changelist} {tint}→ {response.status_code}{OFF}{suffix}")
+        if not ok:
+            raise WalkthroughError(f"admin action {action} returned {response.status_code}")
+        return response
+
 
 def section_admin(api: Api) -> None:
     """Every registered admin, opened. The half of this project nobody curls."""
@@ -1560,7 +3364,7 @@ def section_admin(api: Api) -> None:
     from django.urls import reverse
 
     heading(
-        18,
+        21,
         "The admin, every app of it",
         "all apps",
         "The API is half the project; the other half is the screen the people "
@@ -1594,12 +3398,14 @@ def section_admin(api: Api) -> None:
             )
 
     note(
-        "The changelists are only the door. Two screens are worth opening on "
-        "their own, because neither is an ordinary Django change form."
+        "The changelists are only the door. A few screens are worth opening on "
+        "their own, because none is an ordinary Django change form."
     )
     _admin_content_screen(tour)
     _admin_notification_form(tour)
     _admin_shop_order(tour)
+    _admin_wallet_queue(tour)
+    _admin_club_member(tour)
 
     note(f"{tour.visited} admin pages opened, all of them rendering.")
 
@@ -1666,6 +3472,69 @@ def _admin_shop_order(tour: AdminTour) -> None:
     tour.visit(reverse("admin:shop_product_add"), "add a product")
 
 
+def _admin_wallet_queue(tour: AdminTour) -> None:
+    """The queue of movements waiting on a person, worked the way an operator works it."""
+    from django.apps import apps as django_apps
+    from django.urls import reverse
+
+    if not django_apps.is_installed("apps.wallet"):
+        return
+
+    from apps.wallet.catalog import PaymentMethod
+    from apps.wallet.models import Wallet, WalletEntry
+
+    waiting = WalletEntry.objects.awaiting_approval().first()
+    if waiting is None:  # pragma: no cover - only if the wallet section did not run
+        return
+    note(
+        "The request the wallet section left waiting. Every field on a movement "
+        "is read-only, for a superuser too: what changes one is an action, and "
+        "the action calls the same service the API calls."
+    )
+    queue = reverse("admin:wallet_walletentry_changelist")
+    tour.visit(reverse("admin:wallet_walletentry_change", args=(waiting.pk,)), "the request")
+    tour.act(queue, "reject_entries", waiting.pk, label="Refuse the selected requests")
+    waiting.refresh_from_db()
+    if waiting.approval != "rejected" or waiting.status != "cancelled":
+        raise WalkthroughError(
+            f"refusing from the admin left the request {waiting.status} / {waiting.approval}"
+        )
+    print(f"  {DIM}│ {waiting.status} / {waiting.approval}{OFF}")
+
+    wallet = Wallet.objects.get(user__username="zoe")
+    tour.visit(reverse("admin:wallet_wallet_change", args=(wallet.pk,)), "zoe's wallet and balance")
+    card = PaymentMethod.objects.get(code="card")
+    tour.visit(
+        reverse("admin:wallet_paymentmethod_change", args=(card.pk,)), "the card and its fees"
+    )
+
+
+def _admin_club_member(tour: AdminTour) -> None:
+    """A member's screen: XP that is derived, over a ledger nobody can type into."""
+    from django.apps import apps as django_apps
+    from django.urls import reverse
+
+    if not django_apps.is_installed("apps.club"):
+        return
+
+    from apps.club.models import Membership, Mission
+
+    membership = Membership.objects.filter(user__username="zoe").first()
+    if membership is None:  # pragma: no cover - only if the club section did not run
+        return
+    note(
+        "zoe's membership, with the awards her level is derived from underneath it. "
+        "Read-only: an award typed in by hand is a level with no explanation."
+    )
+    tour.visit(reverse("admin:club_membership_change", args=(membership.pk,)), "zoe in the club")
+    mission = Mission.objects.filter(code="welcome").first()
+    if mission is not None:
+        tour.visit(
+            reverse("admin:club_mission_change", args=(mission.pk,)),
+            "a mission, its event picked from what is registered",
+        )
+
+
 def tour() -> int:
     """The tour itself, running inside the example project."""
     configure()
@@ -1682,6 +3551,9 @@ def tour() -> int:
         section_cms(api)
         section_notifications(api)
         section_shop(api)
+        section_support(api)
+        section_wallet(api)
+        section_club(api)
         section_email_code(api)
         section_sms_code(api)
         section_magic_link(api)

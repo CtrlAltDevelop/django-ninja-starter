@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -347,12 +348,60 @@ AUTH_JWT_ISSUER = os.getenv("DJANGO_AUTH_JWT_ISSUER", "django-ninja-starter")
 AUTH_JWT_AUDIENCE = os.getenv("DJANGO_AUTH_JWT_AUDIENCE", "")
 AUTH_JWT_LEEWAY_SECONDS = int(os.getenv("DJANGO_AUTH_JWT_LEEWAY_SECONDS", "30"))
 
+# -- which transports a feature app publishes --------------------------------
+#
+# Enabling an app installs its tables and, by default, every transport it knows
+# how to speak. That default is right for development and wasteful for a
+# deployment that only ever calls one of them: a project whose clients speak
+# REST pays for the GraphQL schema and the gRPC service registry of every app it
+# turned on, in import time at boot and in surface area for the rest of the
+# deployment's life.
+#
+# So each app also takes a list. `DJANGO_SUPPORT_TRANSPORTS=rest,ws` serves the
+# support desk's endpoints and its socket and publishes neither its GraphQL
+# fields nor its gRPC services. Unset means all of them, which is what keeps
+# this invisible to anybody who does not want it.
+#
+# A list rather than a boolean per transport because the alternative is four
+# environment variables per app, and because adding a transport later should not
+# mean inventing a variable for every app that speaks it.
+TRANSPORTS = ("rest", "graph", "grpc", "ws")
+
+
+def app_transports(app: str, published: tuple[str, ...]) -> tuple[str, ...]:
+    """Which of one app's transports this deployment serves.
+
+    Unset serves everything the app publishes. A name the app does not publish
+    is refused rather than ignored: asking for `ws` from the CMS means somebody
+    believes the CMS has a socket, and a deployment that quietly served three of
+    the four transports they listed would leave them to find out from a client.
+    """
+    raw = os.getenv(f"DJANGO_{app.upper()}_TRANSPORTS", "").strip()
+    if not raw:
+        return published
+    chosen = tuple(dict.fromkeys(part.strip().lower() for part in raw.split(",") if part.strip()))
+    unknown = [name for name in chosen if name not in TRANSPORTS]
+    if unknown:
+        raise ImproperlyConfigured(
+            f"Unknown DJANGO_{app.upper()}_TRANSPORTS: {', '.join(sorted(unknown))}. "
+            f"One or more of: {', '.join(TRANSPORTS)}."
+        )
+    unpublished = [name for name in chosen if name not in published]
+    if unpublished:
+        raise ImproperlyConfigured(
+            f"DJANGO_{app.upper()}_TRANSPORTS names {', '.join(sorted(unpublished))}, "
+            f"which `apps.{app}` does not publish. It speaks: {', '.join(published)}."
+        )
+    return chosen
+
+
 # The content app. Optional in the same way every login method is: naming it is
 # what installs it, and a project that does not name it carries no CMS tables,
 # publishes no CMS routes and never imports the package.
 CMS_ENABLED = os.getenv("DJANGO_CMS_ENABLED", "false").lower() == "true"
 CMS_APP = "apps.cms.apps.CmsConfig"
 CMS_INSTALLED_APPS = [CMS_APP] if CMS_ENABLED else []
+CMS_TRANSPORTS = app_transports("cms", ("rest", "graph", "grpc")) if CMS_ENABLED else ()
 CMS_ROUTERS = (
     [
         {
@@ -366,7 +415,7 @@ CMS_ROUTERS = (
             ),
         }
     ]
-    if CMS_ENABLED
+    if "rest" in CMS_TRANSPORTS
     else []
 )
 # The languages content may be written in. Deliberately not Django's LANGUAGES,
@@ -397,6 +446,11 @@ CMS_MAX_UPLOAD_BYTES = CMS_MAX_UPLOAD_MB * 1024 * 1024
 NOTIFICATIONS_ENABLED = os.getenv("DJANGO_NOTIFICATIONS_ENABLED", "false").lower() == "true"
 NOTIFICATIONS_APP = "apps.notifications.apps.NotificationsConfig"
 NOTIFICATIONS_INSTALLED_APPS = [NOTIFICATIONS_APP] if NOTIFICATIONS_ENABLED else []
+NOTIFICATIONS_TRANSPORTS = (
+    app_transports("notifications", ("rest", "graph", "grpc", "ws"))
+    if NOTIFICATIONS_ENABLED
+    else ()
+)
 # Where the WebSocket is mounted. A setting rather than a constant because it is
 # the one part of this app a reverse proxy has to be told about, and a proxy is
 # usually easier to point at the app than the other way round. Declared above the
@@ -452,7 +506,7 @@ NOTIFICATIONS_ROUTERS = (
             ),
         }
     ]
-    if NOTIFICATIONS_ENABLED
+    if "rest" in NOTIFICATIONS_TRANSPORTS
     else []
 )
 # How a notification created in one process reaches sockets held open by another.
@@ -468,6 +522,12 @@ NOTIFICATIONS_CHANNEL_PREFIX = os.getenv("DJANGO_NOTIFICATIONS_CHANNEL_PREFIX", 
 # endpoint is where the rest of the history lives; this is only so that a client
 # that reconnects does not have to make an HTTP call to find out what it missed.
 NOTIFICATIONS_SOCKET_BACKLOG = int(os.getenv("DJANGO_NOTIFICATIONS_SOCKET_BACKLOG", "20"))
+# How many commands one socket may send a minute before it is refused; zero
+# turns the limit off. Each `list` is two queries and each `authenticate` a
+# token lookup, so a loop on one connection would otherwise cost the database.
+NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE = int(
+    os.getenv("DJANGO_NOTIFICATIONS_SOCKET_COMMANDS_PER_MINUTE", "120")
+)
 # How long a notification is kept. `manage.py notifications_prune` deletes what
 # is older, and nothing does so on its own: deleting rows on a timer nobody
 # asked for is the kind of surprise a starter should not ship. Zero -- the
@@ -481,6 +541,7 @@ NOTIFICATIONS_RETENTION_DAYS = int(os.getenv("DJANGO_NOTIFICATIONS_RETENTION_DAY
 SHOP_ENABLED = os.getenv("DJANGO_SHOP_ENABLED", "false").lower() == "true"
 SHOP_APP = "apps.shop.apps.ShopConfig"
 SHOP_INSTALLED_APPS = [SHOP_APP] if SHOP_ENABLED else []
+SHOP_TRANSPORTS = app_transports("shop", ("rest", "graph", "grpc")) if SHOP_ENABLED else ()
 SHOP_ROUTERS = (
     [
         {
@@ -497,7 +558,7 @@ SHOP_ROUTERS = (
             ),
         }
     ]
-    if SHOP_ENABLED
+    if "rest" in SHOP_TRANSPORTS
     else []
 )
 # The one currency every price is quoted in. A catalogue priced in several needs
@@ -508,9 +569,318 @@ SHOP_CURRENCY = os.getenv("DJANGO_SHOP_CURRENCY", "USD").upper()
 # default: a storefront that publishes whatever is typed into it is a spam
 # target from the first week.
 SHOP_REVIEW_MODERATION = os.getenv("DJANGO_SHOP_REVIEW_MODERATION", "true").lower() == "true"
+# How an order is paid. Empty means `wallet` wherever the wallet app is
+# installed -- orders are paid from the customer's balance, and only that way --
+# and `manual` (settled by an operator in the admin) where it is not.
+SHOP_PAYMENT_PROVIDER = os.getenv("DJANGO_SHOP_PAYMENT_PROVIDER", "")
 SHOP_MAX_ITEM_QUANTITY = int(os.getenv("DJANGO_SHOP_MAX_ITEM_QUANTITY", "99"))
 SHOP_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_PAGE_SIZE", "24"))
 SHOP_MAX_PAGE_SIZE = int(os.getenv("DJANGO_SHOP_MAX_PAGE_SIZE", "100"))
+
+# The wallet app. Optional the same way the others are, and rather more
+# consequential to turn on: naming it installs the tables that hold people's
+# money, so a deployment that names it should mean it.
+WALLET_ENABLED = os.getenv("DJANGO_WALLET_ENABLED", "false").lower() == "true"
+WALLET_APP = "apps.wallet.apps.WalletConfig"
+WALLET_INSTALLED_APPS = [WALLET_APP] if WALLET_ENABLED else []
+WALLET_TRANSPORTS = app_transports("wallet", ("rest", "graph", "grpc")) if WALLET_ENABLED else ()
+WALLET_ROUTERS = (
+    [
+        {
+            "prefix": "/wallet",
+            "router": "apps.wallet.rest.router",
+            "tag": "Wallet",
+            "description": (
+                "One wallet per account: what is in it, what is on its way, and "
+                "every movement it has ever had. The balance is derived from the "
+                "entries rather than stored, so it is always two numbers -- what "
+                "is settled and what is merely pending -- and never one. The ways "
+                "to pay are configured by an administrator rather than compiled "
+                "in, so `/wallet/methods` is the only place a client can learn "
+                "what this deployment takes, what it charges and what it "
+                "converts at. Nothing here is scoped by a parameter: every call "
+                "resolves the wallet from the account that made it."
+            ),
+        }
+    ]
+    if "rest" in WALLET_TRANSPORTS
+    else []
+)
+# The currency every wallet is denominated in. Amounts are stored as bare
+# decimals, so this is the only record of what they mean -- changing it on a
+# deployment that already holds money redenominates every balance in it.
+WALLET_CURRENCY = os.getenv("DJANGO_WALLET_CURRENCY", "USD").upper()
+# Which rails this deployment has actually integrated. The outer gate: an
+# administrator can configure a payment method in the admin, but if its rail is
+# not named here it is never published. Empty means every rail the app knows.
+WALLET_METHODS = tuple(
+    rail.strip().lower()
+    for rail in os.getenv("DJANGO_WALLET_METHODS", "").split(",")
+    if rail.strip()
+)
+# Whether an account's first wallet request opens one for it. On by default,
+# because "every account has a wallet" is the promise the app makes, and a
+# project that has to remember to open one will forget for exactly one user.
+WALLET_AUTO_CREATE = os.getenv("DJANGO_WALLET_AUTO_CREATE", "true").lower() == "true"
+# The secret a payment rail signs its confirmations with, one per method:
+#
+#   DJANGO_WALLET_WEBHOOK_SECRETS=stripe-card:whsec_abc,coinbase:xyz
+#
+# Per method rather than per deployment because the secrets belong to different
+# companies, and a processor that leaks one should not be able to confirm
+# movements on another's rail. In the environment rather than in a column
+# because a secret in the database is a secret in every backup and on an admin
+# screen. A method named here is a method whose webhook this deployment can
+# verify; a method not named confirms nothing, which is the safe direction to
+# fail -- movements stay pending and somebody notices the queue.
+WALLET_WEBHOOK_SECRETS = {
+    pair.split(":", 1)[0].strip(): pair.split(":", 1)[1].strip()
+    for pair in os.getenv("DJANGO_WALLET_WEBHOOK_SECRETS", "").split(",")
+    if ":" in pair
+}
+# How far out of date a signed confirmation may be, in seconds. The signature
+# covers the timestamp, so this is what stops a confirmation captured off the
+# wire from being replayed tomorrow.
+WALLET_WEBHOOK_TOLERANCE_SECONDS = int(os.getenv("DJANGO_WALLET_WEBHOOK_TOLERANCE_SECONDS", "300"))
+# Hosted payment gateways a wallet can be topped up through, configured the way
+# sign-in providers are: fill a gateway's keys and it is offered, leave them
+# empty and it does not exist. Each is reached through a payment method (in the
+# admin) whose code is the gateway's key. See `apps.wallet.gateways`.
+_GATEWAY_SANDBOX = os.getenv("DJANGO_WALLET_GATEWAY_SANDBOX", "false").lower() == "true"
+WALLET_GATEWAYS = {
+    "zarinpal": {"merchant_id": os.getenv("ZARINPAL_MERCHANT_ID", "")},
+    "idpay": {"api_key": os.getenv("IDPAY_API_KEY", "")},
+    "zibal": {"merchant": os.getenv("ZIBAL_MERCHANT", "")},
+    "nextpay": {"api_key": os.getenv("NEXTPAY_API_KEY", "")},
+    "payir": {"api_key": os.getenv("PAYIR_API_KEY", "")},
+    "vandar": {"api_key": os.getenv("VANDAR_API_KEY", "")},
+    "saman": {"terminal_id": os.getenv("SAMAN_TERMINAL_ID", "")},
+    "mellat": {
+        "terminal_id": os.getenv("MELLAT_TERMINAL_ID", ""),
+        "username": os.getenv("MELLAT_USERNAME", ""),
+        "password": os.getenv("MELLAT_PASSWORD", ""),
+    },
+    "sadad": {
+        "merchant_id": os.getenv("SADAD_MERCHANT_ID", ""),
+        "terminal_id": os.getenv("SADAD_TERMINAL_ID", ""),
+        "terminal_key": os.getenv("SADAD_TERMINAL_KEY", ""),
+    },
+    "stripe": {"secret_key": os.getenv("STRIPE_SECRET_KEY", "")},
+    "paypal": {
+        "client_id": os.getenv("PAYPAL_CLIENT_ID", ""),
+        "client_secret": os.getenv("PAYPAL_CLIENT_SECRET", ""),
+    },
+}
+# Sandbox applies to the gateways that have one. Zibal and Pay.ir need no
+# credentials in sandbox, so turning this on offers them straight away.
+for _gateway in WALLET_GATEWAYS.values():
+    _gateway["sandbox"] = _GATEWAY_SANDBOX  # type: ignore[assignment]
+# This wallet's public URL prefix, e.g. https://api.example.com/api/wallet. The
+# gateways send customers back under it; empty derives it from the request.
+WALLET_GATEWAY_CALLBACK_URL = os.getenv("DJANGO_WALLET_GATEWAY_CALLBACK_URL", "")
+# The front-end page a customer lands on afterwards, given ?entry=&status=.
+# Empty answers the return trip with the entry as JSON.
+WALLET_GATEWAY_RETURN_URL = os.getenv("DJANGO_WALLET_GATEWAY_RETURN_URL", "")
+WALLET_GATEWAY_TIMEOUT_SECONDS = int(os.getenv("DJANGO_WALLET_GATEWAY_TIMEOUT_SECONDS", "15"))
+# Reading a balance costs one checkpoint row plus every entry written since it,
+# so the archive keeps that second number small. Either trigger is enough: an
+# entry old enough, or enough of them to slow a read down.
+WALLET_ARCHIVE_AFTER_DAYS = int(os.getenv("DJANGO_WALLET_ARCHIVE_AFTER_DAYS", "1"))
+WALLET_ARCHIVE_THRESHOLD = int(os.getenv("DJANGO_WALLET_ARCHIVE_THRESHOLD", "20"))
+# How long a movement may wait on its rail before `manage.py wallet_expire` gives
+# up on it, in hours. Zero -- the default -- means never, because the right
+# window depends on the slowest rail a deployment runs: a card authorisation is
+# stale in a day, a bank transfer is not late until the third. Requests waiting
+# on an operator are never expired by the job; that wait is a person's.
+WALLET_EXPIRE_AFTER_HOURS = int(os.getenv("DJANGO_WALLET_EXPIRE_AFTER_HOURS", "0"))
+# How far below zero a wallet may go. Zero -- the default -- means never, which
+# is the only safe default: anything else is credit being extended, and this app
+# does not collect it.
+WALLET_OVERDRAFT_LIMIT = Decimal(os.getenv("DJANGO_WALLET_OVERDRAFT_LIMIT", "0"))
+# The deployment's own bounds, in the wallet currency, checked on top of whatever
+# each configured method allows. Zero means no bound. The withdrawal ceiling is
+# the cheapest defence there is against a compromised account emptying a wallet
+# in a single call.
+WALLET_MIN_DEPOSIT = Decimal(os.getenv("DJANGO_WALLET_MIN_DEPOSIT", "0"))
+WALLET_MAX_DEPOSIT = Decimal(os.getenv("DJANGO_WALLET_MAX_DEPOSIT", "0"))
+WALLET_MIN_WITHDRAWAL = Decimal(os.getenv("DJANGO_WALLET_MIN_WITHDRAWAL", "0"))
+WALLET_MAX_WITHDRAWAL = Decimal(os.getenv("DJANGO_WALLET_MAX_WITHDRAWAL", "0"))
+WALLET_PAGE_SIZE = int(os.getenv("DJANGO_WALLET_PAGE_SIZE", "50"))
+WALLET_MAX_PAGE_SIZE = int(os.getenv("DJANGO_WALLET_MAX_PAGE_SIZE", "200"))
+
+# How much client-supplied `metadata` one movement may carry, in bytes. This is a
+# field the caller fills in, on every deposit, withdrawal and transfer, and it is
+# returned on every read of that entry -- so uncapped it is a way for an
+# authenticated account to make the ledger expensive for everybody, a movement at
+# a time. Generous for what the field is for: an order id, a note, a few tags.
+# Zero means no cap, for a deployment that has its own limit in front.
+WALLET_MAX_METADATA_BYTES = int(os.getenv("DJANGO_WALLET_MAX_METADATA_BYTES", "4096"))
+
+# The club app. Optional the same way the others are: naming it installs its
+# tables, its routes and its admin, and a project that does not name it never
+# imports the package. It is the one app here designed to be told about what the
+# *others* do -- see `apps.club.events` -- so it is useful on its own and more
+# useful beside a shop or a wallet.
+CLUB_ENABLED = os.getenv("DJANGO_CLUB_ENABLED", "false").lower() == "true"
+CLUB_APP = "apps.club.apps.ClubConfig"
+CLUB_INSTALLED_APPS = [CLUB_APP] if CLUB_ENABLED else []
+CLUB_TRANSPORTS = app_transports("club", ("rest", "graph", "grpc")) if CLUB_ENABLED else ()
+CLUB_ROUTERS = (
+    [
+        {
+            "prefix": "/club",
+            "router": "apps.club.rest.router",
+            "tag": "Club",
+            "description": (
+                "Clubs with a levelled ladder, and missions that complete "
+                "themselves. An account belongs to one club at a time, earns XP "
+                "for things it does elsewhere in the deployment, and climbs a "
+                "ladder the club defines. Nothing here claims a mission: the "
+                "engine is told by the app where the thing actually happened, so "
+                "`/club/events` is the honest list of what this deployment can "
+                "build a mission out of."
+            ),
+        }
+    ]
+    if "rest" in CLUB_TRANSPORTS
+    else []
+)
+# Dotted module paths that register your own app's events. Importing one is what
+# puts its events in the registry, which is how a mission can be built out of
+# code this starter has never seen.
+CLUB_EVENT_SOURCES = [
+    path.strip() for path in os.getenv("DJANGO_CLUB_EVENT_SOURCES", "").split(",") if path.strip()
+]
+# The slug of a club every new account is put in as it is created. Empty puts
+# nobody anywhere, and then a mission on `accounts.user.registered` never pays:
+# an account is in no club at the moment it exists.
+CLUB_JOIN_ON_SIGNUP = os.getenv("DJANGO_CLUB_JOIN_ON_SIGNUP", "").strip()
+CLUB_PAGE_SIZE = int(os.getenv("DJANGO_CLUB_PAGE_SIZE", "50"))
+CLUB_MAX_PAGE_SIZE = int(os.getenv("DJANGO_CLUB_MAX_PAGE_SIZE", "200"))
+
+# The support app. Optional the same way the CMS, the notifications and the shop
+# are: naming it installs its tables, its routes, its admin and its socket, and
+# a project that does not name it never imports the package.
+SUPPORT_ENABLED = os.getenv("DJANGO_SUPPORT_ENABLED", "false").lower() == "true"
+SUPPORT_APP = "apps.support.apps.SupportConfig"
+SUPPORT_INSTALLED_APPS = [SUPPORT_APP] if SUPPORT_ENABLED else []
+SUPPORT_TRANSPORTS = (
+    app_transports("support", ("rest", "graph", "grpc", "ws")) if SUPPORT_ENABLED else ()
+)
+# Where the WebSocket is mounted. A setting rather than a constant because it is
+# the one part of this app a reverse proxy has to be told about, and a proxy is
+# usually easier to point at the app than the other way round. Declared above
+# the router because the tag below quotes it.
+SUPPORT_WS_PATH = os.getenv("DJANGO_SUPPORT_WS_PATH", "/ws/support")
+# The letters in front of a ticket reference -- `SUP-3F7A2B`. Branding, so it is
+# a setting; the digits after it are random rather than sequential, because a
+# sequence publishes how many tickets the desk has ever had to anybody who opens
+# one.
+SUPPORT_REFERENCE_PREFIX = os.getenv("DJANGO_SUPPORT_REFERENCE_PREFIX", "SUP")
+# The socket, written into the tag rather than into a route. OpenAPI describes
+# request/response over HTTP and has no vocabulary for a long-lived duplex
+# connection, and Swagger has no transport to open one -- so a path published for
+# it would render an operation whose "Try it out" cannot work. This is the half
+# that can be told truthfully, in the same group heading a reader is already
+# looking at. AsyncAPI is the format that describes the rest.
+SUPPORT_SOCKET_DOCS = f"""
+
+### The live conversation: `{SUPPORT_WS_PATH}`
+
+A WebSocket, so it is not an operation on this page. `runserver` is WSGI and will
+not serve it; any ASGI server will.
+
+**Unlike the notification socket, this one is useless until it is
+authenticated** -- there is no public support traffic, and a channel anybody
+could join would be a channel anybody could read. The handshake is still
+accepted without a credential, so a page can open the socket while its token is
+still being fetched. `{{"command": "authenticate", "token": "..."}}` then
+subscribes the connection to that account's own channel, the desk channel if it
+is staff, and the threads it is currently in -- so one socket carries every
+conversation somebody is part of. A credential offered in the handshake --
+`?token=`, a `bearer` subprotocol, an `Authorization` header, a session cookie
+-- is honoured at connect instead, and any command may carry the same `token` to
+sign in before it runs.
+
+Every frame is JSON, with a `command` going up and a `type` coming down. **The
+socket does everything the endpoints below do**, with one exception that is a
+protocol limit rather than a choice: a file has to be uploaded over
+`POST /support/uploads`, because a WebSocket frame cannot carry a multipart
+body. The message that carries it is then sent over the socket like any other.
+
+Open to anyone: `ping`, `authenticate`, `whoami`, `deauthenticate`. Reading:
+`tickets`, `ticket`, `messages`, `unread`, `categories`, `subscribe`,
+`unsubscribe`. Talking: `open`, `send`, `note`, `edit`, `delete`, `read`,
+`unread_ticket`, `typing`, `presence`. Either side: `status`, `close`, `reopen`,
+`rate`. The desk's own: `assign`, `claim`, `priority`, `tag`, `invite`, `tags`,
+`canned`, `stats`.
+
+Frames coming down: `ready`, `authenticated`, `deauthenticated`, `whoami`,
+`pong`, `message`, `ticket`, `typing`, `presence`, `read`, `error`, and one
+named for each command that answers. **Errors are frames, not closes** -- a
+mistyped id costs one message, not the conversation -- and their `title` is the
+same vocabulary the endpoints below answer with.
+
+The app's own `docs/support.md` carries the frame-by-frame reference.
+"""
+SUPPORT_ROUTERS = (
+    [
+        {
+            "prefix": "/support",
+            "router": "apps.support.rest.router",
+            "tag": "Support",
+            "description": (
+                "Tickets and live chat between a client and the desk. A client "
+                "sees the conversations they opened; a member of staff sees the "
+                "queue, the internal notes, the assignment and the numbers. The "
+                "same account, the same endpoints, two different answers." + SUPPORT_SOCKET_DOCS
+            ),
+        }
+    ]
+    if "rest" in SUPPORT_TRANSPORTS
+    else []
+)
+# How a message posted in one process reaches sockets held open by another. The
+# default fans out inside a single process only, which is right for development
+# and wrong for anything running more than one worker -- for a chat app that is
+# not a degraded experience but a broken one, and the app's settings contract
+# says so out loud.
+SUPPORT_BROKER = os.getenv("DJANGO_SUPPORT_BROKER", "apps.support.broadcast.MemoryBroker")
+SUPPORT_REDIS_URL = os.getenv("DJANGO_SUPPORT_REDIS_URL", AUTH_REDIS_URL)
+SUPPORT_CHANNEL_PREFIX = os.getenv("DJANGO_SUPPORT_CHANNEL_PREFIX", "support")
+# How many recent messages a client is handed when it joins a thread, so that
+# opening a conversation renders immediately rather than after a round trip. The
+# messages endpoint is where the rest of the history lives.
+SUPPORT_SOCKET_BACKLOG = int(os.getenv("DJANGO_SUPPORT_SOCKET_BACKLOG", "30"))
+# How long a closed ticket is kept. `manage.py support_prune` deletes what is
+# older, and nothing does so on its own: deleting a customer's support history
+# on a timer nobody asked for is the kind of surprise a starter must not ship.
+# Zero -- the default -- means keep everything, so a project that never
+# schedules the command never silently loses a complaint.
+SUPPORT_RETENTION_DAYS = int(os.getenv("DJANGO_SUPPORT_RETENTION_DAYS", "0"))
+# Where a file attached to a message is written, inside whatever
+# `STORAGES["default"]` is. A prefix rather than a path, because the storage
+# decides what a path means: a folder under MEDIA_ROOT locally, a key prefix in
+# a bucket in production.
+SUPPORT_UPLOAD_PATH = os.getenv("DJANGO_SUPPORT_UPLOAD_PATH", "support/uploads")
+# The largest file anybody may attach, in megabytes. Zero means no limit -- for
+# a deployment whose storage or reverse proxy already imposes one and would
+# rather have a single answer to "how big may this be" than two.
+SUPPORT_MAX_UPLOAD_MB = int(os.getenv("DJANGO_SUPPORT_MAX_UPLOAD_MB", "10"))
+SUPPORT_MAX_UPLOAD_BYTES = SUPPORT_MAX_UPLOAD_MB * 1024 * 1024
+# What the desk accepts, as extensions. An allowlist, because a support desk is
+# a place strangers send you files -- the worst possible place to be relaxed
+# about it. Left empty, the app applies no extension check at all, which is a
+# choice a deployment is allowed to make out loud.
+# Written with or without the leading dot, because both are what somebody
+# reaches for and the app compares against `.png`. `png,jpg` used to be accepted
+# and then match nothing, which turns a desk that quietly rejects every
+# attachment into the deployment's problem to diagnose.
+SUPPORT_UPLOAD_EXTENSIONS = [
+    f".{extension.strip().lower().lstrip('.')}"
+    for extension in os.getenv("DJANGO_SUPPORT_UPLOAD_EXTENSIONS", "").split(",")
+    if extension.strip().strip(".")
+] or None
 
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")
 OAUTH_STATE_TTL_SECONDS = int(os.getenv("DJANGO_OAUTH_STATE_TTL_SECONDS", "600"))
@@ -527,6 +897,51 @@ OAUTH_USER_RESOLVER = os.getenv("DJANGO_OAUTH_USER_RESOLVER", "")
 # publishes all three off one service class, so these switches decide which
 # *doors* are open, never what is behind them: turning either off unpublishes an
 # endpoint and changes no behaviour.
+# What each installed feature app is allowed to publish, keyed by the module name
+# `AppConfig.name` carries. `config/graph.py` and `config/grpc.py` discover their
+# contributions by walking the installed apps, so this is how they learn that an
+# app was installed to serve REST only. An app absent from this mapping -- every
+# infrastructure app -- publishes whatever it has, because the transports there
+# are the project's own and are turned off by the global flags below.
+APP_TRANSPORTS = {
+    "apps.cms": CMS_TRANSPORTS,
+    "apps.notifications": NOTIFICATIONS_TRANSPORTS,
+    "apps.shop": SHOP_TRANSPORTS,
+    "apps.support": SUPPORT_TRANSPORTS,
+    "apps.wallet": WALLET_TRANSPORTS,
+    "apps.club": CLUB_TRANSPORTS,
+}
+
+# How often one caller may ask, whichever endpoint they are asking. A correct
+# credential is not a licence to make a hundred thousand requests, and the
+# catalogue that authenticates nobody is the endpoint most worth scraping -- so
+# there are two default scopes, and which one applies is decided per request:
+# `ANON` counts by IP where nothing was proved, `AUTH` counts by credential
+# everywhere else. Counting an authenticated caller by IP would make an office
+# behind one NAT throttle itself.
+#
+# `LOGIN` is separate and much tighter, for the endpoints that take a secret and
+# say whether it was right. The authentication core already limits guesses
+# against one account; this is the axis that cannot see -- fifty thousand
+# accounts tried once each, which is the attack people actually run.
+#
+# `LOGIN` is counted per IP, so the number has to survive an office behind one
+# NAT all arriving at nine -- while still being nowhere near what credential
+# stuffing needs, which is thousands a minute against a list.
+#
+# `UPLOAD` is separate because the cost of one of those requests is a disk.
+#
+# Each is `<count>/<period>`, where period is s, m, h or d. Empty turns that
+# scope off, which is the honest way to let a deployment that rate-limits at its
+# edge avoid counting everything twice.
+#
+# The counters live in the default cache, so these are per process until that
+# cache is Redis or Memcached. See `infrastructure/common/throttling.py`.
+API_THROTTLE_ANON = os.getenv("DJANGO_API_THROTTLE_ANON", "120/min")
+API_THROTTLE_AUTH = os.getenv("DJANGO_API_THROTTLE_AUTH", "600/min")
+API_THROTTLE_LOGIN = os.getenv("DJANGO_API_THROTTLE_LOGIN", "60/min")
+API_THROTTLE_UPLOAD = os.getenv("DJANGO_API_THROTTLE_UPLOAD", "60/hour")
+
 GRAPHQL_ENABLED = os.getenv("DJANGO_GRAPHQL_ENABLED", "true").lower() == "true"
 # The in-browser query editor. Handy in development, and an unauthenticated
 # schema browser in production, so it is off here and turned on by the
@@ -535,6 +950,48 @@ GRAPHQL_ENABLED = os.getenv("DJANGO_GRAPHQL_ENABLED", "true").lower() == "true"
 # always False, and `development.py` raising it does so after this line has
 # already run, so the editor would be off in the one place it is wanted.
 GRAPHQL_GRAPHIQL = os.getenv("DJANGO_GRAPHQL_GRAPHIQL", "false").lower() == "true"
+# What one GraphQL request is allowed to cost. REST bounds a request by its
+# route -- an endpoint reads what it reads -- but a GraphQL caller composes the
+# query, so the cost of a request is whatever the schema's edges let them nest.
+# Every one of these apps' schemas has a cycle in it (a product has a category
+# which has products), which is all it takes for a short query to ask for a
+# cartesian product of the catalogue.
+#
+# Three limits rather than one, because there are three ways to spend the
+# server's afternoon and each is cheap to check:
+#
+# * `DEPTH` bounds nesting, which is the recursive-cycle attack.
+# * `ALIASES` bounds asking for the *same* expensive field many times under
+#   different names, which nesting limits do not see at all.
+# * `TOKENS` bounds the document before it is parsed, so an enormous query costs
+#   a rejection rather than a parse.
+#
+# Generous by default -- a real client's deepest legitimate query is nowhere
+# near ten levels -- because a limit that breaks honest queries gets raised to
+# infinity by the first person it pages at 3am.
+GRAPHQL_MAX_DEPTH = int(os.getenv("DJANGO_GRAPHQL_MAX_DEPTH", "10"))
+GRAPHQL_MAX_ALIASES = int(os.getenv("DJANGO_GRAPHQL_MAX_ALIASES", "15"))
+GRAPHQL_MAX_TOKENS = int(os.getenv("DJANGO_GRAPHQL_MAX_TOKENS", "2000"))
+# Whether the schema will describe itself. Introspection is what GraphiQL and
+# every code generator read, and it is also how somebody who has just found the
+# endpoint learns every type, field and mutation on it in one request. On by
+# default because a public API's schema is usually meant to be public and
+# turning it off breaks the tooling; a deployment whose API is internal should
+# set this false, and `production.py` does not decide for it either way.
+GRAPHQL_INTROSPECTION = os.getenv("DJANGO_GRAPHQL_INTROSPECTION", "true").lower() == "true"
+# Which hosts a browser may open a WebSocket from. Browsers do not apply the
+# same-origin policy to WebSockets -- any page can ask for a socket to any host
+# and the browser sends the handshake, with cookies -- and these sockets accept a
+# session cookie as identity. Left unset this follows ALLOWED_HOSTS, because the
+# pages that legitimately open these sockets are the pages this deployment
+# serves. A project whose frontend is on another domain names it here. `*` turns
+# the check off.
+WEBSOCKET_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("DJANGO_WEBSOCKET_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 GRPC_ENABLED = os.getenv("DJANGO_GRPC_ENABLED", "true").lower() == "true"
 GRPC_PORT = int(os.getenv("DJANGO_GRPC_PORT", "50051"))
 
@@ -562,6 +1019,9 @@ INSTALLED_APPS = [
     *CMS_INSTALLED_APPS,
     *NOTIFICATIONS_INSTALLED_APPS,
     *SHOP_INSTALLED_APPS,
+    *SUPPORT_INSTALLED_APPS,
+    *WALLET_INSTALLED_APPS,
+    *CLUB_INSTALLED_APPS,
     # The transports beside REST. Both are installed whether or not they are
     # published: `generateproto` and the schema check have to be able to run in a
     # deployment that serves neither.
@@ -580,6 +1040,16 @@ GRPC_FRAMEWORK = {
     # asyncio server starts it empty, which is what the library expects.
     "GRPC_ASYNC": True,
 }
+
+# Whether the admin loads the live script at all. Both feeds are optional apps
+# and either one is enough: `infrastructure.common.adminlive` decides which
+# sockets it opens, and `config/urls.py` mounts the view under the same
+# condition.
+ADMIN_LIVE_SCRIPTS = (
+    ["infrastructure.common.adminlive.live_script_url"]
+    if NOTIFICATIONS_INSTALLED_APPS or SUPPORT_INSTALLED_APPS
+    else []
+)
 
 # The admin's appearance, all of it. The three callbacks are dotted paths rather
 # than imports because settings are read before the app registry is ready, and
@@ -618,6 +1088,12 @@ UNFOLD = {
         "navigation": "infrastructure.common.adminui.sidebar_navigation",
     },
     "COMMAND": {"search_models": True, "show_history": True},
+    # The live corner: a bell with what is unanswered, and a toast when
+    # something arrives, on every admin page rather than only on the screen that
+    # owns the feed. Unfold resolves the entry per request; the view behind it
+    # renders this deployment's socket paths into the script, and the list is
+    # empty -- and the URL unmounted -- when no app publishes a socket.
+    "SCRIPTS": ADMIN_LIVE_SCRIPTS,
 }
 
 MIDDLEWARE = [

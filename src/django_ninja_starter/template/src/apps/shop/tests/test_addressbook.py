@@ -323,6 +323,12 @@ class TestOverGraphql:
 
         assert [row["city"] for row in rows] == ["Bristol"]
 
+    def test_one_address_reads_back(self, alice: Any, address: Address) -> None:
+        query = "query($addressId: String!) { shopAddress(addressId: $addressId) { city } }"
+        row = graphql(query, alice, addressId=str(address.pk))["data"]["shopAddress"]
+
+        assert row["city"] == "Bristol"
+
     def test_an_address_is_saved(self, alice: Any) -> None:
         saved = graphql(ADD_ADDRESS, alice, address=GRAPH_NEW)["data"]["shopAddAddress"]
 
@@ -436,3 +442,14 @@ class TestOverGrpc:
 
         assert preview.is_valid
         assert Decimal(preview.discount) == Decimal("60.00")
+
+
+def test_somebody_elses_address_is_not_found_over_graphql(
+    alice: Any, bob: Any, address: Address
+) -> None:
+    query = "query($addressId: String!) { shopAddress(addressId: $addressId) { city } }"
+
+    body = graphql(query, bob, addressId=str(address.pk))
+
+    assert body["data"] is None
+    assert body["errors"][0]["extensions"]["title"] == "NOT_FOUND"

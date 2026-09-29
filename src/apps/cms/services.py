@@ -25,7 +25,7 @@ from apps.cms.content import (
     site_payload,
 )
 from apps.cms.models import Menu, Page, SiteSettings
-from apps.cms.preview import slug_from_token
+from apps.cms.preview import target_of
 from apps.cms.sitemap import SitemapDisabled, sitemap_xml
 
 
@@ -89,12 +89,16 @@ class ContentService:
         page. The token is checked against the page it was asked for, so one
         preview link does not open every unpublished page on the site.
         """
-        previewing = preview is not None and slug_from_token(preview) == name
+        target = target_of(preview) if preview is not None else None
+        previewing = target is not None and target[1] == name
         pages = previewable_tree() if previewing else page_tree()
         try:
             page = await pages.aget(slug=name)
         except Page.DoesNotExist:
             raise ContentNotFound("No such page.") from None
+        if previewing and target is not None and str(page.pk) != target[0] and not page.is_live:
+            # The slug matches but the row does not: this is another page now.
+            raise ContentNotFound("No such page.")
         return page_payload(page, await SiteSettings.aload(), language)
 
 

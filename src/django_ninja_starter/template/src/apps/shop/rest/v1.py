@@ -13,6 +13,13 @@ authorisation model this app does not have.
 the cart, the reviews or the likes takes an account id; the caller is the
 account, and the service's querysets start from them.
 
+**Saying an order is paid is not the shopper's to say.** Cancelling one is --
+giving up on a purchase you started asserts nothing about the outside world --
+but settling it asserts that money arrived somewhere this app cannot see. That
+statement belongs to the gateway, which makes it signed, or to an operator
+reading a bank statement in the admin. There is no endpoint here for it, because
+an account that could call one would be buying on credit it grants itself.
+
 Two endpoints sit in between. The product page and its review list are public,
 but answer a little differently to somebody signed in: they carry back whether
 *you* liked it and what *you* wrote. A credential is read where one is offered
@@ -55,7 +62,6 @@ from apps.shop.rest.schemas import (
     MyReviewPageOut,
     OrderOut,
     OrderPageOut,
-    PaymentConfirmIn,
     ProductOut,
     ProductPageOut,
     ProductSummaryOut,
@@ -520,7 +526,6 @@ def checkout(request: HttpRequest, payload: CheckoutIn) -> dict:
                 shipping_method_id=payload.shipping_method,
                 coupon_code=payload.coupon,
                 note=payload.note,
-                provider=payload.provider,
             )
         )
 
@@ -549,23 +554,20 @@ def read_invoice(request: HttpRequest, number: str) -> dict:
 
 
 @router.post(
-    "/orders/{number}/payment/confirm",
+    "/orders/{number}/pay",
     response=OrderOut,
     auth=api_auth,
-    summary="Confirm a payment",
+    summary="Pay an order from your wallet",
 )
-def confirm_payment(request: HttpRequest, number: str, payload: PaymentConfirmIn) -> dict:
-    """The seam a payment provider's callback is pointed at.
+def pay_order(request: HttpRequest, number: str) -> dict:
+    """Take the order's total from the caller's wallet balance and mark it paid.
 
-    This starter wires up no gateway -- payments are created against the
-    `manual` provider and settled by somebody in the admin looking at a bank
-    statement. This endpoint is what a project points a real callback at once it
-    has one, and it settles the order exactly the way the admin does.
+    The amount is the order's, fixed at checkout; there is nothing to send.
+    Refused with a 400 when the balance does not cover it -- top the wallet up
+    through `/wallet/gateways` first.
     """
     with _answers():
-        return _order_out(
-            shop_service.confirm_payment(request.user, number, reference=payload.reference)
-        )
+        return _order_out(shop_service.pay_order(request.user, number))
 
 
 @router.post(

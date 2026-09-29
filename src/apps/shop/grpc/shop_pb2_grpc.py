@@ -6,7 +6,7 @@ import warnings
 from apps.shop.grpc import shop_pb2 as apps_dot_shop_dot_grpc_dot_shop__pb2
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -90,11 +90,6 @@ class ShopControllerStub:
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.FromString,
                 _registered_method=True)
-        self.ConfirmPayment = channel.unary_unary(
-                '/config.shop.ShopController/ConfirmPayment',
-                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.SerializeToString,
-                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.FromString,
-                _registered_method=True)
         self.DeleteReview = channel.unary_unary(
                 '/config.shop.ShopController/DeleteReview',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewRequest.SerializeToString,
@@ -149,6 +144,11 @@ class ShopControllerStub:
                 '/config.shop.ShopController/Orders',
                 request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.SerializeToString,
                 response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.FromString,
+                _registered_method=True)
+        self.PayOrder = channel.unary_unary(
+                '/config.shop.ShopController/PayOrder',
+                request_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderRequest.SerializeToString,
+                response_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderResult.FromString,
                 _registered_method=True)
         self.PreviewCoupon = channel.unary_unary(
                 '/config.shop.ShopController/PreviewCoupon',
@@ -301,12 +301,6 @@ class ShopControllerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ConfirmPayment(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def DeleteReview(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -368,6 +362,12 @@ class ShopControllerServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Orders(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PayOrder(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -527,11 +527,6 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.CollectionList.SerializeToString,
             ),
-            'ConfirmPayment': grpc.unary_unary_rpc_method_handler(
-                    servicer.ConfirmPayment,
-                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.FromString,
-                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.SerializeToString,
-            ),
             'DeleteReview': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteReview,
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.DeleteReviewRequest.FromString,
@@ -586,6 +581,11 @@ def add_ShopControllerServicer_to_server(servicer, server):
                     servicer.Orders,
                     request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.FromString,
                     response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.SerializeToString,
+            ),
+            'PayOrder': grpc.unary_unary_rpc_method_handler(
+                    servicer.PayOrder,
+                    request_deserializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderRequest.FromString,
+                    response_serializer=apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderResult.SerializeToString,
             ),
             'PreviewCoupon': grpc.unary_unary_rpc_method_handler(
                     servicer.PreviewCoupon,
@@ -976,33 +976,6 @@ class ShopController:
             _registered_method=True)
 
     @staticmethod
-    def ConfirmPayment(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/config.shop.ShopController/ConfirmPayment',
-            apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentRequest.SerializeToString,
-            apps_dot_shop_dot_grpc_dot_shop__pb2.ConfirmPaymentResult.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
     def DeleteReview(request,
             target,
             options=(),
@@ -1289,6 +1262,33 @@ class ShopController:
             '/config.shop.ShopController/Orders',
             apps_dot_shop_dot_grpc_dot_shop__pb2.OrdersRequest.SerializeToString,
             apps_dot_shop_dot_grpc_dot_shop__pb2.OrderList.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PayOrder(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/config.shop.ShopController/PayOrder',
+            apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderRequest.SerializeToString,
+            apps_dot_shop_dot_grpc_dot_shop__pb2.PayOrderResult.FromString,
             options,
             channel_credentials,
             insecure,

@@ -40,17 +40,30 @@ def test_an_unrouted_path_is_refused_rather_than_left_hanging() -> None:
     assert sent == [{"type": "websocket.close", "code": NO_SUCH_ROUTE}]
 
 
-def test_the_notification_socket_is_mounted_when_the_app_is_enabled() -> None:
+def test_a_socket_is_mounted_for_each_app_that_publishes_one() -> None:
     assert settings.NOTIFICATIONS_ENABLED
+    assert settings.SUPPORT_ENABLED
     assert websocket_routes() == [
-        (settings.NOTIFICATIONS_WS_PATH, "apps.notifications.sockets.notifications_socket")
+        (settings.NOTIFICATIONS_WS_PATH, "apps.notifications.sockets.notifications_socket"),
+        (settings.SUPPORT_WS_PATH, "apps.support.sockets.support_socket"),
     ]
 
 
-def test_a_project_without_notifications_serves_no_socket_at_all() -> None:
+def test_an_app_that_is_turned_off_takes_its_socket_with_it() -> None:
+    """The routing table is built from the flags, so turning one off is enough."""
     with override_settings(NOTIFICATIONS_ENABLED=False):
-        assert websocket_routes() == []
+        assert websocket_routes() == [
+            (settings.SUPPORT_WS_PATH, "apps.support.sockets.support_socket")
+        ]
         assert asyncio.run(_handshake(settings.NOTIFICATIONS_WS_PATH)) == [
+            {"type": "websocket.close", "code": NO_SUCH_ROUTE}
+        ]
+
+
+def test_a_project_with_neither_app_serves_no_socket_at_all() -> None:
+    with override_settings(NOTIFICATIONS_ENABLED=False, SUPPORT_ENABLED=False):
+        assert websocket_routes() == []
+        assert asyncio.run(_handshake(settings.SUPPORT_WS_PATH)) == [
             {"type": "websocket.close", "code": NO_SUCH_ROUTE}
         ]
 

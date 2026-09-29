@@ -6,6 +6,652 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The shop announces what happened: `apps.shop.signals`.** `order_paid` when a
+  payment settles and `review_published` when a review goes public, both after
+  commit and both once. Approval is a queryset `update`, which sends no
+  `post_save`, so until now nothing outside the shop could hear a moderated review
+  at all.
+- **The club hears the shop, the wallet and the sign-in trail by itself.** Each
+  bridge connects to signals its app already sends and none of those apps calls
+  the club, so missions on `shop.order.paid`, `shop.review.published`,
+  `accounts.user.signed_in` and `club.member.joined` now pay. Until now only the
+  wallet's events were delivered: the rest were registered and offered in the
+  admin's dropdown, and nothing ever sent them.
+- **Club XP can no longer be carried, replayed or used to dodge a suspension.** An
+  award records the club that paid it and a member's XP is their current club's,
+  so moving clubs no longer lands somebody high on a new ladder. A mission needing
+  several events counts each `reference` once, so one redelivered event cannot
+  finish it. A suspended member can no longer lift the suspension by leaving and
+  joining again. `apps.club.track` returns nothing in a project without the club
+  installed, as its docstring always said, instead of failing on an import.
+- **A club new accounts join by themselves: `DJANGO_CLUB_JOIN_ON_SIGNUP`.** The
+  slug of a club every account is put in as it is created -- by any route, social
+  callbacks and the admin included -- which is what lets a mission on
+  `accounts.user.registered` pay anybody. A slug naming no club is logged and
+  never fails a sign-up.
+- **Granting XP by hand has a screen.** A member's admin page links to it; it
+  writes through the service with a reason and the operator's name, and a form
+  submitted twice grants once. The form existed before, and nothing rendered it.
+- **The generated project's `.env` ships the wallet off**, like every other
+  feature app. It shipped on, and the test guarding that promise did not list the
+  wallet or the club.
+- **The example project turns the club on and tours it**, as section 12: a welcome
+  paid on joining, then a sign-in, an order and a deposit each paying XP without
+  the client reporting any of them, checked against the award ledger and against
+  the club's router.
+- **A new feature app: `apps.wallet`.** A wallet per account, every way money
+  gets in and out, and a balance that is **derived from the movements rather than
+  stored beside them** -- because a balance column is a second copy of a fact the
+  entries already hold, and the two disagree the first time a process dies
+  between writing an entry and updating the column. Reading is the last
+  checkpoint plus the entries written since it, and `manage.py wallet_archive`
+  folds settled entries into checkpoints -- daily, or once twenty have piled up
+  -- so that second number stays small. A pending entry is never folded, however
+  old: a checkpoint is a number written down, and folding in something still free
+  to change would make it wrong later.
+- **A wallet answers with several numbers, never one.** `settled` is what is
+  there, `available` is `settled` less what pending payouts have already claimed,
+  and `projected` is where it lands if everything outstanding succeeds. A client
+  shown a single figure has to guess whether it may be spent, and it guesses
+  kindly -- so `available` is named, documented, and the one to authorise against.
+- **Ways to pay are configured by an administrator, not compiled in.** What a
+  card *is* -- clears in seconds, chargeable back for months -- is a fact about
+  cards, declared in `methods.py` and reviewed in code. Which processor this
+  deployment runs, what it charges, which currencies it takes: rows in
+  `catalog.py` that change on a Tuesday without a release. `GET /wallet/methods`
+  is the only place a client can learn them, and `manage.py wallet_methods` seeds
+  one per rail, switched off and charging nothing -- it will not guess at a
+  commission, because a fee invented by a command is a fee somebody eventually
+  charges a customer without having decided to.
+- **Fees are priced by the same function that quotes them.** Commission, tax,
+  processing cost and the chain's own fee, each recorded against the entry as its
+  own line, so a customer sees "commission 2.90, tax 0.58" rather than an
+  unexplained 3.48. A tax can be charged on the fees rather than the amount --
+  which is how VAT on a payment commission actually works -- and `POST
+  /wallet/quotes` calls the identical code path the deposit will, so the figure
+  quoted is the figure charged. Charges are copied onto the entry when applied:
+  renegotiating a commission must not rewrite last month's receipts.
+- **Crypto knows about chains, and never guesses one.** The same asset on two
+  chains is one balance to a customer and two incompatible destinations to the
+  network -- paying the wrong one does not fail, it confirms and the money is
+  gone. So each chain is its own row with its own fee, confirmations and address
+  pattern; a payout must name the chain; and an address that does not match it is
+  refused before it is sent.
+- **Movements can be requests.** `approval` is a second axis, independent of
+  `status`: one is what the money is doing, the other what a person decided, and a
+  deposit can be waiting on the bank *and* on the back office at once. A method
+  that requires approval -- the default for a new one -- produces a movement that
+  cannot settle until an operator applies it in the admin. Refusing it stays
+  possible without permission, because refusing money is never the dangerous
+  direction.
+- **A reversal is two facts, and both of them count.** Undoing a settled
+  movement writes an opposing entry rather than editing the original -- the
+  original really did happen, and a ledger that rewrites what happened cannot be
+  reconciled against the rail that still remembers it. Which is why a `reversed`
+  entry goes on counting towards the balance: if marking it also removed it, the
+  opposing entry would take the same money away a second time and the wallet
+  would be short by the amount of the original, permanently, with nothing
+  afterwards to say why. Read `reversed` as "this happened, and its counterpart
+  happened too".
+- **Transfers between two wallets here are free, and cannot be made otherwise.**
+  The money never leaves, so nothing was spent moving it; a fee saved against the
+  internal rail is refused at the point somebody tries to store it, so this is a
+  property of the app rather than a default an afternoon in the admin could
+  quietly change.
+- **Currency conversion at a published rate.** A movement can be named in a
+  currency the wallet is not held in: it is charged in that currency, then
+  converted. The spread is always taken against the customer and published beside
+  the rate rather than folded into it, a pair quoted one way converts both ways
+  off its reciprocal, and a pair with no rate is refused rather than converted at
+  one. Rate rows are superseded, never edited, so "what did we convert at?" stays
+  answerable.
+- **An entry says whether it is part of the balance, not just whether it
+  settled.** The two differ for exactly one status and that status is the one
+  that matters: a reversed entry is no longer `settled` and still counts, because
+  the entry written to undo it is what takes the money back. Adding the
+  `signed_amount` of every movement with `counts_towards_balance` set reproduces
+  the balance exactly, which is the contract a ledger owes anybody reconciling
+  against it. A reversal also keeps the moment it originally settled -- "when did
+  this clear?" starts being asked the day a chargeback lands.
+- **A movement that is already over cannot be applied or refused.** Approval and
+  status are independent axes, so an account cancelling its own request leaves a
+  row that is `cancelled` and still `requested` -- and nothing stopped an operator
+  approving it. No money moved, because the state machine will not settle a
+  cancelled entry, but the trail ended up saying somebody approved a payment that
+  had been withdrawn. Those rows also leave the back office queue, which now holds
+  only what a person can still act on rather than rows nobody can clear.
+- **The wallet's page-size settings are read rather than merely declared.**
+  `DJANGO_WALLET_PAGE_SIZE` and `DJANGO_WALLET_MAX_PAGE_SIZE` were documented,
+  validated against each other by a settings rule, and ignored by a hard-coded
+  constant. A listing now serves the size the deployment chose and every
+  transport echoes back the page it actually served, not the one that was asked
+  for -- a client paging on its own number would have stepped over the rows the
+  ceiling clamped away.
+- **The wallet is proved to work alone, not merely to install alone.** Enabling
+  only `DJANGO_WALLET_ENABLED` leaves a project of exactly three of its own apps
+  -- accounts, common and the wallet -- with no login app installed at all, which
+  means the router's bearer auth is genuinely absent and its `ImportError` guard
+  genuinely fires. `tests/test_app_isolation.py` now drives the whole round trip
+  in that configuration over Django's own session: configure a method, quote a
+  deposit, make it, settle it, and check the balance matches the quote to the
+  last place. Booting is not the claim; with a wallet the gap between "it
+  installed" and "it works" is somebody's money.
+- **Every write that depends on a balance takes the wallet's row lock first.**
+  Two withdrawals of eight against a balance of ten would otherwise both pass a
+  check made on an unlocked read. Pricing happens outside the lock, since it
+  touches no wallet; a transfer locks both wallets in primary-key order so two
+  crossing transfers cannot deadlock; and every write takes a `reference` unique
+  per wallet, so a client retrying on a timeout gets the first entry back rather
+  than moving the money twice.
+- **The walkthrough tours every wallet route, not a selection.** Section 11 now
+  shows a deposit a signed webhook fails as well as settles, a request refused
+  as well as applied, a payout cancelled, a free transfer read back from the
+  recipient's side, and a chargeback written beside the deposit it reverses. It
+  runs both management commands, `wallet_methods` and `wallet_archive`. At the
+  end it asks the app's routers what exists and fails if it skipped a route, as
+  the support section does. The admin section refuses a waiting request from the
+  changelist's own action.
+- **`make serve` serves the static files too.** `runserver` quietly installs a
+  handler that serves `STATIC_URL` from the finders; an ASGI server does not, so
+  a project served the way its own WebSockets require loaded its admin with no
+  stylesheet -- the pages answered 200 and the CSS answered 404, with nothing to
+  say why. `config/asgi.py` now installs the same handler while `DEBUG` is on,
+  and leaves it out otherwise, exactly as `config/urls.py` does for media.
+- **`make serve --reload` notices a changed template.** uvicorn's reloader
+  watches Python files only, so an edited template went on serving its old self
+  until somebody restarted by hand; the target now passes `--reload-include` for
+  HTML, CSS and JavaScript, and the `asgi` extra carries `watchfiles`, without
+  which uvicorn ignores those flags with a warning.
+- **A misconfigured deployment no longer boots.** `config/wsgi.py` and
+  `config/asgi.py` run the system checks before serving anything, so an app you
+  turned on and left half-configured stops the process with the report
+  `manage.py check` would have printed. Only errors stop it -- a warning is an
+  opinion, and refusing to start over one would make the warning level useless
+  -- and `SILENCED_SYSTEM_CHECKS` means the same thing here as everywhere else.
+  `DJANGO_SKIP_PREFLIGHT=true` serves anyway. Previously only `manage.py` ran
+  the checks, which left them unenforced in the one environment where a wrong
+  setting matters most: under Gunicorn or Uvicorn the process started cleanly
+  and failed later, one request at a time.
+- **`apps.cms` and `apps.shop` declare settings contracts.** Both carried
+  `settings_docs` -- rows that documented their settings and validated none of
+  them -- while `notifications` and `support` were checked. All four now declare
+  an `AppSettings`, so every feature app is held to the same standard and
+  `DJANGO_SHOP_CURRENCY=dollars` is refused at boot rather than quoted on a
+  product page.
+- **Every feature app declares its own `*_ENABLED` flag as a requirement.** That
+  flag is what installs the app, so an app installed with it off means somebody
+  edited `INSTALLED_APPS` by hand -- a deployment that migrates the tables and
+  publishes none of the routes. It now says so instead of being discovered.
+- **Requirements can describe a value's shape, a condition, and a
+  relationship.** `pattern` matches where enumerating `choices` is hopeless (a
+  currency is any three capitals, a socket mount is anything starting with a
+  slash); `applies_when` gates a requirement on the rest of the configuration,
+  so a Redis URL is only demanded once the broker is the Redis one; and
+  `AppSettings.rules` reports what no single requirement can see -- a default
+  page size above the ceiling meant to clamp it is two reasonable numbers in the
+  wrong order.
+
+- **A live chat desk in the admin**, at `Support -> Live chat`
+  (`/admin/support/ticket/chat/`): the queue on the left, one conversation on
+  the right, and a single WebSocket under both, so a client's message appears
+  while an agent is reading the thread rather than on the next page load. It
+  posts no form -- the queue and its filters, the thread, sending, internal
+  notes, the typing indicator, claiming, status and priority are all commands on
+  the support socket, so the desk screen and a customer's chat widget exercise
+  one protocol and cannot drift apart. It authenticates with the admin's own
+  session cookie, and says which of the two reasons it is not live -- no `ws`
+  transport, or a WSGI server -- rather than hanging on an empty queue.
+- **A live bell in the admin header**, on every page, beside the environment
+  badge: a count of what is unanswered and a toast when something arrives, fed
+  by the notification socket and the support one. Served as `/admin/live.js`
+  with this deployment's socket paths rendered into it, injected through
+  `UNFOLD["SCRIPTS"]`, and absent entirely when no app publishes a socket for it
+  to open. It mounts into the theme's header, the plain admin's user tools, or
+  the corner of the window, in that order. The count is the server's own rather
+  than a tally the page keeps, so it survives a reconnect and a second tab; the
+  backlog a socket replays on connect is counted and not announced; and a
+  message the desk screen has already shown is not repeated up here.
+- **A `Support` group in the admin sidebar**, led by the live screen, with the
+  ticket records, categories, tags, canned replies and attachments beneath it.
+- **`apps.support`: live chat and support tickets, as one app.** Enabled by
+  `DJANGO_SUPPORT_ENABLED=true` alone, and like the other feature apps it lives
+  entirely in its own directory and can be copied out or deleted without leaving
+  a hole. The design is one sentence: **a ticket is a conversation.** A `Ticket`
+  is a thread, a `Message` is something somebody said in it, and `kind` says
+  whether it is being used as a live chat or as a filed problem with a subject,
+  a category and a deadline. Nothing about the storage differs between them, so
+  a chat that turns out to be a real problem is promoted by giving it a subject
+  rather than by copying rows into a second table.
+- **The whole surface over four transports**: HTTP, a WebSocket, GraphQL and
+  gRPC, under the same names with the same arguments, the same replies and the
+  same refusal titles. Every rule about who may do what is decided once in
+  `services.py`, so the four cannot disagree about who may close a ticket or
+  read a note -- which is the failure mode a four-transport app otherwise has
+  four chances to hit.
+- **Staff-only notes live in the thread they belong to**, in the order they were
+  written, and are dropped from every list a client can reach and again on the
+  way out of the socket. A thread whose notes are somewhere else is a thread
+  nobody reads in order.
+- **An SLA stored as two deadlines, never as a breach flag.** The windows are
+  promised by the category and copied onto the ticket when it is opened, so
+  editing the category later does not rewrite the promise made to tickets
+  already open under it, and a breach is true the instant it is true rather than
+  whenever a job last ran.
+- **Read state per participant**, one row carrying `last_read_at` rather than a
+  receipt per message. Marking read never moves the watermark backwards and does
+  not move it at all when there was nothing unread, so a scroll handler can fire
+  it as often as it likes and "you have caught up" stays a different answer from
+  "there was nothing to catch up on".
+- **Attachments in two steps.** A file is uploaded over HTTP -- the one half of
+  the app that has to be, because a WebSocket frame is JSON and cannot carry a
+  multipart body -- and the message claiming it goes over whichever transport
+  the client is already using. An upload is claimable exactly once, by its
+  owner, which is what makes naming somebody else's id a refusal rather than a
+  way to read their file.
+- **A queue the desk actually works**: assignment and claiming, priorities, tags,
+  canned replies, participants invited into a thread, filters for what is
+  unassigned, what is late and what is live, search across subject, body and
+  reference, and a stats endpoint. The admin adds an SLA column, a waiting
+  column, and three bulk actions -- the only three that are safe to do to a
+  hundred rows at once.
+- **`manage.py support_prune`**, and nothing that deletes anything without it.
+  With no retention window set it refuses rather than treating zero as "delete
+  everything", and only closed tickets are ever pruned: an open one is somebody's
+  unanswered question however old it is, and `resolved` is the desk's opinion
+  rather than the client's agreement.
+- **A tour of all of it** in `examples/walkthrough.py`, from both sides of the
+  desk, ending with two sockets open at once -- and `docs/support.md` beside it.
+  "All of it" is checked rather than claimed: the section asks the router and
+  the socket's command tuple what exists and fails the tour if it left anything
+  out, so a route added without being shown here stops the suite.
+- **Channels, private groups and direct messages**, on the same thread,
+  participant and read-state machinery, because a ticket was already a
+  conversation. `Kind` now has two families: the **desk** kinds -- `chat` and
+  `ticket` -- which staff see every one of, because working the queue is the
+  job, and the **room** kinds -- `channel`, `group` and `direct` -- which staff
+  have no standing in at all. A channel is discoverable and anybody signed in
+  may join it; its address is refused when taken rather than suffixed, since
+  `general-2` is a different room from the one somebody asked for. A group is
+  created with its members and is invisible to everyone else. A private chat is
+  exactly two accounts, deduped by a sorted key, so both people opening it at
+  once land in one conversation rather than in two halves of one. All of it on
+  all four transports under the same names, and `slug` is on the shared payload
+  so a client can link to `#general` rather than to a uuid.
+- **`is_staff` buys nothing in a room.** `TicketQuerySet.visible_to` is the one
+  place the line is drawn, and it grants staff the desk and only the desk. An
+  agent cannot read a group they were not added to or a private chat between two
+  customers, and `test_rooms.py` spends most of its length on an agent being
+  told no -- because a support desk that could read its customers' private
+  conversations would be a surveillance tool with a help widget attached.
+
+- **Money can be put back, given up on, and corrected by hand.** Three things the
+  service could already do and nothing could reach. A chargeback now arrives the
+  way a settlement does -- a `reversed` event on the signed rail webhook -- and an
+  operator has the same verb as an admin action. A pending movement nothing ever
+  confirmed now expires: `DJANGO_WALLET_EXPIRE_AFTER_HOURS` says after how long,
+  `manage.py wallet_expire` is the job that does it, and until one of them ran, a
+  rail that simply never answered held an account's money out of `available`
+  forever. And the four kinds a back office writes -- a bonus, a fee, a credit or
+  debit adjustment -- have a service method and the app's only add form, which
+  writes through `WalletService.adjust` so a correction typed by hand still takes
+  the wallet's lock and is still refused when the funds are not there.
+- **A wallet can be frozen and closed, with the checks a status change needs.**
+  `WalletService.set_wallet_status`, published as admin actions rather than an
+  editable status field. Frozen refuses payouts and still takes money in, which
+  is what a compliance hold means; closed is refused while a settled balance or a
+  pending movement would be stranded by it, and a closed wallet stays closed.
+- **The wallet announces what it did.** `apps.wallet.signals` carries
+  `entry_recorded`, `entry_settled`, `entry_failed`, `entry_reversed`,
+  `payout_ready` and `wallet_status_changed`, sent after commit, so notifications
+  or a payout integration can listen without the wallet importing either.
+- **GraphQL and gRPC take `metadata` on a movement, as REST always did.** The
+  same call through a different transport wrote a different row; it no longer
+  does.
+
+### Security
+
+- **View-only staff could move money and publish content.** No admin action
+  declared a permission, and Django then offers an action to anybody who can
+  open the list -- so an account with only `view_walletentry` could approve and
+  settle a deposit nobody made, and a content editor with only `view_page` could
+  put an unreviewed draft live. Every wallet, cms and site-event action now needs
+  `change`.
+- **GraphQL and REST disagreed about CSRF, and both were wrong.** GraphQL was
+  not CSRF-exempt, so every bearer client -- a mobile app, a SPA, `curl` -- got a
+  `403`; REST was exempt, so in the `none` token mode a write carried only by the
+  session cookie needed no CSRF token at all. One helper now decides for both: a
+  bearer request passes, a session-authenticated write must carry a CSRF token.
+- **A review showed its author's phone number.** The author was
+  `get_username()`, which for a phone sign-up is built from the number, and the
+  review list is public. The club leaderboard showed every member the same login
+  identifier. Both now publish a display name -- first word and last initial --
+  or a neutral fallback.
+- **A signed-out socket handed one account's feed to the next.** A connection
+  cannot leave a channel it has joined, so signing a second account in on it
+  delivered the first account's notifications. It now refuses any other account,
+  and re-checks its credential about once a minute so a revoked token or a
+  deactivated account stops receiving.
+- **Private rooms leaked to the desk and to people who had left them.** New
+  groups and direct chats were announced on the staff channel; a group's creator
+  could read it after leaving; posting, typing and presence silently rejoined a
+  room; and the admin listed every group and DM. Rooms are now their members'
+  alone, and the admin shows desk threads and public channels only.
+- **Upload filters checked the name the file was not stored under.** `x.svg.`
+  or `x.ſvg` passed the check and were saved as `.svg`. Both the cms and support
+  now check the cleaned name, and neither accepts anything a browser would run
+  (`.svg`, `.html`, `.xml`, `.js`).
+- **A customer could forge who settled their money.** `metadata` accepted
+  `settled_by_operator` and its siblings, so a deposit could name a staff member
+  as the person who made it real. Those keys are refused from clients, and are
+  left out of what a customer reads while signals still carry them.
+
+- **Settling a movement from the admin recorded nobody.** `approve` and `reject`
+  filled in `reviewed_by` and a reversal recorded `reversed_by_operator`, but
+  `settle` and `fail` -- the action that turns a row into real money -- took no
+  operator and wrote no `LogEntry`, so a staff member who settled a deposit
+  nobody ever made left no trace of having done it. `settle`, `fail` and
+  `expire_entry` now take `by`, and the admin actions pass the operator, who is
+  recorded on the entry as `settled_by_operator`, `failed_by_operator` or
+  `expired_by_operator`. A transition with no operator on it came from a rail's
+  signed confirmation, the account itself, or the expiry job -- the absence is
+  the answer, not a gap.
+- **`metadata` had no size limit.** The one field on a movement a client fills in
+  freely, unbounded, stored on every deposit, withdrawal and transfer and
+  returned on every read of that entry -- so any authenticated account could put
+  megabytes into the ledger a movement at a time and make everybody's history
+  expensive to read. Capped at `DJANGO_WALLET_MAX_METADATA_BYTES`, 4096 by
+  default, `0` for a deployment that limits request size at its edge.
+- **The row locks are now actually tested.** The wallet's whole safety argument
+  rests on `select_for_update`, which SQLite compiles away -- so on the default
+  backend `test_concurrency.py` skipped itself and nothing, ever, had
+  demonstrated that two withdrawals cannot both take the last of the money. CI
+  gained a `locks` job: a real PostgreSQL service, the wallet suite run against
+  it, and a step that fails if those tests skipped there as well. They pass.
+- **A transfer to a deactivated account is refused.** All three transports
+  resolved the recipient with a bare primary-key lookup, so money could be sent
+  to an account that can no longer sign in and therefore can never spend it. The
+  check is in the service rather than in each of the three doors, because a rule
+  enforced in three places is a rule enforced in two of them a release later.
+
+- **No shopper can mark their own order paid.** `POST
+  /shop/orders/{number}/payment/confirm`, the `shopConfirmPayment` mutation and
+  the `ConfirmPayment` RPC are gone from all three transports. Each authenticated
+  the *shopper* and then settled the order they were being asked to pay for, so a
+  checkout followed by one more request with the same token produced a `paid`
+  order and reserved stock released into fulfilment -- for nothing. The verb
+  survives where it belongs: the admin action, and
+  `ShopService.confirm_payment(user, number)` for a gateway callback a project
+  verifies a signature on for itself. Cancelling an unpaid order is still the
+  shopper's, because giving up on a purchase asserts nothing about the world
+  while saying money arrived asserts something only the rail can.
+- **Every API route is now rate-limited**, by `config/api.py` attaching the
+  limits to the `NinjaAPI` rather than to the routes -- so an endpoint added later
+  is limited by having been added. Which scope applies is decided per request:
+  `anon` counts unauthenticated callers by IP, `auth` counts credentials, and the
+  two are disjoint so an office behind one NAT does not throttle itself. Login,
+  signup, reset, token and OAuth routes get the much tighter `login` scope,
+  counted by IP, which is the axis the existing per-account guess limits cannot
+  see -- fifty thousand accounts tried once each trips no per-account counter.
+  Staging a support attachment gets its own scope, because that request costs a
+  disk. Every rate is a setting, read per request, and empty turns a scope off.
+- **GraphQL requests now have a cost ceiling.** A REST caller is bounded by the
+  route they picked; a GraphQL caller writes the query, and every schema here has
+  a cycle in it -- a category's children are categories -- so a short document
+  could ask for a cartesian product of the catalogue. Depth, alias count and
+  document size are now bounded (`DJANGO_GRAPHQL_MAX_DEPTH`, `_MAX_ALIASES`,
+  `_MAX_TOKENS`), checked before a resolver runs, and introspection can be
+  withheld with `DJANGO_GRAPHQL_INTROSPECTION=false` for an API that is not
+  public. Aliases are limited separately because they are the attack a depth
+  limit cannot see: forty copies of one costly field, all at depth one.
+- **`.svg` is no longer an accepted support attachment.** The allowlist was
+  documented as excluding anything a browser would execute, and an SVG is a
+  document rather than a picture -- it may carry `<script>`, which runs on the
+  origin that serves it. A support desk is where strangers send agents files, and
+  the agent clicking one is the click that turns it into a session. A deployment
+  serving uploads from a separate origin can put it back through
+  `DJANGO_SUPPORT_UPLOAD_EXTENSIONS`.
+- **A WebSocket handshake is now checked against its origin.** Browsers do not
+  apply the same-origin policy to WebSockets -- any page may ask for a socket to
+  any host, and the browser sends the handshake with cookies -- and these sockets
+  accept a session cookie as identity, so a page that is not ours could open a
+  signed-in person's notification feed and read it. The check lives in
+  `config/sockets.py`, where every socket is already routed, and follows
+  `ALLOWED_HOSTS` unless `DJANGO_WEBSOCKET_ALLOWED_ORIGINS` names something else.
+  A handshake carrying no `Origin` is still allowed, because that is a native or
+  server-to-server client and there are no ambient credentials to borrow there.
+  A modern browser's `SameSite=Lax` default already withholds the cookie, so this
+  is the second lock -- which is exactly what a deployment that had to set
+  `SameSite=None` to host its frontend elsewhere is missing.
+- **`GET /shop/products/{slug}/related` now clamps its `limit`** through the same
+  ceiling every other listing uses. It took the caller's number at its word, and
+  it is public and prices every row it returns, so `?limit=1000000` was an
+  unauthenticated request for as much work as somebody cared to name.
+
+### Changed
+
+- **An account cannot cancel a payout its rail may already be paying.** Once
+  `payout_ready` has fired, cancelling would release the hold while the money
+  went out -- paid twice. It is now a `409`; the rail or an operator ends it.
+- **A shopper no longer names the payment provider.** `provider` is gone from
+  REST checkout; every order records `manual` until a gateway says otherwise.
+- **Internal notes no longer move `last_message_at`**, so a note neither
+  re-sorts the client's list nor the desk queue.
+- **Preview links name the page's id as well as its slug**, so a link does not
+  open a different draft that later takes the same address. Links made before
+  this change stopped working.
+
+- **An app now carries its own admin, and the project carries none of it.** The
+  sidebar and the dashboard used to be a list in
+  `infrastructure/common/adminui.py` -- a function per app building its group,
+  another per app counting its numbers -- and a `templates/admin/index.html`
+  with a hard-coded block for each. Installing an app was therefore only two
+  thirds of installing it, and the missing third was silent: the support desk
+  shipped with a `desk_numbers` function nothing ever called. Each app now
+  declares an `adminui.py` beside its `admin.py` with an optional
+  `navigation(request)` and `dashboard(request)`, the same convention
+  `config/graph.py` and `config/grpc.py` already use, and the project walks the
+  installed apps to find them. Groups merge by title, so several apps fill one
+  heading; both functions are asked per request and may return `None`, which is
+  how permissions are applied -- a contributor offers a reader less rather than
+  the project filtering afterwards. `index.html` draws what it is handed and
+  knows no app. `tests/test_app_isolation.py` renders the front page with
+  nothing enabled and with each feature app alone, so an app added tomorrow is
+  covered the day it is added.
+- **The support dashboard counts desk threads only.** `desk_numbers` counted
+  every live `Ticket`, rooms included, so a project using the app for group and
+  direct messages saw its private conversations reported as unanswered support
+  waiting on an agent who is not entitled to read them.
+- **A feature app no longer has to serve all four transports.** Each takes
+  `DJANGO_<APP>_TRANSPORTS`, a list drawn from `rest`, `graph`, `grpc` and `ws`
+  -- so `DJANGO_SUPPORT_TRANSPORTS=rest,ws` serves the desk's endpoints and its
+  socket and publishes neither its GraphQL fields nor its gRPC services. Unset
+  means everything the app speaks, so nothing changes for anybody who does not
+  want this. A list rather than a boolean per transport, because the alternative
+  is four variables per app and a fifth invented for every app the day a
+  transport is added. A name the app does not publish -- `ws` on the CMS -- is
+  refused at startup rather than ignored, since a deployment that quietly served
+  three of the four somebody listed would leave them to find out from a client.
+- **The `.env` guard can no longer be blind to the settings most likely to be
+  undocumented.** It matched `os.getenv("DJANGO_...")` as text, so it saw only
+  the names spelled as literals -- and reported success over any name the
+  settings module *builds*, which is exactly what the new per-app transport
+  lists do. It now executes `base.py` with `os.getenv` recording what it is
+  asked for, so every key the project actually reads has to appear in all three
+  samples however its name was spelled.
+- **`DJANGO_GRPC_ENABLED=false` now actually stops serving gRPC.** The setting
+  was read into `settings` and then read by nothing, so a deployment that turned
+  gRPC off still registered every service against the server. It is honoured
+  when serving and deliberately still ignored on the generation pass, because
+  `manage.py protos` has to keep the `.proto` files in step in a project that
+  never serves them.
+- **The support app's README no longer claims to be self-contained.** It said it
+  imported nothing from the project it could not degrade without; in fact it
+  imports `infrastructure.common` unguarded in six places and will not load at
+  all without it. The README now names what copying the directory really means:
+  two directories, `apps/support` and `infrastructure/common`, and a list of
+  what is genuinely optional.
+- **The support socket admits nobody it cannot name.** A handshake carrying no
+  usable credential is now closed with 1008 before any accept, which an ASGI
+  server turns into a 403 on the upgrade, so a client sees a failure rather than
+  a socket that opens and never speaks. There is no signing in afterwards: the
+  `authenticate` and `deauthenticate` commands and the token-sniffing on every
+  frame are **removed** rather than refused, and with them the signed-out branch
+  every handler carried. A connection belongs to one account for its whole life.
+  A client that used to connect anonymously and authenticate in a frame has to
+  present its credential in the handshake instead.
+- **The desk's verbs reach desk threads only.** Claim, assign, prioritise, tag
+  and rate went through `visible_to`, so an agent could claim a channel into a
+  queue where it was neither answerable nor closable. They go through
+  `_desk_ticket` now.
+- **Your list is what you are in, not what you can find.** `listed_for` is
+  `visible_to` minus discovery, so the queue and a client's own thread list no
+  longer carry every open channel in the building. `GET /support/channels` is
+  the one listing that shows you a room you have not joined.
+
+### Fixed
+
+- **Races that lost updates or answered 500.** Two agents claiming one ticket,
+  two first reviews, two adds of a new basket item, rejoining a club, leaving a
+  club under suspension, replying while a ticket closes, and two editors saving
+  one field in different languages are all locked now. Checkout locks its rows in
+  primary-key order, so two baskets can no longer deadlock.
+- **Cancelling an order left its payment pending and kept its coupon use**, so a
+  cancelled order could still be marked paid and a limited coupon could be
+  drained by placing and cancelling.
+- **A frozen wallet still paid out**, through approval and operator settlement.
+- **Values the database could not hold answered 500**: malformed UUIDs on every
+  transport, `NaN`, `Infinity` and oversized amounts, and text longer than its
+  column on PostgreSQL. They are all refused with a `4xx` now.
+- **Transport gaps.** gRPC gained the wallet's `GetBalance` and `GetMethod`, the
+  cms page's JSON-LD, menu children and section parents; GraphQL gained
+  `shopAddress`, `notificationCount` and `clubAwardCount`; REST gained
+  `GET /notifications/count`. Every paged response echoes the page it served.
+- **A Redis outage failed the request that caused a notification** and dropped
+  the rest of its fan-out. Publishing is robust now, and a support message is no
+  longer rolled back by a notification that fails.
+- **Counts and badges.** Unjoined channels no longer count towards the support
+  badge; the desk statistics leave rooms out; `prune` counts notifications only;
+  the club award `count` is the total rather than the page.
+- **The generated project's `make check` now covers the club**, and its `.env`
+  header counts six feature apps rather than four.
+
+- **`DJANGO_WALLET_TRANSPORTS` was accepted and then ignored.** The wallet was
+  never keyed in `APP_TRANSPORTS`, so `config.transports.serves` took it for an
+  infrastructure app and published its GraphQL fields and gRPC services whatever
+  the setting said. `check` stayed green, because the test only ran `check`. It
+  is keyed now. The isolation test asks the GraphQL and gRPC registries directly
+  whether a REST-only app is still in them, and `test_transports.py` fails fast
+  when a feature app is missing from the mapping.
+- **A misspelt rail in `DJANGO_WALLET_METHODS` switched rails off without a
+  word.** The list is intersected with the rails the app knows, so `card,crd`
+  quietly meant `card` and `crd` alone meant nothing could be paid. A settings
+  rule now refuses a name that is not in `Method`, so `check` and preflight
+  reject it at startup.
+- **An account could confirm its own wallet movements, and credit itself.**
+  `settle`, `fail`, `expire` and `reverse` were published to the wallet's owner
+  on all three transports. Settling is where money becomes real, so two calls --
+  a deposit and a settle -- put any figure a customer liked into their own
+  balance; `reverse` was worse, because it needed no approval at all and turned
+  a withdrawal that had really been paid out into money still in the wallet. The
+  only thing standing in front of either was `requires_approval`, whose own help
+  text recommends turning it off for a rail confirmed by webhook. Those four
+  verbs are now published to nobody. `cancel` stays with the account, because
+  giving up on a payment you started asserts nothing about the outside world.
+- **A rail confirms a movement at `/api/v1/wallet/hooks/{method}`, signed.** The
+  endpoint the removed verbs should always have been. HMAC-SHA256 over
+  `"{timestamp}.{body}"` with a per-method secret from
+  `DJANGO_WALLET_WEBHOOK_SECRETS`, compared in constant time, with the timestamp
+  inside the signature so a captured confirmation cannot be replayed past
+  `DJANGO_WALLET_WEBHOOK_TOLERANCE_SECONDS`. Per method, so a leaked secret
+  confirms nothing on another company's rail -- checked against the movement's
+  own method, not just trusted. Unsigned, wrongly signed, stale and
+  not-configured all answer one `401` with one sentence. A method with no secret
+  confirms nothing, which leaves a queue somebody notices rather than a door.
+- **No pending withdrawal could ever be settled.** The balance re-check at
+  settlement ran against `available`, which already has the pending payout
+  subtracted from it, so the movement was charged for its own hold twice: a
+  customer with a thousand who asked to withdraw a thousand was told "Not enough
+  available: 0.0000" when the operator approved it. Only a wallet holding twice
+  the amount could pay one out -- and the approval-gated path, the one this app
+  recommends, is where it bit. The re-check still happens, and still refuses a
+  payout whose money went while it was in flight; it just hands back the
+  movement's own hold first.
+- **A reference reused for a different movement is refused rather than
+  swallowed.** Idempotency returned the first entry for anything carrying the
+  same reference, without comparing the two requests, so a client that reused
+  one asked to deposit five thousand, was answered `200`, and was credited with
+  yesterday's five. The kind, the amount and the method are now compared against
+  the entry the reference already wrote, and a mismatch is a `409`. A genuine
+  retry -- the same request again -- still returns the same entry, which is what
+  the reference is for.
+
+- **Every wallet changelist crashed as soon as it had a row.** Three columns --
+  a chain-less crypto currency, a method enabled with nothing to price, and an
+  entry waiting on approval -- were drawn with `format_html` and a single
+  pre-built string, which Django refuses. An empty list calls none of its column
+  callables, so all three screens answered a clean 200 in the example tour and
+  in every test, and would have answered `TypeError` to the first operator with
+  data. They go through a `_badge` helper now, and a test opens each of this
+  app's lists with rows in it.
+- **Wallet amounts are written as money rather than at storage precision.**
+  Amounts are stored at four decimals for the rails that quote minor units, and
+  every screen printed that straight: `1250.5000 USD`, and a dashboard card
+  whose whole value was `0.0000`. `money.written()` keeps every digit that is
+  real and drops the padding -- `1250.50`, `99.00`, `12.3456` -- and the payouts
+  card counts payouts, with what they are worth in the hint, like every other
+  card on the page.
+- **The preflight checks no longer kill an ASGI server that imports the
+  application on its event loop.** Some of Django's own model checks open a
+  cursor -- asking SQLite whether it supports `JSONField` is one -- which raises
+  `SynchronousOnlyOperation` from asynchronous code, so `uvicorn --reload`, and
+  therefore `make serve`, died at boot with a traceback about asynchronous
+  context and nothing about settings. `config/preflight.py` now runs them on a
+  worker thread whenever a loop is already running.
+- **`DJANGO_SUPPORT_UPLOAD_EXTENSIONS` accepts extensions written without a
+  dot.** The app compares against `.png`, so a deployment that wrote `png,jpg`
+  -- the obvious way to write it -- configured an allowlist that matched
+  nothing, and got a support desk that silently rejected every attachment. Both
+  forms are now normalised to the one the app compares.
+- **A setting that is a flag counts as unfilled when it is `False`.** The
+  emptiness test listed `""`, `None`, `[]` and `{}`, so a required boolean
+  passed however it was set -- which is precisely the case the new `*_ENABLED`
+  requirements rest on.
+- **`Ticket.readable_by` no longer hands staff a room.** It is the
+  row-at-a-time answer to `TicketQuerySet.visible_to` and predated the line that
+  method draws, so it still returned true for any staff account on any thread --
+  a private group, a direct message between two customers, anything -- and in
+  the other direction refused a non-staff account the public channel the
+  queryset offers for discovery. Nothing calls it, so this was a latent trap
+  rather than a live leak; in an app meant to be copied out, a helper whose
+  answer is more generous than the queryset beside it is a trap wherever it
+  lands. A test now asserts the two against each other for every kind and every
+  account.
+- **Being put into a thread now reaches the person it concerns.**
+  `publish_ticket` only ever published to the thread's own channel, so somebody
+  added to a thread they were not already in -- an invitation, and now every new
+  group and private chat -- was the one person who never heard about it.
+  `to_members` sends it to their account channel, which is where they are
+  certainly listening.
+- **Every feature app is now proven to work on its own**, not only alongside all
+  the others. `tests/test_app_isolation.py` had covered one of the four; it is
+  now parametrised over `cms`, `notifications`, `shop` and `support`, and each
+  has to boot with no login app installed, install its own tables and none of
+  its neighbours', and leave nothing in the schema when nobody names it. Adding
+  an app to `FEATURE_APPS` is what gives it that coverage, so the app somebody
+  adds next is covered the day it is added rather than the day somebody
+  remembers to copy a test. Support additionally opens a ticket over HTTP and a
+  socket over the same Django session in a project with no login app and no
+  notification app -- the guards that make that possible were already there, and
+  a guard nobody exercises is a comment.
+- **The unread count is no longer permanently stuck at what you had missed.**
+  The correlated subquery that annotates a thread's unread count read its
+  watermark with a single `OuterRef`, which one level deep resolves against the
+  *messages* rather than the tickets, matched no participant, and so counted
+  every message as unread however much had been read. The badge cleared and came
+  straight back.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added

@@ -15,7 +15,8 @@ from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
+from ninja.utils import check_csrf
 
 # gRPC metadata keys are lowercase; Django keeps headers in `META` under their
 # CGI names. This is the one header the credential is ever carried in.
@@ -30,6 +31,26 @@ def _resolver() -> Any:
     from infrastructure.auth.core.sessions import resolve_request_user
 
     return resolve_request_user
+
+
+def session_csrf_failure(request: HttpRequest) -> HttpResponse | None:
+    """Return Django's CSRF refusal if this request rides on the session cookie.
+
+    A bearer token is not an ambient credential -- a browser never attaches one
+    on its own -- so a request it authenticates cannot be forged cross-site and
+    needs no CSRF token. The session cookie is attached to every request the
+    browser makes, so a write it authenticates must prove it came from our own
+    pages. The session is only ever the credential in the ``none`` token mode;
+    every other mode ignores it, so there is nothing to forge there. Both REST
+    and GraphQL are CSRF-exempt at the Django level and ask this instead, which
+    is what keeps the two transports agreeing. Safe methods pass untouched.
+    """
+    if settings.AUTH_TOKEN_MODE != "none":
+        return None
+    user = getattr(request, "user", None)
+    if user is None or not user.is_authenticated:
+        return None
+    return check_csrf(request)
 
 
 def caller(request: HttpRequest) -> Any | None:

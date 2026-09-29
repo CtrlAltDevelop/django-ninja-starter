@@ -81,6 +81,17 @@ Naming the app is the whole installation; leaving it unset costs nothing.
 | `admin.py` | Where the catalogue is actually built, and the moderation queue |
 | `theme.py` | Where the admin theme comes from, and what to do without one |
 
+## Paying for an order
+
+When the wallet app is installed, orders are paid **from the customer's wallet
+balance, and only that way**. `POST /shop/orders/{number}/pay` (also
+`shopPayOrder` and gRPC `PayOrder`) takes the order total in the same
+transaction that marks the order paid. Nobody, including an operator in the
+admin, can mark a wallet order paid by hand. A refund puts the money back in the
+wallet. Customers top the wallet up through its gateways. Set
+`DJANGO_SHOP_PAYMENT_PROVIDER=manual` to settle orders by hand instead; that is
+also the only mode when there is no wallet.
+
 ## The decisions worth knowing before changing anything
 
 **A category is the shape of a product, not a folder.** `CategoryAttribute` rows

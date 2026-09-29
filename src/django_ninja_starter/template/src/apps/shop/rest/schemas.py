@@ -458,7 +458,6 @@ class CheckoutIn(Schema):
     shipping_method: str
     coupon: str = ""
     note: str = ""
-    provider: str = "manual"
 
 
 class PaymentConfirmIn(Schema):

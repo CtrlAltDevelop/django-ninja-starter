@@ -297,6 +297,16 @@ class TestCoupons:
 
         assert coupon.used_count == 1
 
+    def test_cancelling_gives_the_use_back(
+        self, basket: Any, address: Address, shipping: ShippingMethod, coupon: Coupon
+    ) -> None:
+        """Otherwise placing and cancelling over and over drains a limited coupon."""
+        order = _checkout(basket, address, shipping, coupon_code="WELCOME")
+        shop_service.cancel_order(basket, order.number)
+        coupon.refresh_from_db()
+
+        assert coupon.used_count == 0
+
     def test_an_amount_coupon_never_takes_more_than_the_basket_holds(
         self, alice: Any, tshirt: Product, address: Address, shipping: ShippingMethod
     ) -> None:
@@ -392,7 +402,8 @@ class TestCancellation:
         order = _checkout(basket, address, shipping)
         shop_service.cancel_order(basket, order.number)
 
-        assert shop_service.confirm_payment(basket, order.number).status == OrderStatus.CANCELLED
+        with pytest.raises(ShopRefused, match="cancelled"):
+            shop_service.confirm_payment(basket, order.number)
 
     def test_an_untracked_product_has_no_stock_to_put_back(
         self, alice: Any, laptop: Product, address: Address, shipping: ShippingMethod
@@ -426,15 +437,43 @@ class TestCheckoutOverHttp:
         assert placed.status_code == 200, placed.content
         order = placed.json()["data"]
 
+        assert order["status"] == "pending"
+        assert order["payment_status"] == "pending"
+        # Where it stays until somebody who is not the buyer says otherwise --
+        # see the settlement test below.
+
+    def test_no_endpoint_lets_a_shopper_settle_their_own_order(
+        self, client: Client, basket: Any, address: Address, shipping: ShippingMethod
+    ) -> None:
+        """The route is gone, and that is the security property.
+
+        Marking an order paid asserts that money arrived somewhere this app
+        cannot see. The account that owes it is the one caller who must not make
+        that assertion -- an endpoint scoped to `request.user` would hand a
+        shopper the power to check out for nothing.
+        """
+        order = _checkout(basket, address, shipping)
+
         paid = client.post(
-            f"{SHOP}/orders/{order['number']}/payment/confirm",
+            f"{SHOP}/orders/{order.number}/payment/confirm",
             data={"reference": "psp_2"},
             content_type="application/json",
             **bearer(basket),
         )
 
-        assert paid.status_code == 200, paid.content
-        assert paid.json()["data"]["status"] == "paid"
+        assert paid.status_code == 404
+        order.refresh_from_db()
+        assert order.status == OrderStatus.PENDING
+
+    def test_an_operator_settles_it_the_way_the_admin_does(
+        self, basket: Any, address: Address, shipping: ShippingMethod
+    ) -> None:
+        """The verb still exists; it is reached from the back office, not a token."""
+        order = _checkout(basket, address, shipping)
+
+        settled = shop_service.settle_order(order, reference="bank-statement-1")
+
+        assert settled.status == OrderStatus.PAID
 
     def test_an_order_can_be_cancelled_over_http(
         self, client: Client, basket: Any, address: Address, shipping: ShippingMethod

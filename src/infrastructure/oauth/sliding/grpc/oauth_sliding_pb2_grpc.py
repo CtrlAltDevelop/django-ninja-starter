@@ -6,7 +6,7 @@ import warnings
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from infrastructure.oauth.sliding.grpc import oauth_sliding_pb2 as infrastructure_dot_oauth_dot_sliding_dot_grpc_dot_oauth__sliding__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

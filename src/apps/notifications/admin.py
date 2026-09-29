@@ -66,6 +66,13 @@ class NotificationAdmin(ModelAdmin):
         ("Record", {"classes": ("collapse",), "fields": ("id", "created_at")}),
     )
 
+    def get_readonly_fields(self, request: HttpRequest, obj: Any = None) -> Any:
+        """Who a saved notification is for is fixed: it was broadcast on creation,
+        so re-addressing it would expose it to a new audience that was never told."""
+        if obj is not None:
+            return (*self.readonly_fields, "audience", "recipient")
+        return self.readonly_fields
+
     def get_queryset(self, request: HttpRequest) -> QuerySet[Notification]:
         """Count receipts in the list query rather than once per row."""
         return (
@@ -110,7 +117,7 @@ class NotificationAdmin(ModelAdmin):
 class NotificationReceiptAdmin(ModelAdmin):
     """What each account has done with each notification. A log, so nothing is editable."""
 
-    # Enforced by the two methods below; declared here so the generated
+    # Enforced by the three methods below; declared here so the generated
     # documentation can say so without inheriting this project's ReadOnlyAdmin,
     # which imports Unfold directly and would not travel with this app.
     read_only_admin = True
@@ -127,4 +134,7 @@ class NotificationReceiptAdmin(ModelAdmin):
         return False
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False

@@ -6,12 +6,13 @@ number, which means ``SILENCED_SYSTEM_CHECKS`` can turn off one nag without
 turning off a whole family.
 """
 
+import re
 from typing import Any
 
 from django.apps import apps
 from django.core.checks import CheckMessage, Error, Warning, register
 
-from infrastructure.common.appsettings import MISSING, AppSettings, Requirement
+from infrastructure.common.appsettings import MISSING, AppSettings, Requirement, Rule
 
 
 def installed_specs() -> list[tuple[str, AppSettings]]:
@@ -40,6 +41,8 @@ def _numeric(value: Any) -> float | None:
 def _check(label: str, spec: AppSettings, requirement: Requirement) -> list[CheckMessage]:
     messages: list[CheckMessage] = []
     identifier = f"{label}.{requirement.check_id}"
+    if not requirement.applies():
+        return messages
     value = requirement.resolve()
 
     if value is MISSING:
@@ -51,7 +54,10 @@ def _check(label: str, spec: AppSettings, requirement: Requirement) -> list[Chec
             )
         ]
 
-    empty = value in ("", None, [], {})
+    # `False` counts as empty, because for a setting that is a flag it is the
+    # unfilled state: an app installed with its own `*_ENABLED` off is exactly
+    # the half-configured deployment this check exists to refuse.
+    empty = value is False or value in ("", None, [], {})
     if empty and requirement.required:
         return [
             Error(
@@ -80,6 +86,15 @@ def _check(label: str, spec: AppSettings, requirement: Requirement) -> list[Chec
                 id=identifier,
             )
         )
+    if requirement.pattern and not re.fullmatch(requirement.pattern, str(value)):
+        wanted = requirement.pattern_description or f"match {requirement.pattern}"
+        messages.append(
+            Error(
+                f"{spec.title}: {requirement.setting} must {wanted}",
+                hint=_hint(requirement),
+                id=identifier,
+            )
+        )
     number = _numeric(value)
     if number is not None:
         below = requirement.minimum is not None and number < requirement.minimum
@@ -104,6 +119,19 @@ def _check(label: str, spec: AppSettings, requirement: Requirement) -> list[Chec
     return messages
 
 
+def _check_rule(label: str, spec: AppSettings, rule: Rule) -> list[CheckMessage]:
+    """Report a relationship between settings that does not hold."""
+    if rule.holds():
+        return []
+    return [
+        Error(
+            f"{spec.title}: {rule.message}",
+            hint=rule.hint,
+            id=f"{label}.{rule.check_id}",
+        )
+    ]
+
+
 @register()
 def check_declared_app_settings(**kwargs: object) -> list[CheckMessage]:
     """Run every installed app's settings contract."""
@@ -111,4 +139,6 @@ def check_declared_app_settings(**kwargs: object) -> list[CheckMessage]:
     for label, spec in installed_specs():
         for requirement in spec.requirements:
             messages.extend(_check(label, spec, requirement))
+        for rule in spec.rules:
+            messages.extend(_check_rule(label, spec, rule))
     return messages

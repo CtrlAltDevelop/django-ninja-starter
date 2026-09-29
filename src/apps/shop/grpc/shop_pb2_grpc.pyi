@@ -43,7 +43,6 @@ class ShopControllerStub:
     ClearCart: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.ClearCartResult]
     Collection: _grpc.UnaryUnaryMultiCallable[_shop_pb2.CollectionRequest, _shop_pb2.CollectionResult]
     Collections: _grpc.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.CollectionList]
-    ConfirmPayment: _grpc.UnaryUnaryMultiCallable[_shop_pb2.ConfirmPaymentRequest, _shop_pb2.ConfirmPaymentResult]
     DeleteReview: _grpc.UnaryUnaryMultiCallable[_shop_pb2.DeleteReviewRequest, _shop_pb2.DeleteReviewResult]
     Favourites: _grpc.UnaryUnaryMultiCallable[_shop_pb2.FavouritesRequest, _shop_pb2.FavouritesResult]
     GetAddress: _grpc.UnaryUnaryMultiCallable[_shop_pb2.GetAddressRequest, _shop_pb2.GetAddressResult]
@@ -55,6 +54,7 @@ class ShopControllerStub:
     MyReviews: _grpc.UnaryUnaryMultiCallable[_shop_pb2.MyReviewsRequest, _shop_pb2.MyReviewsResult]
     Order: _grpc.UnaryUnaryMultiCallable[_shop_pb2.OrderRequest, _shop_pb2.OrderResult]
     Orders: _grpc.UnaryUnaryMultiCallable[_shop_pb2.OrdersRequest, _shop_pb2.OrderList]
+    PayOrder: _grpc.UnaryUnaryMultiCallable[_shop_pb2.PayOrderRequest, _shop_pb2.PayOrderResult]
     PreviewCoupon: _grpc.UnaryUnaryMultiCallable[_shop_pb2.CouponPreviewRequest, _shop_pb2.CouponPreviewResult]
     Product: _grpc.UnaryUnaryMultiCallable[_shop_pb2.ProductRequest, _shop_pb2.ProductResult]
     Products: _grpc.UnaryUnaryMultiCallable[_shop_pb2.ProductsRequest, _shop_pb2.ProductsResult]
@@ -86,7 +86,6 @@ class ShopControllerAsyncStub(ShopControllerStub):
     ClearCart: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.ClearCartResult]  # type: ignore[assignment]
     Collection: _aio.UnaryUnaryMultiCallable[_shop_pb2.CollectionRequest, _shop_pb2.CollectionResult]  # type: ignore[assignment]
     Collections: _aio.UnaryUnaryMultiCallable[_empty_pb2.Empty, _shop_pb2.CollectionList]  # type: ignore[assignment]
-    ConfirmPayment: _aio.UnaryUnaryMultiCallable[_shop_pb2.ConfirmPaymentRequest, _shop_pb2.ConfirmPaymentResult]  # type: ignore[assignment]
     DeleteReview: _aio.UnaryUnaryMultiCallable[_shop_pb2.DeleteReviewRequest, _shop_pb2.DeleteReviewResult]  # type: ignore[assignment]
     Favourites: _aio.UnaryUnaryMultiCallable[_shop_pb2.FavouritesRequest, _shop_pb2.FavouritesResult]  # type: ignore[assignment]
     GetAddress: _aio.UnaryUnaryMultiCallable[_shop_pb2.GetAddressRequest, _shop_pb2.GetAddressResult]  # type: ignore[assignment]
@@ -98,6 +97,7 @@ class ShopControllerAsyncStub(ShopControllerStub):
     MyReviews: _aio.UnaryUnaryMultiCallable[_shop_pb2.MyReviewsRequest, _shop_pb2.MyReviewsResult]  # type: ignore[assignment]
     Order: _aio.UnaryUnaryMultiCallable[_shop_pb2.OrderRequest, _shop_pb2.OrderResult]  # type: ignore[assignment]
     Orders: _aio.UnaryUnaryMultiCallable[_shop_pb2.OrdersRequest, _shop_pb2.OrderList]  # type: ignore[assignment]
+    PayOrder: _aio.UnaryUnaryMultiCallable[_shop_pb2.PayOrderRequest, _shop_pb2.PayOrderResult]  # type: ignore[assignment]
     PreviewCoupon: _aio.UnaryUnaryMultiCallable[_shop_pb2.CouponPreviewRequest, _shop_pb2.CouponPreviewResult]  # type: ignore[assignment]
     Product: _aio.UnaryUnaryMultiCallable[_shop_pb2.ProductRequest, _shop_pb2.ProductResult]  # type: ignore[assignment]
     Products: _aio.UnaryUnaryMultiCallable[_shop_pb2.ProductsRequest, _shop_pb2.ProductsResult]  # type: ignore[assignment]
@@ -194,13 +194,6 @@ class ShopControllerServicer(metaclass=_abc_1.ABCMeta):
     ) -> _typing.Union[_shop_pb2.CollectionList, _abc.Awaitable[_shop_pb2.CollectionList]]: ...
 
     @_abc_1.abstractmethod
-    def ConfirmPayment(
-        self,
-        request: _shop_pb2.ConfirmPaymentRequest,
-        context: _ServicerContext,
-    ) -> _typing.Union[_shop_pb2.ConfirmPaymentResult, _abc.Awaitable[_shop_pb2.ConfirmPaymentResult]]: ...
-
-    @_abc_1.abstractmethod
     def DeleteReview(
         self,
         request: _shop_pb2.DeleteReviewRequest,
@@ -276,6 +269,13 @@ class ShopControllerServicer(metaclass=_abc_1.ABCMeta):
         request: _shop_pb2.OrdersRequest,
         context: _ServicerContext,
     ) -> _typing.Union[_shop_pb2.OrderList, _abc.Awaitable[_shop_pb2.OrderList]]: ...
+
+    @_abc_1.abstractmethod
+    def PayOrder(
+        self,
+        request: _shop_pb2.PayOrderRequest,
+        context: _ServicerContext,
+    ) -> _typing.Union[_shop_pb2.PayOrderResult, _abc.Awaitable[_shop_pb2.PayOrderResult]]: ...
 
     @_abc_1.abstractmethod
     def PreviewCoupon(
