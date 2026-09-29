@@ -5,7 +5,7 @@ import warnings
 
 from infrastructure.auth.sms_code.grpc import auth_sms_code_pb2 as infrastructure_dot_auth_dot_sms__code_dot_grpc_dot_auth__sms__code__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

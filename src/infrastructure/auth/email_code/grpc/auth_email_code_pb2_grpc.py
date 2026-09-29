@@ -5,7 +5,7 @@ import warnings
 
 from infrastructure.auth.email_code.grpc import auth_email_code_pb2 as infrastructure_dot_auth_dot_email__code_dot_grpc_dot_auth__email__code__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

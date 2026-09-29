@@ -5,7 +5,7 @@ import warnings
 
 from infrastructure.auth.password.grpc import auth_password_pb2 as infrastructure_dot_auth_dot_password_dot_grpc_dot_auth__password__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

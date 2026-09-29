@@ -6,7 +6,7 @@ import warnings
 from apps.club.grpc import club_pb2 as apps_dot_club_dot_grpc_dot_club__pb2
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

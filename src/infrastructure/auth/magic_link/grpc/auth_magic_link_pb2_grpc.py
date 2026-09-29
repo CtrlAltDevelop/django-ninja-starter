@@ -5,7 +5,7 @@ import warnings
 
 from infrastructure.auth.magic_link.grpc import auth_magic_link_pb2 as infrastructure_dot_auth_dot_magic__link_dot_grpc_dot_auth__magic__link__pb2
 
-GRPC_GENERATED_VERSION = '1.83.1'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
