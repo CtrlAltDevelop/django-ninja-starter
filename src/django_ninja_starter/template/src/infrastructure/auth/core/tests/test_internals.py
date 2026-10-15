@@ -196,3 +196,21 @@ def test_corrupt_metadata_degrades_to_an_empty_mapping(db: None) -> None:
     store._records[ticket_key(ticket)][1]["metadata"] = "{not json"
 
     assert store.read(ticket, purpose="pending").metadata == {}
+
+
+def test_the_in_process_store_does_not_hoard_what_has_expired() -> None:
+    """Nothing expires a key in a dict, so the write paths have to drop them.
+
+    A code nobody comes back for, and a counter per address tried, would
+    otherwise be held until the process restarted.
+    """
+    from infrastructure.auth.core.challenges import LocMemChallengeStore
+
+    store = LocMemChallengeStore()
+    store.create(purpose="pending", subject="7", ttl=-1)
+    store.increment("attempts:gone", -1)
+
+    store.create(purpose="pending", subject="8")
+
+    assert len(store._records) == 1
+    assert store._counters == {}

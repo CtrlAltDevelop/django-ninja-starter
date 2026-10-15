@@ -24,7 +24,7 @@ requires-python = ">=3.12"
 # opens. Each is imported only by the module its feature loads, so leaving an
 # extra out costs nothing until something actually reaches for it.
 dependencies = [
-  "cryptography>=45,<48",
+  "cryptography>=45,<51",
   "Django>=5.2,<7.0",
   "django-ninja>=1.4,<2.0",
   "django-socio-grpc>=0.25,<1.0",
@@ -38,7 +38,7 @@ dependencies = [
 # Social sign-in, for talking to the providers.
 oauth = ["httpx>=0.28,<1.0"]
 # The challenge store that survives a restart and reaches every worker.
-redis = ["redis>=5.0,<7.0"]
+redis = ["redis>=5.0,<9.0"]
 # Authenticator-app second factors.
 totp = ["pyotp>=2.9,<3.0"]
 # An ASGI server and a WebSocket protocol implementation, for the notification

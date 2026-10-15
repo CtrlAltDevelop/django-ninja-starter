@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`cryptography` and `redis` accept their current major versions**, here and
+  in the generated project: `cryptography<51` and `redis<9`. The challenge store
+  dropped two casts and widened one that redis 8's own type hints now contradict,
+  which is all the newer driver asked for.
+
+### Fixed
+
+- **The in-process challenge store no longer grows for the life of the process.**
+  Nothing expires a key in a dict, and `LocMemChallengeStore` dropped a lapsed
+  record only when something looked that same key up again -- which a code that
+  is requested and never used, and every rate-limit counter, never are. One per
+  address, per destination and per account tried were held until a restart, so an
+  anonymous caller could grow a worker's memory by asking. The two write paths
+  sweep what has expired first.
+
 ## [2.1.0] - 2026-09-30
 
 ### Added
