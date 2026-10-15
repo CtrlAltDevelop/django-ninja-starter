@@ -431,6 +431,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`cryptography` and `redis` accept their current major versions**, here and
+  in the generated project: `cryptography<51` and `redis<9`. The challenge store
+  dropped two casts and widened one that redis 8's own type hints now contradict,
+  which is all the newer driver asked for.
+
 - **An account cannot cancel a payout its rail may already be paying.** Once
   `payout_ready` has fired, cancelling would release the hold while the money
   went out -- paid twice. It is now a `409`; the rail or an operator ends it.
@@ -511,6 +516,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the one listing that shows you a room you have not joined.
 
 ### Fixed
+
+- **The in-process challenge store no longer grows for the life of the process.**
+  Nothing expires a key in a dict, and `LocMemChallengeStore` dropped a lapsed
+  record only when something looked that same key up again -- which a code that
+  is requested and never used, and every rate-limit counter, never are. One per
+  address, per destination and per account tried were held until a restart, so an
+  anonymous caller could grow a worker's memory by asking. The two write paths
+  sweep what has expired first.
 
 - **Races that lost updates or answered 500.** Two agents claiming one ticket,
   two first reviews, two adds of a new basket item, rejoining a club, leaving a

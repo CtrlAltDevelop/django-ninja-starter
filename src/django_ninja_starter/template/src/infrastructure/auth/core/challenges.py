@@ -173,7 +173,7 @@ class RedisChallengeStore:
         record = _record(purpose, subject, channel, destination, metadata, code_hash)
         key = self._key(ticket)
         pipeline = self.client.pipeline()
-        pipeline.hset(key, mapping=record)
+        pipeline.hset(key, mapping=cast("Any", record))
         pipeline.expire(key, lifetime)
         pipeline.execute()
         return ticket
@@ -181,7 +181,7 @@ class RedisChallengeStore:
     def verify(self, ticket: str, code: str, *, purpose: str) -> Challenge:
         record = self._load(ticket, purpose)
         key = self._key(ticket)
-        attempts = cast(int, self.client.hincrby(key, "attempts", 1))
+        attempts = self.client.hincrby(key, "attempts", 1)
         if attempts > settings.AUTH_CHALLENGE_MAX_ATTEMPTS:
             self.client.delete(key)
             raise ChallengeAttemptsExhausted("Too many incorrect codes. Request a new one.")
@@ -201,7 +201,7 @@ class RedisChallengeStore:
         key = self._key(ticket)
         if not self.client.exists(key):
             return 0
-        attempts = cast(int, self.client.hincrby(key, "attempts", 1))
+        attempts = self.client.hincrby(key, "attempts", 1)
         if attempts > settings.AUTH_CHALLENGE_MAX_ATTEMPTS:
             self.client.delete(key)
         return attempts
@@ -223,11 +223,26 @@ class LocMemChallengeStore:
 
     Deliberately not safe across processes: a multi-worker deployment would hand
     step two to a worker that never saw step one.
+
+    Unlike Redis, nothing here expires a key on its own: a lapsed record is
+    dropped when something looks it up again, and most never are. A code that is
+    requested and never used, and every rate-limit counter -- one per address,
+    per destination, per account tried -- would otherwise be held for the life of
+    the process, which is memory an anonymous caller can grow by asking. So the
+    two write paths sweep first.
     """
 
     def __init__(self) -> None:
         self._records: dict[str, tuple[float, dict[str, str]]] = {}
         self._counters: dict[str, tuple[float, int]] = {}
+
+    def _sweep(self) -> None:
+        # ponytail: a full pass over both dicts per write. They stay small
+        # because of it; a store that needs better than that wants Redis, which
+        # is the other implementation in this module.
+        now = time.monotonic()
+        self._records = {k: v for k, v in self._records.items() if v[0] > now}
+        self._counters = {k: v for k, v in self._counters.items() if v[0] > now}
 
     def _live(self, key: str) -> dict[str, str] | None:
         entry = self._records.get(key)
@@ -260,6 +275,7 @@ class LocMemChallengeStore:
         metadata: dict[str, Any] | None = None,
         ttl: int | None = None,
     ) -> str:
+        self._sweep()
         ticket = generate_ticket()
         lifetime = ttl if ttl is not None else settings.AUTH_CHALLENGE_TTL_SECONDS
         code_hash = hash_code(ticket, purpose, code) if code else ""
@@ -301,6 +317,7 @@ class LocMemChallengeStore:
         self._records.pop(ticket_key(ticket), None)
 
     def increment(self, key: str, ttl: int) -> int:
+        self._sweep()
         entry = self._counters.get(key)
         now = time.monotonic()
         if entry is None or entry[0] <= now:
