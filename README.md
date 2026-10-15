@@ -1,5 +1,7 @@
 # Django Ninja Starter
 
+[![PyPI](https://img.shields.io/pypi/v/django-ninja-starter.svg)](https://pypi.org/project/django-ninja-starter/)
+
 A production-oriented Django and Django Ninja starter, available as both a GitHub
 Template and an installable Python project generator.
 
