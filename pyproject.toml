@@ -10,7 +10,7 @@ dynamic = ["version"]
 description = "A production-oriented Django Ninja API template and project generator"
 readme = "README.md"
 requires-python = ">=3.12"
-license = "MIT"
+license = "AGPL-3.0-only"
 keywords = [
   "django",
   "django-ninja",
