@@ -35,6 +35,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The S3 backend for DJANGO_STORAGE_BACKEND=s3.
+s3 = ["django-storages[s3]>=1.14,<2.0"]
 # Social sign-in, for talking to the providers.
 oauth = ["httpx>=0.28,<1.0"]
 # The challenge store that survives a restart and reaches every worker.

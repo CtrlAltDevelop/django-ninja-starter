@@ -34,9 +34,6 @@ already written to storage before anybody notices.
 """
 
 import posixpath
-import re
-import unicodedata
-import uuid
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -46,12 +43,9 @@ from django.core.files.storage import default_storage
 from django.utils import timezone
 
 from apps.support.models import Upload
+from infrastructure.common.uploads import check_size, extension_of, safe_name
 
-#: What survives of an uploaded file's own name. Everything else becomes a
-#: hyphen, because the name ends up in a URL and a storage key, and
-#: "screenshot (2)+copy.png" is a different string in each of the places it is
-#: written.
-UNSAFE = re.compile(r"[^a-zA-Z0-9._-]+")
+__all__ = ["check", "extension_of", "safe_name", "store"]
 
 #: What a client may send the desk. A allowlist rather than a blocklist: the
 #: interesting extensions are the ones nobody thought of, and a blocklist is a
@@ -114,36 +108,9 @@ def allowed_extensions() -> tuple[str, ...]:
     return tuple(str(item).lower() for item in configured)
 
 
-def safe_name(name: str) -> str:
-    """A storage-safe, URL-safe version of an uploaded file's own name.
-
-    The stem is kept -- shortened, ASCII-folded and stripped of anything that
-    would need escaping -- because a folder of ``a1b2c3.png`` is unsearchable
-    for the agent looking for the screenshot a client sent this morning.
-    Uniqueness comes from a suffix rather than from the name, so two people
-    sending ``screenshot.png`` do not overwrite each other.
-    """
-    stem = PurePosixPath(name or "file").name
-    folded = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
-    cleaned = UNSAFE.sub("-", folded).strip("-.") or "file"
-    root, _, extension = cleaned.rpartition(".")
-    root = (root or cleaned)[:60].strip("-") or "file"
-    suffix = uuid.uuid4().hex[:8]
-    return f"{root}-{suffix}.{extension.lower()}" if extension else f"{root}-{suffix}"
-
-
-def extension_of(name: str) -> str:
-    """``"Shot.PNG"`` -> ``".png"``. Empty when the name has no extension at all."""
-    _, dot, extension = PurePosixPath(name or "").name.rpartition(".")
-    return f".{extension.lower()}" if dot else ""
-
-
 def check(user: Any, upload: Any) -> None:
     """Raise :class:`ValidationError` if this file may not be stored by this account."""
-    limit = max_upload_bytes()
-    size = getattr(upload, "size", 0) or 0
-    if limit and size > limit:
-        raise ValidationError(f"That file is {size // 1024} KB. The limit is {limit // 1024} KB.")
+    check_size(getattr(upload, "size", 0) or 0, max_upload_bytes())
     allowed = allowed_extensions()
     if allowed:
         # The name it will be stored under, which `safe_name` folds and trims.

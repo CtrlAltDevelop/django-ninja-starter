@@ -48,6 +48,7 @@ def build_apis() -> dict[str, NinjaAPI]:
             *settings.SUPPORT_ROUTERS,
             *settings.WALLET_ROUTERS,
             *settings.WEBHOOKS_ROUTERS,
+            *settings.FILES_ROUTERS,
         ]
         guarded = {id(route["router"]) for route in credential_routes}
         api = EnvelopeAPI(

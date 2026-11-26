@@ -15,7 +15,7 @@ themselves — see [keeping these pages honest](#keeping-these-pages-honest).
 | Social providers | [`oauth_google`](oauth/google.md), [`oauth_apple`](oauth/apple.md), [`oauth_microsoft`](oauth/microsoft.md), [`oauth_github`](oauth/github.md) |
 | Token modes | [`oauth_sliding`](oauth/sliding.md), [`oauth_session`](oauth/session.md), [`oauth_rotation`](oauth/rotation.md) |
 | Shared by those | [`auth_core`](auth/core.md), [`oauth_core`](oauth/core.md) |
-| Feature apps | [`cms`](cms.md), [`notifications`](notifications.md), [`shop`](shop.md), [`support`](support.md), [`wallet`](wallet.md), [`club`](club.md), [`webhooks`](webhooks.md) |
+| Feature apps | [`cms`](cms.md), [`notifications`](notifications.md), [`shop`](shop.md), [`support`](support.md), [`wallet`](wallet.md), [`club`](club.md), [`webhooks`](webhooks.md), [`files`](files.md) |
 | Cross-cutting | [The response envelope](responses.md), [Signing in](signing-in.md), [Credentials](credentials.md), [The admin](admin.md) |
 
 ## Start here
@@ -103,6 +103,7 @@ features a project chooses rather than the plumbing under them.
 | [`wallet`](wallet.md) | `DJANGO_WALLET_ENABLED=true` | A wallet per account with the balance derived from its movements rather than stored, payment methods an administrator configures rather than code declares, fees and taxes priced by the same function that quotes them, crypto with its chains, currency conversion at a published rate, and deposits that stay requests until an operator applies them |
 | [`club`](club.md) | `DJANGO_CLUB_ENABLED=true` | Clubs with a levelled ladder, an account in one club at a time, XP derived from an immutable award ledger rather than stored, and missions that complete themselves from events the other apps emit -- including events an app of your own registers, which is what lets a mission be built out of code this starter has never seen |
 | [`webhooks`](webhooks.md) | `DJANGO_WEBHOOKS_ENABLED=true` | Outgoing webhooks: https endpoints per account with their own secret and event types, HMAC-SHA256-signed deliveries retried with exponential backoff by `manage.py webhooks_deliver`, every attempt recorded, and private, loopback and link-local targets refused at send time |
+| [`files`](files.md) | `DJANGO_FILES_ENABLED=true` | Owned file uploads through Django's storage API (local or S3): sniffed content types, random storage names, and owner-or-staff access over REST, GraphQL and gRPC |
 
 All five ship **off**, which is why a fresh `/api/docs` lists none of them: an
 app nobody named has no tables, no routes and no admin, and never imports its

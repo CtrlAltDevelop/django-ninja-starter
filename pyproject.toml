@@ -54,6 +54,8 @@ Documentation = "https://github.com/CtrlAltDevelop/django-ninja-starter/tree/mai
 django-ninja-starter = "django_ninja_starter.cli:main"
 
 [project.optional-dependencies]
+# The S3 backend for DJANGO_STORAGE_BACKEND=s3.
+s3 = ["django-storages[s3]>=1.14,<2.0"]
 dev = [
   "Django>=5.2,<7.0",
   "cryptography>=45,<51",

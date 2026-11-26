@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package config.files;
+
+service FileController {
+    rpc Delete(DeleteRequest) returns (DeleteResult) {}
+    rpc Download(DownloadRequest) returns (FileContent) {}
+    rpc Get(GetRequest) returns (StoredFile) {}
+    rpc List(ListRequest) returns (FileList) {}
+    rpc Upload(UploadRequest) returns (StoredFile) {}
+}
+
+message DeleteRequest {
+    string file_id = 1;
+}
+
+message DeleteResult {
+    string id = 1;
+    bool deleted = 2;
+}
+
+message DownloadRequest {
+    string file_id = 1;
+}
+
+message FileContent {
+    StoredFile file = 1;
+    bytes content = 2;
+}
+
+message FileList {
+    repeated StoredFile files = 1;
+    int32 total = 2;
+    int32 limit = 3;
+    int32 offset = 4;
+}
+
+message GetRequest {
+    string file_id = 1;
+}
+
+message ListRequest {
+    int32 limit = 1;
+    int32 offset = 2;
+}
+
+message StoredFile {
+    string id = 1;
+    string owner_id = 2;
+    string name = 3;
+    string content_type = 4;
+    int32 size = 5;
+    string created_at = 6;
+}
+
+message UploadRequest {
+    string name = 1;
+    bytes content = 2;
+}
+
