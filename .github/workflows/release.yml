@@ -1,7 +1,8 @@
 # =============================================================================
 # Release: build once, publish to PyPI with trusted publishing.
 # =============================================================================
-# Runs on a version tag. No API token exists anywhere: PyPI trusts this
+# Runs when a GitHub Release is published; its tag must be v<__version__>.
+# No API token exists anywhere: PyPI trusts this
 # workflow's OIDC identity, configured once under the project's "Publishing"
 # settings (owner CtrlAltDevelop, repo django-ninja-starter, workflow
 # release.yml, environment pypi).
@@ -14,8 +15,8 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
 
 permissions: {}
 

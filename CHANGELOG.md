@@ -10,9 +10,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Relicensed from MIT to AGPL-3.0-only.** Releases from 2.2.0 on are under the
   GNU Affero General Public License v3; earlier releases keep their MIT license.
-- **Releases publish from this repository's own workflow on a `v*` tag.** PyPI's
+- **Releases publish from this repository's own workflow.** PyPI's
   trusted publishing rejects the shared reusable publish workflow with
-  `invalid-publisher`, so the build and publish jobs live in `release.yml`.
+  `invalid-publisher`, so the build and publish jobs live in `release.yml`, still run by
+  publishing a GitHub Release.
 
 ## [2.1.1] - 2026-10-15
 
