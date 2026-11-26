@@ -903,6 +903,35 @@ OAUTH_USER_RESOLVER = os.getenv("DJANGO_OAUTH_USER_RESOLVER", "")
 # app was installed to serve REST only. An app absent from this mapping -- every
 # infrastructure app -- publishes whatever it has, because the transports there
 # are the project's own and are turned off by the global flags below.
+# Outgoing webhooks. Optional like every feature app: naming it installs its
+# tables and routes. Deliveries are sent by `manage.py webhooks_deliver`, which
+# a scheduler runs; nothing is sent from inside a request.
+WEBHOOKS_ENABLED = os.getenv("DJANGO_WEBHOOKS_ENABLED", "false").lower() == "true"
+WEBHOOKS_APP = "apps.webhooks.apps.WebhooksConfig"
+WEBHOOKS_INSTALLED_APPS = [WEBHOOKS_APP] if WEBHOOKS_ENABLED else []
+WEBHOOKS_TRANSPORTS = (
+    app_transports("webhooks", ("rest", "graph", "grpc")) if WEBHOOKS_ENABLED else ()
+)
+WEBHOOKS_ROUTERS = (
+    [
+        {
+            "prefix": "/webhooks",
+            "router": "apps.webhooks.rest.router",
+            "tag": "Webhooks",
+            "description": (
+                "Register https endpoints to be told about this account's events. "
+                "Every delivery is signed with HMAC-SHA256 in `X-Webhook-Signature`, "
+                "retried with exponential backoff, and every attempt is recorded."
+            ),
+        }
+    ]
+    if "rest" in WEBHOOKS_TRANSPORTS
+    else []
+)
+WEBHOOKS_MAX_ATTEMPTS = int(os.getenv("DJANGO_WEBHOOKS_MAX_ATTEMPTS", "6"))
+WEBHOOKS_BACKOFF_SECONDS = int(os.getenv("DJANGO_WEBHOOKS_BACKOFF_SECONDS", "30"))
+WEBHOOKS_TIMEOUT_SECONDS = int(os.getenv("DJANGO_WEBHOOKS_TIMEOUT_SECONDS", "10"))
+
 APP_TRANSPORTS = {
     "apps.cms": CMS_TRANSPORTS,
     "apps.notifications": NOTIFICATIONS_TRANSPORTS,
@@ -910,6 +939,7 @@ APP_TRANSPORTS = {
     "apps.support": SUPPORT_TRANSPORTS,
     "apps.wallet": WALLET_TRANSPORTS,
     "apps.club": CLUB_TRANSPORTS,
+    "apps.webhooks": WEBHOOKS_TRANSPORTS,
 }
 
 # How often one caller may ask, whichever endpoint they are asking. A correct
@@ -1022,6 +1052,7 @@ INSTALLED_APPS = [
     *SUPPORT_INSTALLED_APPS,
     *WALLET_INSTALLED_APPS,
     *CLUB_INSTALLED_APPS,
+    *WEBHOOKS_INSTALLED_APPS,
     # The transports beside REST. Both are installed whether or not they are
     # published: `generateproto` and the schema check have to be able to run in a
     # deployment that serves neither.
