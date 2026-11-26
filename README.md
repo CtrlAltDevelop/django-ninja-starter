@@ -1,6 +1,13 @@
 # Django Ninja Starter
 
 [![PyPI](https://img.shields.io/pypi/v/django-ninja-starter.svg)](https://pypi.org/project/django-ninja-starter/)
+[![CI](https://github.com/CtrlAltDevelop/django-ninja-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltDevelop/django-ninja-starter/actions/workflows/ci.yml)
+[![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/CtrlAltDevelop/django-ninja-starter/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org)
+[![Django](https://img.shields.io/badge/Django-5.2%2B-092E20.svg?logo=django)](https://www.djangoproject.com)
+[![Django Ninja](https://img.shields.io/badge/Django%20Ninja-1.4%2B-0f766e.svg)](https://django-ninja.dev)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-supported-4169E1.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![last commit](https://img.shields.io/github/last-commit/CtrlAltDevelop/django-ninja-starter.svg)](https://github.com/CtrlAltDevelop/django-ninja-starter/commits)
 
 A production-oriented Django and Django Ninja starter, available as both a GitHub
 Template and an installable Python project generator.
@@ -570,6 +577,10 @@ To publish a release:
 4. Create and publish a GitHub Release. The release workflow builds and uploads the wheel
    and source distribution without a long-lived PyPI token.
 
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. Release notes are in the [CHANGELOG](CHANGELOG.md).
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+AGPL-3.0-only. See [LICENSE](LICENSE).
