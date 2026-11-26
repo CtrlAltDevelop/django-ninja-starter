@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package config.webhooks;
+
+import "google/protobuf/empty.proto";
+
+service WebhookController {
+    rpc Create(CreateRequest) returns (WebhookEndpoint) {}
+    rpc Delete(DeleteRequest) returns (DeleteResult) {}
+    rpc List(google.protobuf.Empty) returns (EndpointList) {}
+    rpc ListDeliveries(ListDeliveriesRequest) returns (DeliveryList) {}
+    rpc RotateSecret(RotateSecretRequest) returns (WebhookEndpoint) {}
+}
+
+message CreateRequest {
+    string url = 1;
+    repeated string events = 2;
+}
+
+message DeleteRequest {
+    string endpoint_id = 1;
+}
+
+message DeleteResult {
+    bool deleted = 1;
+}
+
+message DeliveryList {
+    repeated WebhookDelivery deliveries = 1;
+}
+
+message EndpointList {
+    repeated WebhookEndpoint endpoints = 1;
+}
+
+message ListDeliveriesRequest {
+    string endpoint_id = 1;
+    int32 limit = 2;
+}
+
+message RotateSecretRequest {
+    string endpoint_id = 1;
+}
+
+message WebhookAttempt {
+    int32 number = 1;
+    int32 status_code = 2;
+    string error = 3;
+    int32 duration_ms = 4;
+    string created_at = 5;
+}
+
+message WebhookDelivery {
+    string id = 1;
+    string event = 2;
+    string status = 3;
+    int32 attempts = 4;
+    string next_attempt_at = 5;
+    string created_at = 6;
+    repeated WebhookAttempt attempt_log = 7;
+}
+
+message WebhookEndpoint {
+    string id = 1;
+    string url = 2;
+    repeated string events = 3;
+    bool is_active = 4;
+    string created_at = 5;
+    string secret = 6;
+}
+

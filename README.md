@@ -1,6 +1,13 @@
 # Django Ninja Starter
 
 [![PyPI](https://img.shields.io/pypi/v/django-ninja-starter.svg)](https://pypi.org/project/django-ninja-starter/)
+[![CI](https://github.com/CtrlAltDevelop/django-ninja-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltDevelop/django-ninja-starter/actions/workflows/ci.yml)
+[![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/CtrlAltDevelop/django-ninja-starter/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org)
+[![Django](https://img.shields.io/badge/Django-5.2%2B-092E20.svg?logo=django)](https://www.djangoproject.com)
+[![Django Ninja](https://img.shields.io/badge/Django%20Ninja-1.4%2B-0f766e.svg)](https://django-ninja.dev)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-supported-4169E1.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![last commit](https://img.shields.io/github/last-commit/CtrlAltDevelop/django-ninja-starter.svg)](https://github.com/CtrlAltDevelop/django-ninja-starter/commits)
 
 A production-oriented Django and Django Ninja starter, available as both a GitHub
 Template and an installable Python project generator.
@@ -394,6 +401,7 @@ another Django project or deleted from this one without leaving a hole.
 | [`cms`](docs/cms.md) | `DJANGO_CMS_ENABLED=true` | Pages made of sections made of typed, translatable fields; a library of shared sections; menus; drafts, schedules and signed preview links; export/import for moving content between environments; and a content-editing admin screen separate from the structural one |
 | [`notifications`](docs/notifications.md) | `DJANGO_NOTIFICATIONS_ENABLED=true` | A notification table addressed to one account or to everybody; per-account read and dismiss receipts, so a broadcast is read and cleared by each person separately; a scoped read API with the same surface over REST, GraphQL, gRPC and a WebSocket that pushes new ones on save and keeps a second device in step; and a retention command |
 | [`support`](docs/support.md) | `DJANGO_SUPPORT_ENABLED=true` | Chat and support tickets as one thing, because a ticket is a conversation: live chat and filed tickets with staff-only notes, attachments, SLA-carrying categories, a queue with assignment, priorities and tags — plus open **channels**, private **groups** and one-to-one **direct messages** that staff have no more right to read than anyone else. Read state per participant, and one authenticated WebSocket carrying every conversation an account is in |
+| [`files`](docs/files.md) | `DJANGO_FILES_ENABLED=true` | Owned file uploads through Django's storage API -- local disk by default, S3 via django-storages -- with a size limit, content types sniffed rather than trusted, random storage names, and owner-or-staff access over REST, GraphQL and gRPC |
 | [`shop`](docs/shop.md) | `DJANGO_SHOP_ENABLED=true` | A catalogue whose categories declare the attributes their products answer; products, variants and stock; timed discount campaigns; search, filters and named listings; reviews and likes; a basket per account; a saved address book and delivery options costed against that basket; and an order, coupon and payment cycle that reserves stock when the order is placed |
 | [`wallet`](docs/wallet.md) | `DJANGO_WALLET_ENABLED=true` | A wallet per account whose balance is derived from its movements rather than stored beside them; deposits, withdrawals and free wallet-to-wallet transfers; payment methods, currencies, limits, commissions and taxes an administrator configures rather than code declares; crypto with per-chain fees, confirmations and address checks; currency conversion at a published rate and spread; and an approval flow that leaves a movement a request until an operator applies it |
 
@@ -562,14 +570,19 @@ scaffold together when changing project behavior.
 
 To publish a release:
 
-1. Update `version` in `pyproject.toml` and `__version__` in
-   `src/django_ninja_starter/__init__.py`.
+1. Update `__version__` in `src/django_ninja_starter/__init__.py` and add the
+   release to `CHANGELOG.md`.
 2. Run `make check`, `make test`, and `make package`.
 3. Configure a PyPI Trusted Publisher for `.github/workflows/release.yml` with the `pypi`
    GitHub environment and require approval on that environment.
-4. Create and publish a GitHub Release. The release workflow builds and uploads the wheel
-   and source distribution without a long-lived PyPI token.
+4. Create and publish a GitHub Release tagged `v<version>`, matching `__version__`. The
+   release workflow builds and uploads the wheel and source distribution without a
+   long-lived PyPI token.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. Release notes are in the [CHANGELOG](CHANGELOG.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+AGPL-3.0-only. See [LICENSE](LICENSE).

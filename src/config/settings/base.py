@@ -882,6 +882,34 @@ SUPPORT_UPLOAD_EXTENSIONS = [
     if extension.strip().strip(".")
 ] or None
 
+# The files app. Optional the same way the others are: naming it installs its
+# table, its routes and its admin. Files go through `STORAGES["default"]`, so
+# pointing that at S3 (below) moves them without this app knowing.
+FILES_ENABLED = os.getenv("DJANGO_FILES_ENABLED", "false").lower() == "true"
+FILES_APP = "apps.files.apps.FilesConfig"
+FILES_INSTALLED_APPS = [FILES_APP] if FILES_ENABLED else []
+FILES_TRANSPORTS = app_transports("files", ("rest", "graph", "grpc")) if FILES_ENABLED else ()
+FILES_ROUTERS = (
+    [
+        {
+            "prefix": "/files",
+            "router": "apps.files.rest.router",
+            "tag": "Files",
+            "description": (
+                "Files an account uploads and owns. The content is sniffed rather "
+                "than trusted, stored under a random name, and only its owner or "
+                "staff may list, download or delete it."
+            ),
+        }
+    ]
+    if "rest" in FILES_TRANSPORTS
+    else []
+)
+FILES_UPLOAD_PATH = os.getenv("DJANGO_FILES_UPLOAD_PATH", "files")
+# Zero means no limit, for a deployment whose proxy already imposes one.
+FILES_MAX_UPLOAD_MB = int(os.getenv("DJANGO_FILES_MAX_UPLOAD_MB", "10"))
+FILES_MAX_UPLOAD_BYTES = FILES_MAX_UPLOAD_MB * 1024 * 1024
+
 OAUTH_ENCRYPTION_KEY = os.getenv("DJANGO_OAUTH_ENCRYPTION_KEY", "")
 OAUTH_STATE_TTL_SECONDS = int(os.getenv("DJANGO_OAUTH_STATE_TTL_SECONDS", "600"))
 OAUTH_HTTP_TIMEOUT_SECONDS = float(os.getenv("DJANGO_OAUTH_HTTP_TIMEOUT_SECONDS", "10"))
@@ -903,6 +931,35 @@ OAUTH_USER_RESOLVER = os.getenv("DJANGO_OAUTH_USER_RESOLVER", "")
 # app was installed to serve REST only. An app absent from this mapping -- every
 # infrastructure app -- publishes whatever it has, because the transports there
 # are the project's own and are turned off by the global flags below.
+# Outgoing webhooks. Optional like every feature app: naming it installs its
+# tables and routes. Deliveries are sent by `manage.py webhooks_deliver`, which
+# a scheduler runs; nothing is sent from inside a request.
+WEBHOOKS_ENABLED = os.getenv("DJANGO_WEBHOOKS_ENABLED", "false").lower() == "true"
+WEBHOOKS_APP = "apps.webhooks.apps.WebhooksConfig"
+WEBHOOKS_INSTALLED_APPS = [WEBHOOKS_APP] if WEBHOOKS_ENABLED else []
+WEBHOOKS_TRANSPORTS = (
+    app_transports("webhooks", ("rest", "graph", "grpc")) if WEBHOOKS_ENABLED else ()
+)
+WEBHOOKS_ROUTERS = (
+    [
+        {
+            "prefix": "/webhooks",
+            "router": "apps.webhooks.rest.router",
+            "tag": "Webhooks",
+            "description": (
+                "Register https endpoints to be told about this account's events. "
+                "Every delivery is signed with HMAC-SHA256 in `X-Webhook-Signature`, "
+                "retried with exponential backoff, and every attempt is recorded."
+            ),
+        }
+    ]
+    if "rest" in WEBHOOKS_TRANSPORTS
+    else []
+)
+WEBHOOKS_MAX_ATTEMPTS = int(os.getenv("DJANGO_WEBHOOKS_MAX_ATTEMPTS", "6"))
+WEBHOOKS_BACKOFF_SECONDS = int(os.getenv("DJANGO_WEBHOOKS_BACKOFF_SECONDS", "30"))
+WEBHOOKS_TIMEOUT_SECONDS = int(os.getenv("DJANGO_WEBHOOKS_TIMEOUT_SECONDS", "10"))
+
 APP_TRANSPORTS = {
     "apps.cms": CMS_TRANSPORTS,
     "apps.notifications": NOTIFICATIONS_TRANSPORTS,
@@ -910,6 +967,8 @@ APP_TRANSPORTS = {
     "apps.support": SUPPORT_TRANSPORTS,
     "apps.wallet": WALLET_TRANSPORTS,
     "apps.club": CLUB_TRANSPORTS,
+    "apps.webhooks": WEBHOOKS_TRANSPORTS,
+    "apps.files": FILES_TRANSPORTS,
 }
 
 # How often one caller may ask, whichever endpoint they are asking. A correct
@@ -1022,6 +1081,8 @@ INSTALLED_APPS = [
     *SUPPORT_INSTALLED_APPS,
     *WALLET_INSTALLED_APPS,
     *CLUB_INSTALLED_APPS,
+    *WEBHOOKS_INSTALLED_APPS,
+    *FILES_INSTALLED_APPS,
     # The transports beside REST. Both are installed whether or not they are
     # published: `generateproto` and the schema check have to be able to run in a
     # deployment that serves neither.
@@ -1158,4 +1219,29 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # and a project on S3 overrides STORAGES and leaves both of these unused.
 MEDIA_URL = os.getenv("DJANGO_MEDIA_URL", "media/")
 MEDIA_ROOT = os.getenv("DJANGO_MEDIA_ROOT", "") or BASE_DIR / "media"
+# Where uploaded files go. `filesystem` is MEDIA_ROOT; `s3` is a bucket through
+# django-storages (`pip install 'django-storages[s3]'`), configured by the
+# AWS_* variables below, which django-storages reads from these settings.
+STORAGE_BACKEND = os.getenv("DJANGO_STORAGE_BACKEND", "filesystem").lower()
+STORAGE_BACKENDS = {
+    "filesystem": "django.core.files.storage.FileSystemStorage",
+    "s3": "storages.backends.s3.S3Storage",
+}
+if STORAGE_BACKEND not in STORAGE_BACKENDS:
+    raise ImproperlyConfigured(
+        f"Unknown DJANGO_STORAGE_BACKEND: {STORAGE_BACKEND}. One of: {', '.join(STORAGE_BACKENDS)}."
+    )
+STORAGES = {
+    "default": {"BACKEND": STORAGE_BACKENDS[STORAGE_BACKEND]},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+AWS_STORAGE_BUCKET_NAME = os.getenv("DJANGO_AWS_STORAGE_BUCKET_NAME", "")
+AWS_S3_REGION_NAME = os.getenv("DJANGO_AWS_S3_REGION_NAME", "") or None
+AWS_S3_ENDPOINT_URL = os.getenv("DJANGO_AWS_S3_ENDPOINT_URL", "") or None
+AWS_ACCESS_KEY_ID = os.getenv("DJANGO_AWS_ACCESS_KEY_ID", "") or None
+AWS_SECRET_ACCESS_KEY = os.getenv("DJANGO_AWS_SECRET_ACCESS_KEY", "") or None
+# Private objects and signed URLs: these are people's files, not a public site.
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = True
+AWS_S3_FILE_OVERWRITE = False
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
