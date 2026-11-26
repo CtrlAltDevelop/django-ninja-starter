@@ -569,13 +569,14 @@ scaffold together when changing project behavior.
 
 To publish a release:
 
-1. Update `version` in `pyproject.toml` and `__version__` in
-   `src/django_ninja_starter/__init__.py`.
+1. Update `__version__` in `src/django_ninja_starter/__init__.py` and add the
+   release to `CHANGELOG.md`.
 2. Run `make check`, `make test`, and `make package`.
 3. Configure a PyPI Trusted Publisher for `.github/workflows/release.yml` with the `pypi`
    GitHub environment and require approval on that environment.
-4. Create and publish a GitHub Release. The release workflow builds and uploads the wheel
-   and source distribution without a long-lived PyPI token.
+4. Push a `v<version>` tag matching `__version__`. The release workflow builds and uploads
+   the wheel and source distribution without a long-lived PyPI token. Then create the
+   GitHub Release from that tag.
 
 ## Contributing and security
 
