@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-11-26
+
+### Changed
+
+- **Relicensed from MIT to AGPL-3.0-only.** Releases from 2.2.0 on are under the
+  GNU Affero General Public License v3; earlier releases keep their MIT license.
+- **Releases publish from this repository's own workflow on a `v*` tag.** PyPI's
+  trusted publishing rejects the shared reusable publish workflow with
+  `invalid-publisher`, so the build and publish jobs live in `release.yml`.
+
 ## [2.1.1] - 2026-10-15
 
 ### Changed
